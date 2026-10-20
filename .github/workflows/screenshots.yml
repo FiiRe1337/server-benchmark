@@ -116,7 +116,7 @@ jobs:
             '@echo Exit-Code %ERRORLEVEL%',
             '@type nul > D:\sbench\cli-done.txt'
           ) | Set-Content -Encoding ascii D:\sbench\cli-demo.cmd
-          Start-Process cmd.exe -ArgumentList '/k', 'title sbench CLI & mode con cols=118 lines=34 & D:\sbench\cli-demo.cmd'
+          Start-Process cmd.exe -ArgumentList '/k', 'title sbench CLI & mode con cols=118 lines=22 & D:\sbench\cli-demo.cmd'
           python gui/tools/capture_window.py --title "sbench CLI" --wait-file D:\sbench\cli-done.txt --timeout 60 --out "$env:SHOTS\07_cli.png"
           Get-Content D:\sbench\ergebnis.json -TotalCount 5
 

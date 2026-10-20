@@ -66,7 +66,7 @@ class Compare(QWidget):
         self.list = listw(); left.add(self.list, 1)
         for i, (f, r) in enumerate(self.results):
             it = QListWidgetItem(f"{run_label(r)}{'  · Beispiel' if r.get('_example') else ''}\n"
-                                 f"{len(storage_tests(r))} Tests · {_local(r['started_utc'])}")
+                                 f"{len(storage_tests(r))} Tests · {_load_cfg(r) + ' · ' if _load_cfg(r) else ''}{_local(r['started_utc'])}")
             it.setFlags(it.flags() | Qt.ItemIsUserCheckable); it.setCheckState(Qt.Checked if i < 3 else Qt.Unchecked)
             it.setData(Qt.UserRole, i); self.list.addItem(it)
         self.list.itemChanged.connect(self.update)

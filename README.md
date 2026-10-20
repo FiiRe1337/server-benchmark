@@ -40,6 +40,9 @@ der Seitenleiste.
 
 ![Übersicht nach dem ersten Start](docs/img/guide/02_start.png)
 
+Im Bild ist der CI-Runner zu sehen: eine Azure-VM, auf der Hyper-V aktiviert ist. sbench meldet ihn
+deshalb als Hyper-V-Host (Root-Partition).
+
 ## 3. Storage-Test anlegen
 
 Unter **Testprofile** legen Sie einen Test wie in Iometer an: oben die **Ziele** (Testdatei, Volume
@@ -50,7 +53,8 @@ den Kern das Profil prüfen; **▶ Test starten** startet es.
 ![Testprofil mit Ziel, Access Specs, Worker und Queue Depth](docs/img/guide/03_testprofil.png)
 
 Für eine Testdatei sind keine Administratorrechte nötig. Ohne Rechte legt der Kern die Datei nur
-langsamer an (Hinweis `W_NEEDS_ADMIN`); Sie können mit **Ohne Rechte starten** fortfahren. Testdateien,
+langsamer an (Hinweis `W_NEEDS_ADMIN`); Sie können im folgenden Dialog mit **Ohne Rechte starten**
+fortfahren. (Auf dem CI-Runner läuft die GUI als Administrator, deshalb erscheint der Dialog im Bild nicht.) Testdateien,
 die sbench selbst angelegt hat, löscht es nach dem Test wieder.
 
 ## 4. Live-Lauf beobachten und stoppen
@@ -70,8 +74,8 @@ und ist als „abgebrochen“ markiert.
 
 Unter **Vergleich** haken Sie zwei oder drei Läufe an. Die GUI stellt gleichnamige Tests gegenüber
 (IOPS je Test, Latenz-Perzentile, Delta-Tabelle gegenüber dem ersten Lauf). Im Bild sind es zwei echte
-Läufe desselben Profils auf dem CI-Runner mit unterschiedlicher Last (2 Worker × QD 8 und
-1 Worker × QD 1). Host gegen VM funktioniert genauso: dasselbe Profil auf dem Hyper-V-Host und in der
+Läufe derselben Tests auf dem CI-Runner mit unterschiedlicher Last: A = 1 Worker × QD 1 (Basis),
+B = 2 Worker × QD 8. Host gegen VM funktioniert genauso: dasselbe Profil auf dem Hyper-V-Host und in der
 VM laufen lassen, die Ergebnisdatei der VM in den Ergebnisordner der GUI auf dem Host kopieren
 (`%LOCALAPPDATA%\sbench-gui\results`), die GUI neu starten und beide Läufe auswählen.
 
