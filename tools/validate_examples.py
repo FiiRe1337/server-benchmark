@@ -6,7 +6,12 @@ Prüft:
   * jedes Beispiel gegen sein Schema (Zuordnung über den Dateinamen),
   * einige semantische Regeln, die JSON Schema nicht ausdrücken kann
     (z. B. Summe der access_specs-Gewichte = 100, allow_destructive bei
-    Schreibtests auf volume/physical).
+    Schreibtests auf volume/physical, tests[].index streng monoton steigend und
+    < Anzahl Tests im Job, disjunkte NUMA-CPU-Listen),
+  * einen Selbsttest der semantischen Regeln mit absichtlich falschen Dokumenten.
+
+Die Funktionen check_result_indices() und check_numa() nutzen auch die Smoke-Tests
+(tests/smoke/smoke.py) für echte Ergebnisse und Bundles.
 
 Aufruf:  python tools/validate_examples.py      (Exit 0 = alles gültig, 1 = Fehler)
 Benötigt: pip install jsonschema
@@ -35,13 +40,72 @@ MAPPING = {
     "bundle-": "sb-bundle-1.schema.json",
 }
 
+# Ergebnis-Beispiel -> zugehöriger Job (für die Obergrenze von tests[].index)
+RESULT_JOBS = {
+    "result-storage.json": "job-storage-mix.json",
+    "result-gaps.json": "job-mixed-gaps.json",
+}
+
 
 def load_json(path: Path):
     with path.open(encoding="utf-8") as f:
         return json.load(f)
 
 
-def semantic_checks(kind: str, doc) -> list[str]:
+def check_result_indices(result: dict, job: dict | None = None) -> list[str]:
+    """tests[].index: ganzzahlig, >= 0, streng monoton steigend und kleiner als die Anzahl
+    der Tests im Job. Lücken sind erlaubt: nicht implementierte oder übersprungene Tests
+    (z. B. E_NOT_IMPLEMENTED) fehlen im Ergebnis. Ohne Job entfällt die Obergrenze; ist
+    der Job da, muss config.type zum Job-Test an dieser Position passen."""
+    errs: list[str] = []
+    prev = -1
+    njob = len(job["tests"]) if job and isinstance(job.get("tests"), list) else None
+    for i, t in enumerate(result.get("tests", [])):
+        idx = t.get("index")
+        if not isinstance(idx, int) or isinstance(idx, bool) or idx < 0:
+            errs.append(f"/tests/{i}/index: {idx!r} ist keine Ganzzahl >= 0")
+            continue
+        if idx <= prev:
+            errs.append(f"/tests/{i}/index: {idx} nicht streng steigend (vorher {prev})")
+        prev = max(prev, idx)
+        if njob is not None:
+            if idx >= njob:
+                errs.append(f"/tests/{i}/index: {idx} >= Anzahl Tests im Job ({njob})")
+            elif job["tests"][idx].get("type") != t.get("type"):
+                errs.append(f"/tests/{i}: type {t.get('type')} passt nicht zu Job-Test {idx} ({job['tests'][idx].get('type')})")
+    return errs
+
+
+def check_numa(meta: dict, prefix: str = "/meta") -> list[str]:
+    """numa_nodes: CPU-Listen (globale Indizes Gruppe*64+Bit) eindeutig, nicht überlappend,
+    insgesamt höchstens cpu.threads; Knoten-RAM-Summe <= ram_bytes, frei <= gesamt."""
+    errs: list[str] = []
+    nodes = meta.get("numa_nodes") or []
+    seen: dict[int, int] = {}
+    ids = [n.get("id") for n in nodes]
+    if len(set(ids)) != len(ids):
+        errs.append(f"{prefix}/numa_nodes: doppelte Knoten-IDs {ids}")
+    for k, n in enumerate(nodes):
+        cpus = n.get("cpus", [])
+        if len(set(cpus)) != len(cpus):
+            errs.append(f"{prefix}/numa_nodes/{k}/cpus: doppelte Einträge")
+        for c in cpus:
+            if c in seen and seen[c] != k:
+                errs.append(f"{prefix}/numa_nodes/{k}/cpus: CPU {c} auch in Knoten {nodes[seen[c]].get('id')}")
+                break
+            seen[c] = k
+        if "ram_free_bytes" in n and "ram_bytes" in n and n["ram_free_bytes"] > n["ram_bytes"]:
+            errs.append(f"{prefix}/numa_nodes/{k}: ram_free_bytes > ram_bytes")
+    threads = (meta.get("cpu") or {}).get("threads")
+    if nodes and threads and len(seen) > threads:
+        errs.append(f"{prefix}/numa_nodes: {len(seen)} CPUs in Knoten > cpu.threads {threads}")
+    total = sum(n.get("ram_bytes", 0) for n in nodes)
+    if nodes and meta.get("ram_bytes") and total > meta["ram_bytes"]:
+        errs.append(f"{prefix}/numa_nodes: Summe ram_bytes {total} > meta.ram_bytes {meta['ram_bytes']}")
+    return errs
+
+
+def semantic_checks(kind: str, doc, job: dict | None = None) -> list[str]:
     """Regeln außerhalb von JSON Schema (entsprechen den Prüfungen von 'sbench validate')."""
     errs: list[str] = []
 
@@ -61,9 +125,9 @@ def semantic_checks(kind: str, doc) -> list[str]:
         check_tests(doc["tests"], "/tests")
     elif kind == "sb-result-1.schema.json":
         check_tests([t["config"] for t in doc["tests"]], "/tests/*/config")
+        errs += check_result_indices(doc, job)
+        errs += check_numa(doc.get("meta", {}))
         for i, t in enumerate(doc["tests"]):
-            if t["index"] != i:
-                errs.append(f"/tests/{i}/index: erwartet {i}, gefunden {t['index']}")
             if t["type"] != t["config"]["type"]:
                 errs.append(f"/tests/{i}: type passt nicht zu config.type")
             if t["type"] == "storage":
@@ -74,7 +138,32 @@ def semantic_checks(kind: str, doc) -> list[str]:
                     errs.append(f"/tests/{i}/per_worker: Summe io_count != summary.io_count")
                 if sum(s["io_count"] for s in t["per_spec"]) != t["summary"]["io_count"]:
                     errs.append(f"/tests/{i}/per_spec: Summe io_count != summary.io_count")
+    elif kind == "sb-info-1.schema.json":
+        errs += check_numa(doc.get("meta", {}))
     return errs
+
+
+def selftest() -> list[str]:
+    """Die semantischen Regeln müssen falsche Dokumente erkennen und Lücken zulassen."""
+    bad: list[str] = []
+    job = {"tests": [{"type": "cpu"}, {"type": "storage"}, {"type": "memory"}, {"type": "storage"}]}
+    res = lambda *ix: {"tests": [{"index": i, "type": "storage"} for i in ix]}  # noqa: E731
+    cases = [
+        ("Lücke 1,3", check_result_indices(res(1, 3), job), False),
+        ("ohne Job", check_result_indices(res(0, 7)), False),
+        ("doppelt 1,1", check_result_indices(res(1, 1), job), True),
+        ("fallend 3,1", check_result_indices(res(3, 1), job), True),
+        ("negativ", check_result_indices(res(-1)), True),
+        ("index >= Anzahl", check_result_indices(res(1, 4), job), True),
+        ("type passt nicht", check_result_indices(res(0), job), True),
+        ("NUMA disjunkt", check_numa({"cpu": {"threads": 4}, "numa_nodes": [{"id": 0, "cpus": [0, 1]}, {"id": 1, "cpus": [2, 3]}]}), False),
+        ("NUMA überlappend", check_numa({"numa_nodes": [{"id": 0, "cpus": [0, 1]}, {"id": 1, "cpus": [1, 2]}]}), True),
+        ("NUMA > threads", check_numa({"cpu": {"threads": 2}, "numa_nodes": [{"id": 0, "cpus": [0, 1, 2]}]}), True),
+    ]
+    for name, errs, expect_err in cases:
+        if bool(errs) != expect_err:
+            bad.append(f"{name}: erwartet {'Fehler' if expect_err else 'gültig'}, erhalten {errs}")
+    return bad
 
 
 def main() -> int:
@@ -122,7 +211,8 @@ def main() -> int:
         else:
             doc = load_json(p)
             docs = [("", doc)]
-            extra = semantic_checks(kind, doc)
+            jn = RESULT_JOBS.get(p.name)
+            extra = semantic_checks(kind, doc, load_json(EXAMPLE_DIR / jn) if jn else None)
 
         errs = []
         for where, doc in docs:
@@ -137,6 +227,15 @@ def main() -> int:
                 print(f"         - {m}")
         else:
             print(f"[OK]   Beispiel {rel} ({kind})")
+
+    st = selftest()
+    if st:
+        failures += 1
+        print("[FAIL] Selbsttest semantische Regeln")
+        for m in st:
+            print(f"         - {m}")
+    else:
+        print("[OK]   Selbsttest semantische Regeln (Index-Lücken, NUMA)")
 
     print()
     print("Ergebnis:", "alles gültig" if failures == 0 else f"{failures} Datei(en) fehlerhaft")

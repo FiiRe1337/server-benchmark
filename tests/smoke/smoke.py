@@ -128,16 +128,17 @@ def check_progress(events: list[dict], what: str, expect_aborted: bool | None = 
     check(prog_ok, f"{what}: progress-Events passen zur Phase, done <= total")
 
 
-def check_result(path: Path, what: str, expect_aborted: bool) -> dict | None:
+def check_result(path: Path, what: str, expect_aborted: bool, job: Path | None = None) -> dict | None:
     if not check(path.exists(), f"{what}: Ergebnisdatei {path.name} existiert"):
         return None
     doc = json.loads(path.read_text(encoding="utf-8"))
     validate(doc, "sb-result-1.schema.json", what)
     if semantic_checks:
-        extra = semantic_checks("sb-result-1.schema.json", doc)
+        jdoc = json.loads(job.read_text(encoding="utf-8")) if job and job.exists() else None
+        extra = semantic_checks("sb-result-1.schema.json", doc, jdoc)
         for m in extra:
             print("         " + m)
-        check(not extra, f"{what}: semantische Regeln (Histogramm-/Worker-/Spec-Summen = io_count)")
+        check(not extra, f"{what}: semantische Regeln (Summen = io_count, index steigend{' < Tests im Job' if jdoc else ''}, NUMA disjunkt)")
     check(doc["aborted"] is expect_aborted, f"{what}: aborted = {expect_aborted}")
     return doc
 
@@ -587,6 +588,10 @@ def main() -> int:
     ni = storage_job(work / "job-ni.json", "ni", testfile, 1, warmup=0,
                      extra_tests=[{"type": "cpu", "duration_s": 1}, {"type": "memory", "mode": "latency", "buffer_size": "64MiB", "duration_s": 1},
                                   {"type": "net_client", "host": "127.0.0.1", "duration_s": 1}, {"type": "hyperv_info"}])
+    # Storage an Position 1 (cpu davor): echte Ergebnisse haben Lücken in tests[].index
+    nij = json.loads(ni.read_text(encoding="utf-8"))
+    nij["tests"].insert(1, nij["tests"].pop(0))
+    ni.write_text(json.dumps(nij), encoding="utf-8")
     nprog = work / "progress-ni.jsonl"
     nout = work / "result-ni.json"
     p = run(sbench, "run", "--job", ni, "--out", nout, "--progress", f"file:{nprog}")
@@ -594,10 +599,10 @@ def main() -> int:
     nevs = read_jsonl(nprog)
     check_progress(nevs, "Fortschritt (not implemented)", expect_aborted=False)
     nis = [e for e in nevs if e["ev"] == "error" and e["code"] == "E_NOT_IMPLEMENTED"]
-    check(sorted(e["test"] for e in nis) == [1, 2, 3, 4], "E_NOT_IMPLEMENTED für Tests 1-4")
-    nres = check_result(nout, "Ergebnis (not implemented)", expect_aborted=False)
+    check(sorted(e["test"] for e in nis) == [0, 2, 3, 4], "E_NOT_IMPLEMENTED für Tests 0, 2-4")
+    nres = check_result(nout, "Ergebnis (not implemented)", expect_aborted=False, job=ni)
     if nres:
-        check([t["index"] for t in nres["tests"]] == [0], "nur der Storage-Test im Ergebnis")
+        check([t["index"] for t in nres["tests"]] == [1], "nur der Storage-Test im Ergebnis, index = 1 (Lücke)")
 
     print("\n== #6: ohne Adminrechte (eingeschränkter Token) ==")
     rdd = work / "dd-restricted"
@@ -680,10 +685,19 @@ def main() -> int:
             bad_hash = [f["path"] for f in man["files"]
                         if hashlib.sha256(z.read(f["path"])).hexdigest() != f["sha256"] or len(z.read(f["path"])) != f["size_bytes"]]
             check(not bad_hash, f"{what}: sha256/size stimmen für {len(man['files'])} Dateien {bad_hash}")
-            validate(json.loads(z.read("info.json")), "sb-info-1.schema.json", f"{what}: info.json")
+            idoc = json.loads(z.read("info.json"))
+            validate(idoc, "sb-info-1.schema.json", f"{what}: info.json")
+            if semantic_checks:
+                ie = semantic_checks("sb-info-1.schema.json", idoc)
+                check(not ie, f"{what}: info.json NUMA-Knoten disjunkt {ie[:3]}")
             for n in sorted(names):
                 if n.startswith("results/"):
-                    validate(json.loads(z.read(n)), "sb-result-1.schema.json", f"{what}: {n}")
+                    rdoc = json.loads(z.read(n))
+                    validate(rdoc, "sb-result-1.schema.json", f"{what}: {n}")
+                    jn = "jobs/" + n[len("results/"):]
+                    if semantic_checks and jn in names:
+                        extra = semantic_checks("sb-result-1.schema.json", rdoc, json.loads(z.read(jn)))
+                        check(not extra, f"{what}: {n} semantisch gültig gegen {jn} {extra[:3]}")
                 if n.startswith("runs/"):
                     bad = sum(1 for l in z.read(n).decode("utf-8").splitlines()
                               if l.strip() and list(V["sb-progress-1.schema.json"].iter_errors(json.loads(l))))

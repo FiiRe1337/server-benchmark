@@ -1024,7 +1024,7 @@
         "index": {
           "type": "integer",
           "minimum": 0,
-          "description": "Index des Tests im Job."
+          "description": "Index des Tests im Job (Position in job.tests). Streng steigend, aber nicht lückenlos: Tests, die nicht ausgeführt wurden (z. B. E_NOT_IMPLEMENTED), fehlen in tests[]."
         },
         "type": {
           "enum": [
