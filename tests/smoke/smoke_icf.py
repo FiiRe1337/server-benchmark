@@ -75,6 +75,7 @@ def run_icf(h, sbench: Path, work: Path, quick: bool) -> dict:
         res = h.check_result(rout, "Ergebnis (import-icf)", expect_aborted=False, job=rjob)
         if res:
             out["result"] = rout
+            check(not any(t.get("partial") for t in res["tests"]), "importierter Job: keine Teilergebnisse (Vertrag 1.3, partial = false)")
             fs = res["tests"][0]
             n = sum(s["io_count"] for s in fs["per_spec"])
             shares = [100.0 * s["io_count"] / n if n else 0 for s in fs["per_spec"]]
