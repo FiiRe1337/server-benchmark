@@ -41,7 +41,7 @@ def main():
                   dict(base, SBENCH_MOCK_HOST=kind, SBENCH_MOCK_ELEVATED="0"))
         assert cp.returncode == 0, cp.stderr
         fix(o, tmp)
-    # contract 1.2 (M2): CPU + RAM on host and VM (comparison), NUMA local/remote on the 2-socket host, replay stream
+    # contract 1.2/1.3 (M2): CPU + RAM on host and VM (comparison), NUMA local/remote on the 2-socket host, replay stream
     jp = os.path.join(ROOT, "profiles", "cpu-ram.json")
     for kind, rid in (("host", "20261020-131500-m2h1"), ("vm", "20261020-134000-m2v1")):
         o = os.path.join(DEMO, f"result-m2-{kind}.json")
@@ -56,6 +56,12 @@ def main():
     o = os.path.join(DEMO, "result-m2-numa.json")
     cp = mock(["run", "--job", os.path.join(ROOT, "profiles", "numa-lokal-remote.json"), "--out", o, "--id", "20261020-140500-m2n1"], base)
     assert cp.returncode == 0, cp.stderr
+    fix(o, tmp)
+    # contract 1.3: partial result (stop while RAM test 4 allocates its buffers -> present with partial/stopped_in, null values;
+    # later tests absent). Deterministic via SBENCH_MOCK_STOP_AT instead of a timed `sbench stop`.
+    o = os.path.join(DEMO, "result-m2-partial.json")
+    cp = mock(["run", "--job", jp, "--out", o, "--id", "20261020-143000-m2p1"], dict(base, SBENCH_MOCK_STOP_AT="3:preparing:2"))
+    assert cp.returncode == 3, (cp.returncode, cp.stderr)
     fix(o, tmp)
     shutil.rmtree(tmp)
     print("demo/ regenerated")

@@ -44,7 +44,7 @@ def result_files(d, extra_dirs=()):
         files += sorted(glob.glob(os.path.join(e, "*.json")), reverse=True)
     try:
         sys.path.insert(0, ROOT); import sb_contract
-        exs = [os.path.join(sb_contract.base_dir(), "examples", f) for f in ("result-storage.json", "result-compute.json")]  # 1.2: cpu/memory + NUMA
+        exs = [os.path.join(sb_contract.base_dir(), "examples", f) for f in ("result-storage.json", "result-compute.json", "result-partial.json")]  # 1.2: cpu/memory + NUMA, 1.3: partial
     except (ImportError, FileNotFoundError):
         exs = []
     quad = [f for f in files if "quad" in f]
@@ -150,7 +150,8 @@ def screenshots(a):
 
 
 def _m2_shots(win, live, shot):
-    """Contract 1.2 (M2): CPU/RAM live view, results, host-vs-VM compare, profile editor (demo data from tools/make_demo.py)."""
+    """Contracts 1.2/1.3 (M2): CPU/RAM live view, results (incl. 1.3 partial), host-vs-VM compare, export hint, profile editor
+    (demo data from tools/make_demo.py)."""
     from PySide6.QtCore import Qt
     from .sbench import Replay
     jp, pp = os.path.join(DEMO, "job-m2.json"), os.path.join(DEMO, "progress-m2.jsonl")
@@ -165,7 +166,8 @@ def _m2_shots(win, live, shot):
         rep = Replay(pp); live.attach(rep, job, tick_ms=250)
         rep.feed_until(pred); live.refresh(); live.timer.stop(); shot(name)
     rp = win.pages["results"]
-    for name, stem in (("09_results_cpu_ram", "result-m2-host"), ("09b_results_numa", "result-m2-numa")):
+    for name, stem in (("09_results_cpu_ram", "result-m2-host"), ("09b_results_numa", "result-m2-numa"),
+                       ("09c_results_partial", "result-m2-partial")):
         f = next((x for x, _ in rp.results if stem in x), None)
         if f:
             rp.select_file(f); win.show_page("results"); shot(name)
@@ -174,6 +176,19 @@ def _m2_shots(win, live, shot):
         it = cp.list.item(i); f = cp.results[it.data(Qt.UserRole)][0]
         it.setCheckState(Qt.Checked if ("result-m2-host" in f or "result-m2-vm" in f) else Qt.Unchecked)
     win.show_page("compare"); shot("10_compare_cpu_ram")
+    for i in range(cp.list.count()):        # 1.3: host vs. partial run (test stopped in preparing -> "–", † marker)
+        it = cp.list.item(i); f = cp.results[it.data(Qt.UserRole)][0]
+        it.setCheckState(Qt.Checked if ("result-m2-host" in f or "result-m2-partial" in f) else Qt.Unchecked)
+    shot("10b_compare_partial")
+    ep = win.pages.get("export")
+    if ep is not None:                       # 1.3: Iometer CSV omits cpu/memory -> hint; timeseries label from tick_ms
+        for i in range(ep.list.count()):
+            ep.list.item(i).setCheckState(Qt.Checked if "result-m2-host" in ep.results[i][0] else Qt.Unchecked)
+        iom = ep.fmt["CSV Iometer"].isChecked()
+        ep.fmt["CSV Iometer"].setChecked(True); win.show_page("export"); shot("12_export_hint")
+        ep.fmt["CSV Iometer"].setChecked(iom)
+        for i in range(ep.list.count()):     # back to the default selection for 05_export
+            ep.list.item(i).setCheckState(Qt.Checked if i < 2 else Qt.Unchecked)
     for i in range(cp.list.count()):        # back to the storage selection for 04_compare
         cp.list.item(i).setCheckState(Qt.Checked if i < 3 else Qt.Unchecked)
     pe = win.pages["profiles"]
@@ -361,7 +376,7 @@ def core_self_test(work):
             check("result_schema", not e, "; ".join(e) or f"run_id={res.get('run_id')}")
             check("result_run_id", res.get("run_id") == rid, f"run_id={res.get('run_id')}")
             st = storage_tests(check_schema(res, "sb-result/1"))
-            n = st[0]["summary"].get("io_count", 0) if st else 0
+            n = (st[0]["summary"].get("io_count") or 0) if st else 0     # 1.3: null if stopped before measure
             check("io_count", n > 0, f"io_count={n} iops={st[0]['summary'].get('iops') if st else None}")
             rep["result_file"] = out_path
             rep["result_summary"] = {"iops": st[0]["summary"].get("iops") if st else None, "io_count": n,
@@ -424,6 +439,16 @@ def self_test_child(plat, a):
         if a.expect_result:   # result of the core self-test run must be parsed by the GUI (compare/export pages)
             files = [f for f, _ in win.pages["compare"].results]
             res["expect_result"] = "geladen" if any(_same_path(f, a.expect_result) for f in files) else f"fehlt in {len(files)} Ergebnissen"
+        # contract 1.3: every loaded result (incl. schema/examples/result-partial.json with null summary values) must
+        # render on the results page, in the compare page and in the HTML report without exceptions
+        from .report import build_html
+        rp = win.pages["results"]; runs = [r for _, r in rp.results]
+        for f, _ in rp.results:
+            rp.select_file(f); QCoreApplication.processEvents()
+        build_html(runs); build_html(runs, compact=True)
+        win.pages["compare"].update()
+        res["results_rendered"] = len(runs)
+        res["partial_rendered"] = sum(1 for r in runs for t in r["tests"] if t.get("partial"))
         if os.name == "nt":
             res["loaded_dlls"] = _loaded_modules()
         res["ok"] = img.width() > 0 and not img.isNull() and res.get("expect_result", "geladen") == "geladen"

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 r"""Mock of the core CLI `sbench.exe`, implemented against the contract in
-FiiRe1337/server-benchmark, contract 1.2 (core M2, PR #13 branch feat/m2-mem-cpu: docs/cli.md, docs/core.md +
-schema/*.schema.json + schema/examples/*-compute.*). Contract 1.1 (core M1 5670020) via SBENCH_MOCK_CONTRACT=1.1.
+FiiRe1337/server-benchmark, contract 1.3 (main 020a2de, PR #16: docs/cli.md "Vertrag 1.3", schema/,
+schema/examples/*-partial.*): tick.metric/score, phase.threads/cpus, tests[].partial/stopped_in (null summary values
+when stopped before measure), meta.cpu_score, summary.score_reference/proc_cpu_pct, timeseries at --tick-ms, tick_ms,
+CSV partial/stopped_in. Contract 1.2 (core M2, #13) / 1.1 (core M1 5670020) via SBENCH_MOCK_CONTRACT.
 
   sbench run --job <job.json> --out <result.json> [--progress stdout|file:<p.jsonl>|pipe:\\.\pipe\sbench-<id>]
              [--tick-ms <ms>=1000, min 100] [--id <id>] [--allow-destructive]
@@ -20,9 +22,11 @@ Every run additionally writes <data_dir>/runs/<run_id>.jsonl (all events) and ru
 data_dir: --data-dir, else $SBENCH_DATA_DIR, else data\ next to sbench (writable), else %ProgramData%\sbench.
 Exit codes: 0 ok, 1 runtime error, 2 invalid job/args, 3 aborted, 4 missing privileges.
 Mock knobs (env): SBENCH_MOCK_SPEED (time compression), SBENCH_MOCK_HOST (host|vm|vm-san),
-SBENCH_MOCK_ELEVATED=1 (pretend to be elevated), SBENCH_MOCK_CONTRACT=1.2|1.1 (default 1.2 = core M2: cpu + memory
-implemented, net_*/hyperv_info E_NOT_IMPLEMENTED; 1.1 = core M1: every non-storage test E_NOT_IMPLEMENTED + skipped,
-no ram_method, 14 CSV columns), SBENCH_MOCK_ALL_TYPES=1 (additionally simulate net_*/hyperv_info), SBENCH_DATA_DIR,
+SBENCH_MOCK_ELEVATED=1 (pretend to be elevated), SBENCH_MOCK_CONTRACT=1.3|1.2|1.1 (default 1.3; 1.2 = core M2: cpu + memory
+implemented, net_*/hyperv_info E_NOT_IMPLEMENTED, no 1.3 fields, 18 CSV columns; 1.1 = core M1: every non-storage test
+E_NOT_IMPLEMENTED + skipped, no ram_method, 14 CSV columns), SBENCH_MOCK_LAG=1 (1.3: storage worker 0 misses the tick
+ack now and then -> 0 in that tick, recounted next), SBENCH_MOCK_STOP_AT=<test>:<phase>[:<n>] (deterministic stop),
+SBENCH_MOCK_ALL_TYPES=1 (additionally simulate net_*/hyperv_info), SBENCH_DATA_DIR,
 SBENCH_SCHEMA_DIR.
 Stop: real core uses the named event Global\sbench-stop-<id> (fallback Local\); the mock uses a marker file.
 """
@@ -57,10 +61,12 @@ PERF = {"host": (1.0, 1.0), "vm": (0.78, 1.25), "vm-san": (0.42, 2.4)}[HOSTKIND]
 SCHEMA_DIR = sb_contract.base_dir()
 ELEVATED = os.environ.get("SBENCH_MOCK_ELEVATED") == "1"
 ALL_TYPES = os.environ.get("SBENCH_MOCK_ALL_TYPES") == "1"  # simulate cpu/memory/net/hyperv_info regardless of contract
-CONTRACT = os.environ.get("SBENCH_MOCK_CONTRACT", "1.2")
-if CONTRACT not in ("1.1", "1.2"):
-    raise SystemExit(f"SBENCH_MOCK_CONTRACT={CONTRACT!r}: 1.1 oder 1.2")
-M2 = CONTRACT == "1.2"
+CONTRACT = os.environ.get("SBENCH_MOCK_CONTRACT", "1.3")
+if CONTRACT not in ("1.1", "1.2", "1.3"):
+    raise SystemExit(f"SBENCH_MOCK_CONTRACT={CONTRACT!r}: 1.1, 1.2 oder 1.3")
+M2 = CONTRACT in ("1.2", "1.3")
+V13 = CONTRACT == "1.3"
+LAG = os.environ.get("SBENCH_MOCK_LAG") == "1"
 IMPLEMENTED = {"storage"} | ({"cpu", "memory"} if M2 else set()) | ({"cpu", "memory", "net_client", "net_server", "hyperv_info"} if ALL_TYPES else set())
 EXIT_OK, EXIT_ERR, EXIT_INVALID, EXIT_ABORTED, EXIT_PRIV = 0, 1, 2, 3, 4
 UNITS = {"KiB": 1024, "MiB": 1024**2, "GiB": 1024**3}
@@ -125,7 +131,13 @@ def info_doc():
 
 
 def _ram_method(info):
-    """Contract 1.2 (#8): numa_nodes[].ram_method (total|srat|estimate); contract 1.1 core: field absent."""
+    """Contract 1.2 (#8): numa_nodes[].ram_method (total|srat|estimate); contract 1.1 core: field absent.
+    Contract 1.3: meta.cpu_score (formula + reference ops/s per workload); absent before."""
+    if V13:
+        info["meta"].setdefault("cpu_score", {"formula": "score = ops_per_s / ref_ops_per_s[workload] * 1000", "points": 1000,
+                                              "reference_threads": 1, "ref_ops_per_s": dict(CPU_REF)})
+    else:
+        info["meta"].pop("cpu_score", None)
     for n in info["meta"].get("numa_nodes", []):
         if not M2:
             n.pop("ram_method", None)
@@ -243,6 +255,13 @@ def thread_cpus(meta, threads, numa_node=None):
             order += [g[k] for g in group if k < len(g)]
     n = threads or len(order)
     return [order[i % len(order)] for i in range(n)]
+
+
+def cpu_entry(meta, i, c):
+    """Contract 1.3 phase.cpus[] entry. Mock topology: SMT siblings = (2k, 2k+1), core = c // 2."""
+    smt = meta["cpu"]["threads"] > meta["cpu"]["cores"]
+    return {"id": i, "cpu": c, "group": c // 64, "number": c % 64, "numa_node": node_of(meta, c), "core": c // 2 if smt else c,
+            "smt_sibling_of": (c - 1) if smt and c % 2 else None}
 
 
 def node_of(meta, cpu):
@@ -365,7 +384,27 @@ _RUNF = None  # <data_dir>/runs/<run_id>.jsonl, always written
 _stop = False
 
 
+_STOP_AT = os.environ.get("SBENCH_MOCK_STOP_AT", "")   # "<test>:<phase>[:<n events>]" -> deterministic stop (demo/tests)
+_stop_cnt = [0]
+
+
+def _stop_hook(obj):
+    """SBENCH_MOCK_STOP_AT=2:warmup stops at the 1st progress event of test 2 in warmup; 3:measure:4 after its 4th tick;
+    2:preparing:2 after the 2nd preparing progress event. Same effect as `sbench stop` (exit 3, partial result)."""
+    global _stop
+    if not _STOP_AT or _stop:
+        return
+    parts = _STOP_AT.split(":"); ti, ph = int(parts[0]), parts[1]; n = int(parts[2]) if len(parts) > 2 else 1
+    if obj.get("test") != ti:
+        return
+    if (ph == "measure" and obj.get("ev") == "tick") or (obj.get("ev") == "progress" and obj.get("phase") == ph):
+        _stop_cnt[0] += 1
+        if _stop_cnt[0] >= n:
+            _stop = True
+
+
 def emit(obj):
+    _stop_hook(obj)
     line = json.dumps(obj, separators=(",", ":"), ensure_ascii=False)
     if _LOG:
         _LOG.write(f"{dt.datetime.now().isoformat(timespec='milliseconds')} {line}\n"); _LOG.flush()
@@ -398,12 +437,76 @@ def sleep_tick(sec, rid):
         time.sleep(min(0.05, max(0, end - time.monotonic())))
 
 
+def _phase_start(ti, extra):
+    """First phase event of a test (preparing). 1.3: + threads (and cpus[] for cpu/memory)."""
+    ev = {"ev": "phase", "test": ti, "name": "preparing"}
+    if V13:
+        ev.update(extra)
+    emit(ev)
+
+
+def _ts_from_ticks(ticks, keys):
+    """1.3: one timeseries point per tick (--tick-ms); <= 1.2: 1 s buckets (end of interval)."""
+    if V13:
+        out = []
+        for tk in ticks:
+            p = {"t": tk["t"]}
+            for k in keys:
+                if k in tk:
+                    p[k] = tk[k] if k != "lat_us" else {x: tk["lat_us"][x] for x in ("mean", "p99", "max")}
+            out.append(p)
+        return out
+    ts, bucket, acc = [], 1, []
+    for tk in ticks:
+        acc.append(tk)
+        if tk["t"] + 1e-9 >= bucket or tk is ticks[-1]:
+            n = len(acc); p = {"t": round(min(bucket, tk["t"]), 3)}
+            for k in keys:
+                if k in ("proc_cpu_pct", "score") or k not in tk:
+                    continue
+                if k == "lat_us":
+                    p[k] = {"mean": round(sum(a["lat_us"]["mean"] for a in acc) / n, 1), "p99": max(a["lat_us"]["p99"] for a in acc),
+                            "max": max(a["lat_us"]["max"] for a in acc)}
+                else:
+                    p[k] = round(sum(a[k] for a in acc) / n, 3 if k in ("gbps", "latency_ns") else 1)
+            ts.append(p); acc = []; bucket += 1
+    return ts
+
+
+STORAGE_NULL = ("iops", "mbps", "read_iops", "write_iops", "read_mbps", "write_mbps", "lat_us", "errors", "io_count", "cpu_pct", "proc_cpu_pct")
+
+
+def _stopped_early(ti, typ, t, phase, summ_cfg, null_keys):
+    """1.3: test stopped in preparing/warmup -> present, partial, summary values null, per_* empty. <= 1.2: absent."""
+    if not V13:
+        return None
+    summ = dict(summ_cfg); summ.update({k: None for k in null_keys})
+    out = {"index": ti, "type": typ, "partial": True, "stopped_in": phase, "config": t, "summary": summ, "errors": []}
+    if typ == "storage":
+        out.update(per_worker=[], per_spec=[], histogram=[], timeseries=[])
+    else:
+        out.update(per_worker=[], timeseries=[])
+    return out
+
+
+def _mark(r, stopped):
+    if V13 and r is not None:
+        r["partial"] = bool(stopped)
+        if stopped:
+            r["stopped_in"] = "measure"
+        r.setdefault("partial", False)
+        keys = list(r)
+        order = ["index", "type", "partial", "stopped_in"]
+        return {k: r[k] for k in order + [k for k in keys if k not in order] if k in r}
+    return r
+
+
 def run_storage(ti, t, tick, rng, rid):
     iops0, lat0, avg_bs, specs = storage_model(t)
     nw = t.get("workers", 1); nt = len(t["targets"])
     wshare = [1 + rng.uniform(-.05, .05) for _ in range(nw)]; s_ = sum(wshare); wshare = [w / s_ for w in wshare]
     # preparing: create/extend test files (progress in bytes); raw targets need no preparation
-    emit({"ev": "phase", "test": ti, "name": "preparing"})
+    _phase_start(ti, {"threads": nw})                    # 1.3: storage = number of workers, no cpus (workers are not pinned)
     total = sum(parse_size(tg["file_size"]) for tg in t["targets"] if tg["kind"] == "file")
     if total:
         rate = 2.5e9  # B/s simulated file creation
@@ -415,7 +518,8 @@ def run_storage(ti, t, tick, rng, rid):
     else:
         sleep_tick(0.3, rid)
     if _stop:
-        return None
+        emit({"ev": "phase", "test": ti, "name": "cleanup"})
+        return _stopped_early(ti, "storage", t, "preparing", {}, STORAGE_NULL)
     wu = float(t.get("warmup_s", 0))
     if wu:
         emit({"ev": "phase", "test": ti, "name": "warmup", "duration_s": wu}); el = 0.0
@@ -423,7 +527,8 @@ def run_storage(ti, t, tick, rng, rid):
             step = min(1.0, wu - el); sleep_tick(step, rid); el += step
             emit({"ev": "progress", "test": ti, "phase": "warmup", "done": round(el, 3), "total": wu, "unit": "s"})
         if _stop:
-            return None
+            emit({"ev": "phase", "test": ti, "name": "cleanup"})
+            return _stopped_early(ti, "storage", t, "warmup", {}, STORAGE_NULL)
     dur = float(t["duration_s"])
     emit({"ev": "phase", "test": ti, "name": "measure", "duration_s": dur})
     el = 0.0; ticks = []
@@ -443,7 +548,7 @@ def run_storage(ti, t, tick, rng, rid):
         rf = min(1, max(0, rd_frac + rng.gauss(0, .004)))
         p99 = round(ls["p99"] * (1 + abs(rng.gauss(0, .06))), 1)
         proc = 2 + iops / 32000 + rng.gauss(0, 0.5)
-        tk = {"ev": "tick", "test": ti, "t": el, "iops": round(iops, 1), "mbps": round(mbps, 2),
+        tk = {"ev": "tick", "test": ti, "t": el, **({"metric": "iops"} if V13 else {}), "iops": round(iops, 1), "mbps": round(mbps, 2),
               "read_iops": round(iops * rf, 1), "write_iops": round(iops * (1 - rf), 1),
               "read_mbps": round(mbps * rf, 2), "write_mbps": round(mbps * (1 - rf), 2),
               "lat_us": {"mean": ls["mean"], "p50": ls["p50"], "p99": p99, "max": round(ls["p99"] * rng.uniform(2.5, 4.5), 1)},
@@ -451,10 +556,17 @@ def run_storage(ti, t, tick, rng, rid):
               "workers": [{"id": i, "iops": round(iops * w, 1), "mbps": round(mbps * w, 2),
                            "lat_us": {"mean": round(ls["mean"] * wlat[i], 1), "p99": round(p99 * wlat[i] * (1 + abs(rng.gauss(0, .03))), 1)}}
                           for i, w in enumerate(wshare)]}
+        if V13 and LAG:      # worker 0 misses the 250 ms ack every 7th tick: 0 now (no lat_us), its I/O counts next tick
+            k = len(ticks)
+            if k % 7 == 3:
+                tk["workers"][0] = {"id": 0, "iops": 0, "mbps": 0}
+            elif k % 7 == 4 and k > 0:
+                w0 = tk["workers"][0]; w0["iops"] = round(w0["iops"] * 2, 1); w0["mbps"] = round(w0["mbps"] * 2, 2)
         emit(tk); ticks.append((step, tk))
+    stopped = _stop
     emit({"ev": "phase", "test": ti, "name": "cleanup"}); sleep_tick(0.2, rid)
     if not ticks:
-        return None
+        return _stopped_early(ti, "storage", t, "warmup" if wu else "preparing", {}, STORAGE_NULL)
     secs = sum(s for s, _ in ticks)
     iops = sum(s * tk["iops"] for s, tk in ticks) / secs
     mean = sum(s * tk["lat_us"]["mean"] for s, tk in ticks) / secs
@@ -473,23 +585,15 @@ def run_storage(ti, t, tick, rng, rid):
         per_worker.append({"id": i, "target": i % nt, "iops": round(wi, 1), "mbps": round(mbps * w, 2),
                            "read_iops": round(wi * rd_frac, 1), "write_iops": round(wi * (1 - rd_frac), 1),
                            "lat_us": lat_stats(mean * wlat[i]), "io_count": cnt, "errors": 0})
-    # 1 s timeseries (end of interval)
-    ts, bucket, acc = [], 1, []
-    for s, tk in ticks:
-        acc.append(tk)
-        if tk["t"] + 1e-9 >= bucket or tk is ticks[-1][1]:
-            k = len(acc)
-            ts.append({"t": round(min(bucket, tk["t"]), 3), "iops": round(sum(a["iops"] for a in acc) / k, 1),
-                       "mbps": round(sum(a["mbps"] for a in acc) / k, 2),
-                       "lat_us": {"mean": round(sum(a["lat_us"]["mean"] for a in acc) / k, 1), "p99": max(a["lat_us"]["p99"] for a in acc),
-                                  "max": max(a["lat_us"]["max"] for a in acc)},
-                       "cpu_pct": round(sum(a["cpu_pct"] for a in acc) / k, 1)})
-            acc = []; bucket += 1
-    return {"index": ti, "type": "storage", "config": t,
-            "summary": {"iops": round(iops, 1), "mbps": round(mbps, 2), "read_iops": round(iops * rd_frac, 1),
-                        "write_iops": round(iops * (1 - rd_frac), 1), "read_mbps": round(rmb, 2), "write_mbps": round(mbps - rmb, 2),
-                        "lat_us": lat_stats(mean), "errors": 0, "io_count": n},
-            "per_worker": per_worker, "per_spec": per_spec, "histogram": lognorm_hist(mean, n), "timeseries": ts, "errors": []}
+    ts = _ts_from_ticks([tk for _, tk in ticks], ("iops", "mbps", "lat_us", "cpu_pct", "proc_cpu_pct"))
+    summ = {"iops": round(iops, 1), "mbps": round(mbps, 2), "read_iops": round(iops * rd_frac, 1),
+            "write_iops": round(iops * (1 - rd_frac), 1), "read_mbps": round(rmb, 2), "write_mbps": round(mbps - rmb, 2),
+            "lat_us": lat_stats(mean), "errors": 0, "io_count": n}
+    if V13:      # 1.3: cpu_pct (now also storage) + proc_cpu_pct, mean over the measure phase
+        summ["cpu_pct"] = round(sum(s * tk["cpu_pct"] for s, tk in ticks) / secs, 1)
+        summ["proc_cpu_pct"] = round(sum(s * tk["proc_cpu_pct"] for s, tk in ticks) / secs, 1)
+    return _mark({"index": ti, "type": "storage", "config": t, "summary": summ,
+                  "per_worker": per_worker, "per_spec": per_spec, "histogram": lognorm_hist(mean, n), "timeseries": ts, "errors": []}, stopped)
 
 
 CPU_REF = {"int": 2.8e8, "float": 1.5e8, "crypto": 3.4e6, "mixed": 3.8e5}   # docs/core.md, ops/s of 1 reference thread
@@ -559,23 +663,41 @@ def run_compute(ti, t, tick, rng, rid, meta):
     if latency:
         cpus = cpus[:1]
     key, base = _per_thread_model(t, meta, cpus)
+    wl = t.get("workload", "mixed")
+    bs_act = parse_size(t["buffer_size"]) // 64 * 64 if latency else (parse_size(t["buffer_size"]) // 8192 * 8192 if typ == "memory" else 0)
+    cfg_summ = ({"workload": wl, "threads": len(cpus), "score_reference": CPU_REF[wl]} if typ == "cpu" else
+                {"mode": t["mode"], **({} if latency else {"op": t.get("op", "read")}), "threads": len(cpus), "buffer_size_bytes": bs_act,
+                 **({} if latency else {"simd": "avx2" if t.get("simd", "auto") == "auto" else t["simd"],
+                                         "nontemporal": bool(t.get("nontemporal")) and t.get("op", "read") != "read" and ARCH == "x64"})})
+    if "numa_node" in t:
+        cfg_summ["numa_node"] = t["numa_node"]
+    if typ == "memory" and "mem_node" in t:
+        cfg_summ["mem_node"] = t["mem_node"]
+    cfg_summ["cpus"] = cpus
+    null_keys = (("ops_per_s", "score", "ops") if typ == "cpu" else (("latency_ns", "loads") if latency else ("gbps", "bytes"))) + ("cpu_pct", "proc_cpu_pct")
+    # 1.3: the first phase event of every test (cpu too) carries threads + the pinned CPUs (incl. SMT siblings)
+    if typ == "memory" or V13:
+        _phase_start(ti, {"threads": len(cpus), "cpus": [cpu_entry(meta, i, c) for i, c in enumerate(cpus)]})
     if typ == "memory":
-        emit({"ev": "phase", "test": ti, "name": "preparing"})
-        total = len(cpus) * parse_size(t["buffer_size"]); done = 0; rate = 6 * GIB
+        # 1.3: progress ~ every 0.3 s (>= 250 ms apart) + a final event with done = total; total = threads x actual size
+        total = len(cpus) * bs_act; done = 0; rate = 6 * GIB; iv = 0.3 if V13 else 1.0
         while done < total and not _stop:
-            step = min(total - done, rate)
+            step = min(total - done, int(rate * iv))
             sleep_tick(step / rate, rid); done += step
             emit({"ev": "progress", "test": ti, "phase": "preparing", "done": done, "total": total, "unit": "bytes"})
         if _stop:
-            return None
+            emit({"ev": "phase", "test": ti, "name": "cleanup"})
+            return _stopped_early(ti, typ, t, "preparing", cfg_summ, null_keys)
     wu = float(t.get("warmup_s", 1))
     if wu:
         emit({"ev": "phase", "test": ti, "name": "warmup", "duration_s": wu}); el = 0.0
+        wstep = 0.5 if V13 else 1.0          # 1.3: cpu/memory warmup progress ~ every 0.5 s
         while el < wu and not _stop:
-            step = min(1.0, wu - el); sleep_tick(step, rid); el += step
+            step = min(wstep, wu - el); sleep_tick(step, rid); el += step
             emit({"ev": "progress", "test": ti, "phase": "warmup", "done": round(el, 3), "total": wu, "unit": "s"})
         if _stop:
-            return None
+            emit({"ev": "phase", "test": ti, "name": "cleanup"})
+            return _stopped_early(ti, typ, t, "warmup", cfg_summ, null_keys)
     dur = float(t["duration_s"])
     emit({"ev": "phase", "test": ti, "name": "measure", "duration_s": dur})
     logical = meta["cpu"]["threads"]
@@ -590,14 +712,17 @@ def run_compute(ti, t, tick, rng, rid, meta):
         f = 1 + .012 * math.sin(el / 2.1) + rng.gauss(0, .006)
         per = [round(b * j * f * (1 + rng.gauss(0, .004)), nd) for b, j in zip(base, jitter)]
         tot = round(sum(per), nd) if key != "latency_ns" else per[0]
-        tk = {"ev": "tick", "test": ti, "t": el, key: tot, "cpu_pct": round(min(100, load * 1.01 + abs(rng.gauss(0, .3))), 2),
-              "proc_cpu_pct": round(load * 0.99, 2)}
+        tk = {"ev": "tick", "test": ti, "t": el, **({"metric": key} if V13 else {}), key: tot,
+              "cpu_pct": round(min(100, load * 1.01 + abs(rng.gauss(0, .3))), 2), "proc_cpu_pct": round(load * 0.99, 2)}
+        if V13 and typ == "cpu":
+            tk["score"] = round(tot / CPU_REF[wl] * 1000, 1)
         if not latency:
             tk["workers"] = [{"id": i, key: v} for i, v in enumerate(per)]
         emit(tk); ticks.append((step, per, tk))
+    stopped = _stop
     emit({"ev": "phase", "test": ti, "name": "cleanup"}); sleep_tick(0.1, rid)
     if not ticks:
-        return None
+        return _stopped_early(ti, typ, t, "warmup" if wu else "preparing", cfg_summ, null_keys)
     secs = sum(s for s, _, _ in ticks)
     avg = [round(sum(s * p[i] for s, p, _ in ticks) / secs, nd) for i in range(len(cpus))]
     total = round(sum(avg), nd) if key != "latency_ns" else avg[0]
@@ -609,9 +734,10 @@ def run_compute(ti, t, tick, rng, rid, meta):
             w["mem_node"] = t.get("mem_node", w["node"])
         w[key] = v; per_worker.append(w)
     if typ == "cpu":
-        wl = t.get("workload", "mixed")
         summ = {"workload": wl, "threads": len(cpus), "ops_per_s": total, "score": round(total / CPU_REF[wl] * 1000, 1),
                 "ops": int(total * secs)}
+        if V13:
+            summ["score_reference"] = CPU_REF[wl]
     else:
         bs = parse_size(t["buffer_size"])
         summ = {"mode": t["mode"]}
@@ -629,17 +755,12 @@ def run_compute(ti, t, tick, rng, rid, meta):
     if "numa_node" in t:
         summ["numa_node"] = t["numa_node"]
     summ.update(cpus=cpus, cpu_pct=cpu_pct)
+    if V13:
+        summ["proc_cpu_pct"] = round(sum(s * tk["proc_cpu_pct"] for s, _, tk in ticks) / secs, 1)
     if typ == "memory" and "mem_node" in t:      # schema order: numa_node before mem_node (cosmetic)
         summ["mem_node"] = summ.pop("mem_node")
-    ts, bucket, acc = [], 1, []
-    for s, _, tk in ticks:
-        acc.append(tk)
-        if tk["t"] + 1e-9 >= bucket or tk is ticks[-1][2]:
-            k = len(acc)
-            ts.append({"t": round(min(bucket, tk["t"]), 3), key: round(sum(a[key] for a in acc) / k, nd),
-                       "cpu_pct": round(sum(a["cpu_pct"] for a in acc) / k, 1)})
-            acc = []; bucket += 1
-    return {"index": ti, "type": typ, "config": t, "summary": summ, "per_worker": per_worker, "timeseries": ts, "errors": []}
+    ts = _ts_from_ticks([tk for _, _, tk in ticks], (key, "cpu_pct", "proc_cpu_pct", "score"))
+    return _mark({"index": ti, "type": typ, "config": t, "summary": summ, "per_worker": per_worker, "timeseries": ts, "errors": []}, stopped)
 
 
 def run_simple(ti, t, tick, rng, rid, meta):
@@ -778,7 +899,7 @@ def run(a):
             if _stop:
                 break
         res = {"schema": "sb-result/1", "kern_version": VERSION, "run_id": rid, "started_utc": started, "ended_utc": utc_now(),
-               "aborted": _stop, "meta": meta, "tests": results}
+               "aborted": _stop, **({"tick_ms": a.tick_ms} if V13 else {}), "meta": meta, "tests": results}
         tmp = a.out + ".tmp"  # write <out>.tmp, then atomic rename
         with open(tmp, "w", encoding="utf-8", newline="\n") as f:
             json.dump(res, f, indent=1, ensure_ascii=False)
@@ -799,17 +920,23 @@ def run(a):
 FLAT = ["test", "type", "scope", "id", "iops", "mbps", "read_iops", "write_iops", "read_mbps", "write_mbps",
         "lat_mean_us", "lat_p99_us", "lat_max_us", "errors"]
 FLAT_M2 = ["ops_per_s", "gbps", "latency_ns", "score"]   # contract 1.2: appended, older positions unchanged
+FLAT_V13 = ["partial", "stopped_in"]                     # contract 1.3: per test, on every row of the test
 
 
-def _flat_row(idx, typ, scope, id_, x, rw_mbps):
-    """Like core export.c flat_row(): every type gets total/worker/spec rows; missing values stay empty."""
+def _flat_row(idx, typ, scope, id_, x, rw_mbps, tst=None):
+    """Like core export.c flat_row(): every type gets total/worker/spec rows; empty = no value (column n/a for type/scope
+    or null in a partial test), 0 = measured. 1.3: + partial (true/false), stopped_in."""
     g = lambda o, k: "" if not isinstance(o, dict) or o.get(k) is None or isinstance(o.get(k), (dict, list)) else o[k]
     lat = x.get("lat_us") if isinstance(x.get("lat_us"), dict) else {}
     e = x.get("errors", "")
     row = [idx, typ, scope, id_, g(x, "iops"), g(x, "mbps"), g(x, "read_iops"), g(x, "write_iops"),
            g(x, "read_mbps") if rw_mbps else "", g(x, "write_mbps") if rw_mbps else "", g(lat, "mean"), g(lat, "p99"), g(lat, "max"),
            len(e) if isinstance(e, list) else e]
-    return row + ([g(x, k) for k in FLAT_M2] if M2 else [])
+    row += [g(x, k) for k in FLAT_M2] if M2 else []
+    if V13:
+        pa = (tst or {}).get("partial")
+        row += ["" if pa is None else ("true" if pa else "false"), (tst or {}).get("stopped_in") or ""]
+    return row
 
 
 def export(a):
@@ -817,15 +944,16 @@ def export(a):
     with open(a.csv, "w", encoding="utf-8", newline="") as f:
         w = csv.writer(f, lineterminator="\r\n")
         if a.style == "flat":
-            w.writerow(FLAT + (FLAT_M2 if M2 else []))
+            w.writerow(FLAT + (FLAT_M2 if M2 else []) + (FLAT_V13 if V13 else []))
             for t in res["tests"]:
                 if t["type"] not in IMPLEMENTED and t["type"] != "storage":
                     continue
-                w.writerow(_flat_row(t["index"], t["type"], "total", "", {**t["summary"], "errors": t["summary"].get("errors", t["errors"])}, True))
+                # like export.c: the total row is the summary (cpu/memory have no summary.errors -> empty)
+                w.writerow(_flat_row(t["index"], t["type"], "total", "", t["summary"], True, t))
                 for x in t.get("per_worker", []):
-                    w.writerow(_flat_row(t["index"], t["type"], "worker", x["id"], x, False))
+                    w.writerow(_flat_row(t["index"], t["type"], "worker", x["id"], x, False, t))
                 for x in t.get("per_spec", []):
-                    w.writerow(_flat_row(t["index"], t["type"], "spec", x["spec"], x, False))
+                    w.writerow(_flat_row(t["index"], t["type"], "spec", x["spec"], x, False, t))
         else:
             w.writerow(["Target Type", "Target Name", "Access Specification Name", "# Managers", "# Workers", "# Disks", "IOps",
                         "Read IOps", "Write IOps", "MBps (Decimal)", "Read MBps (Decimal)", "Write MBps (Decimal)",
@@ -833,11 +961,13 @@ def export(a):
             for t in res["tests"]:
                 if t["type"] != "storage":
                     continue
-                s = t["summary"]; c = t["config"]
-                name = " + ".join(f"{p['weight']}% {p['block_size_bytes'] // 1024}K {p['read_pct']}%R {p['random_pct']}%Rnd" for p in t["per_spec"])
-                w.writerow(["ALL", "All", name, 1, c.get("workers", 1), len(c["targets"]), s["iops"], s["read_iops"], s["write_iops"],
-                            s["mbps"], s["read_mbps"], s["write_mbps"], round(s["lat_us"]["mean"] / 1000, 4),
-                            round(s["lat_us"]["max"] / 1000, 4), s["errors"]])
+                s = t["summary"]; c = t["config"]; lat = s.get("lat_us") or {}   # 1.3: null values -> empty fields
+                e = lambda v: "" if v is None else v   # noqa: E731
+                name = " + ".join(f"{p['weight']}% {parse_size(p['block_size']) // 1024}K {p['read_pct']}%R {p['random_pct']}%Rnd"
+                                  for p in c["access_specs"])
+                w.writerow(["ALL", "All", name, 1, c.get("workers", 1), len(c["targets"]), e(s["iops"]), e(s["read_iops"]), e(s["write_iops"]),
+                            e(s["mbps"]), e(s["read_mbps"]), e(s["write_mbps"]), round(lat["mean"] / 1000, 4) if "mean" in lat else "",
+                            round(lat["max"] / 1000, 4) if "max" in lat else "", e(s["errors"])])
     return EXIT_OK
 
 

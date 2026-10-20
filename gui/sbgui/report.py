@@ -1,7 +1,17 @@
 """HTML/PDF report from sb-result/1 (GUI-side; CSV comes from `sbench export`)."""
 import html
 from .model import (test_label, host_label, human_bytes, storage_tests, compute_tests, fmt_metric, numa_placement, short_size,
-                    RAM_METHOD_TXT)
+                    RAM_METHOD_TXT, sval, partial_text)
+
+
+def _n(v, spec=",.0f"):
+    """Null-safe number (contract 1.3: summary values are null for tests stopped before measure)."""
+    return "–" if v is None else format(v, spec)
+
+
+def _name(t, res):
+    p = partial_text(t, res)
+    return test_label(t["config"]) + (f" ({p})" if p else "")
 
 
 def build_html(results, compact=False):
@@ -21,9 +31,9 @@ td{border-bottom:1px solid #e3e8ee;padding:3px 6px;font-size:8.5pt} td.n{text-al
                    f"{r['started_utc'][:16].replace('T', ' ')} UTC</div>")
         if storage_tests(r) or not compute_tests(r):
             cols = ["Test", "IOPS", "MB/s", "Ø µs", "p99 µs"] + ([] if compact else ["p99.9 µs", "Fehler"])
-            out.append(_table(cols, [[test_label(t["config"]), f"{t['summary']['iops']:,.0f}", f"{t['summary']['mbps']:,.0f}",
-                                      f"{t['summary']['lat_us']['mean']:,.0f}", f"{t['summary']['lat_us']['p99']:,.0f}"]
-                                     + ([] if compact else [f"{t['summary']['lat_us']['p99_9']:,.0f}", str(t['summary']['errors'])])
+            out.append(_table(cols, [[_name(t, r), _n(sval(t, "summary", "iops")), _n(sval(t, "summary", "mbps")),
+                                      _n(sval(t, "summary", "lat_us", "mean")), _n(sval(t, "summary", "lat_us", "p99"))]
+                                     + ([] if compact else [_n(sval(t, "summary", "lat_us", "p99_9")), _n(sval(t, "summary", "errors"), "d")])
                                      for t in storage_tests(r)]))
         out += _compute_html(r, compact)
         if compact:
@@ -46,15 +56,17 @@ def _compute_html(r, compact):
     if cpu:
         out.append("<div class='m'>CPU · Score = ops/s ÷ Referenz-Thread × 1000</div>")
         out.append(_table(["CPU-Test", "Workload", "Threads", "NUMA", "ops/s", "Score"],
-                          [[test_label(t["config"]), t["summary"]["workload"], t["summary"]["threads"], numa_placement(t) or "alle",
-                            fmt_metric("ops_per_s", t["summary"]["ops_per_s"]), fmt_metric("score", t["summary"]["score"])] for t in cpu]))
+                          [[_name(t, r), sval(t, "summary", "workload") or t["config"].get("workload", "–"),
+                            sval(t, "summary", "threads") or "–", numa_placement(t) or "alle",
+                            fmt_metric("ops_per_s", sval(t, "summary", "ops_per_s")), fmt_metric("score", sval(t, "summary", "score"))] for t in cpu]))
     if mem:
         out.append("<div class='m'>Arbeitsspeicher · GB/s = 10⁹ Byte/s · Latenz in ns</div>")
         rows = []
         for t in mem:
-            s = t["summary"]; bw = s["mode"] == "bandwidth"
-            rows.append([test_label(t["config"]), (s.get("op", "") + (" NT" if s.get("nontemporal") else "")) if bw else "Latenz",
-                         s.get("simd", "–") if bw else "–", s["threads"], short_size(s["buffer_size_bytes"]), numa_placement(t) or "lokal",
+            s = t.get("summary") or {}; bw = s.get("mode", t["config"].get("mode")) == "bandwidth"
+            rows.append([_name(t, r), (s.get("op", "") + (" NT" if s.get("nontemporal") else "")) if bw else "Latenz",
+                         s.get("simd", "–") if bw else "–", s.get("threads", "–"),
+                         short_size(s["buffer_size_bytes"]) if s.get("buffer_size_bytes") else "–", numa_placement(t) or "lokal",
                          fmt_metric("gbps", s.get("gbps")), fmt_metric("latency_ns", s.get("latency_ns"))])
         out.append(_table(["RAM-Test", "Modus", "SIMD", "Threads", "Puffer", "NUMA", "GB/s", "Latenz ns"], rows))
     nodes = r["meta"].get("numa_nodes") or []

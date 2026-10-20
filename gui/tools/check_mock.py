@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Validate mock sbench output / recorded files against the contract (main, Vertrag 1.2; sb-bundle/1 see sb_contract.py).
+"""Validate mock sbench output / recorded files against the contract (main, Vertrag 1.3; sb-bundle/1 see sb_contract.py).
 
   python tools/check_mock.py <file.json|file.jsonl|bundle.zip> ...
-JSON files are matched by their "schema" field; .jsonl = sb-progress/1 stream; .zip = sbench bundle (manifest + sha256)."""
+JSON files are matched by their "schema" field; .jsonl = sb-progress/1 stream (1.3 streams additionally: tick.metric, sorted workers, cpu tick score, threads/cpus on the first phase); .zip = sbench bundle (manifest + sha256)."""
 import hashlib, json, re, sys, zipfile
 from pathlib import Path
 
@@ -52,6 +52,27 @@ def _stream_errs(text):
         errs.append("first event must be start")
     if "done" in names and (names.count("done") != 1 or names[-1] != "done"):
         errs.append("done must be the single last event")
+    # contract 1.3 (stream with tick.metric): metric names a present field, workers[] complete + sorted by id,
+    # first phase event of every test carries threads (cpu/memory also cpus[] with one entry per thread)
+    v13 = any("metric" in e for e in evs if e["ev"] == "tick")
+    first = {}
+    for e in evs:
+        if e["ev"] == "phase" and e["test"] not in first:
+            first[e["test"]] = e
+        if v13 and e["ev"] == "tick":
+            if e.get("metric") not in e:
+                errs.append(f"tick test {e['test']} t={e['t']}: metric {e.get('metric')!r} missing/absent field")
+            ids = [w["id"] for w in e.get("workers", [])]
+            if ids != list(range(len(ids))):
+                errs.append(f"tick test {e['test']} t={e['t']}: workers ids {ids[:6]} not 0..n-1 sorted")
+            if e.get("metric") == "ops_per_s" and "score" not in e:
+                errs.append(f"cpu tick test {e['test']} t={e['t']}: score missing")
+    if v13:
+        for ti, e in first.items():
+            if "threads" not in e:
+                errs.append(f"first phase event of test {ti} without threads")
+            elif e.get("cpus") is not None and len(e["cpus"]) != e["threads"]:
+                errs.append(f"test {ti}: cpus[] has {len(e['cpus'])} entries, threads={e['threads']}")
     phase = {}
     for e in evs:
         if e["ev"] == "phase":

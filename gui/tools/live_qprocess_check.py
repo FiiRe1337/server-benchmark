@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Headless end-to-end check against the mock sbench (contract 1.2):
+"""Headless end-to-end check against the mock sbench (contract 1.3; mock default):
  1. exit 4 (raw disk without admin) -> elevation hint      2. destructive job without --allow-destructive -> exit 2
  3. live run via QProcess/stdout, R/W split + worker latency, stop -> exit 3, result read only after done
- 3b. contract 1.2: cpu + memory run, live metric/thread bars, stop during memory measure -> exit 3, partial result
+ 3b. contract 1.2/1.3: cpu + memory run, live metric/thread bars, stop during memory measure -> exit 3, partial result
+     1.3: tick.metric on every tick, phase.threads/cpus -> thread KPI, memory test partial with stopped_in=measure, tick_ms
  4. re-attach: run started outside the GUI -> sbench list --running -> TailSession follows runs/<id>.jsonl to done
  5. support bundle with --include (GUI logs + profiles) and --anonymize -> manifest/sha256 validated
 Writes $SBENCH_SHOT_DIR (default build/)/03c_live_qprocess.png. Uses temp SBENCH_DATA_DIR / SBENCH_GUI_DIR."""
@@ -74,12 +75,17 @@ wait(lambda: any(e.get("ev") == "tick" and e.get("test") == 0 for e in evs), 30)
 report["m2_cpu_thread_bars"] = len(live.thread_bars.opts["height"])
 report["m2_preparing_seen"] = wait(lambda: any(e.get("ev") == "progress" and e.get("phase") == "preparing" for e in evs), 30)
 wait(lambda: sum(1 for e in evs if e.get("ev") == "tick" and e.get("test") == 1) >= 4, 45); live.refresh(); modes.append(live.mode)
+ticks = [e for e in evs if e.get("ev") == "tick"]
+report["m2_metric_on_ticks"] = bool(ticks) and all(e.get("metric") in e for e in ticks)
+report["m2_cpu_tick_score"] = all("score" in e for e in ticks if e.get("metric") == "ops_per_s")
+report["m2_phase_threads"] = dict(sorted(live.test_threads.items()))
 win.stop_run(); wait(lambda: codes, 25); live.result_ready.disconnect()
 report["m2_modes"] = modes; report["m2_stop_exit"] = codes[:1]
 if res:
     r = json.load(open(res[0], encoding="utf-8"))
     report["m2_result"] = {"aborted": r["aborted"], "tests": [t["type"] for t in r["tests"]],
-                           "gbps": r["tests"][-1]["summary"].get("gbps") if r["tests"] else None}
+                           "gbps": r["tests"][-1]["summary"].get("gbps") if r["tests"] else None,
+                           "partial": [(t.get("partial"), t.get("stopped_in")) for t in r["tests"]], "tick_ms": r.get("tick_ms")}
     chk = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "check_mock.py"), res[0]], capture_output=True, text=True)
     report["m2_result_valid"] = chk.returncode == 0
 
@@ -117,5 +123,7 @@ ok = (report["privilege_exit"] == [4] and report["destructive_exit"] == [2] and 
       and report["bundle_anonymized"] is True and report["bundle_has_gui_log"] and report["data_dir_from_info"]
       and report["m2_modes"] == ["ops_per_s", "gbps"] and report["m2_cpu_thread_bars"] == 4 and report["m2_preparing_seen"]
       and report["m2_stop_exit"] == [3] and report.get("m2_result_valid")
-      and (report.get("m2_result") or {}).get("tests") == ["cpu", "memory"] and report["m2_result"]["aborted"] is True)
+      and (report.get("m2_result") or {}).get("tests") == ["cpu", "memory"] and report["m2_result"]["aborted"] is True
+      and report["m2_result"]["partial"] == [(False, None), (True, "measure")] and report["m2_result"]["tick_ms"] == 250
+      and report["m2_metric_on_ticks"] and report["m2_cpu_tick_score"] and report["m2_phase_threads"] == {0: 4, 1: 4})
 sys.exit(0 if ok else 1)

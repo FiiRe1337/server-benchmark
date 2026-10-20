@@ -135,9 +135,10 @@ METRIC_TXT = {"ops_per_s": ("Operationen", "ops/s"), "gbps": ("Bandbreite", "GB/
 WORKLOADS = ("int", "float", "crypto", "mixed")
 MEM_OPS = ("read", "write", "copy")
 SIMD = ("auto", "scalar", "sse2", "avx2", "avx512", "neon")
-# docs/core.md (contract 1.2): ops/s of ONE thread on the reference machine (score = ops_per_s / ref * 1000).
-# Only used for a live *estimate*; the result carries the authoritative summary.score.
+# FALLBACK ONLY for cores < 1.3 (contract 1.3: tick.score, summary.score_reference, meta.cpu_score in info + result).
+# docs/core.md (1.2): ops/s of ONE thread on the reference machine (score = ops_per_s / ref * 1000).
 CPU_REFERENCE = {"int": 2.8e8, "float": 1.5e8, "crypto": 3.4e6, "mixed": 3.8e5}
+PHASE_TXT = {"preparing": "Vorbereitung", "warmup": "Warmup", "measure": "Messung"}
 RAM_METHOD_TXT = {"total": "gesamt (1 Knoten)", "srat": "ACPI SRAT", "estimate": "geschätzt"}
 
 
@@ -157,14 +158,65 @@ def expected_metric(cfg):
 
 
 def tick_metric(ev, cfg=None):
-    """Which value a tick carries. Ticks have no explicit kind field: storage ticks always have iops; otherwise the
-    first present of ops_per_s/gbps/latency_ns; fallback = job config of that test (e.g. re-attach without values)."""
+    """Which value a tick carries. Contract 1.3: tick.metric (always emitted). Fallback for older cores: storage ticks
+    always have iops; otherwise the first present of ops_per_s/gbps/latency_ns; then the job config of that test."""
+    if ev.get("metric") in ("iops", "mbps") + METRICS:
+        return ev["metric"]
     if "iops" in ev:
         return "iops"
     for k in METRICS:
         if k in ev:
             return k
     return expected_metric(cfg)
+
+
+def sval(d, *path):
+    """Null-safe nested get: contract 1.3 partial tests (stopped in preparing/warmup) have summary values null."""
+    for k in path:
+        if not isinstance(d, dict):
+            return None
+        d = d.get(k)
+    return d
+
+
+def is_partial(t, res=None):
+    """Contract 1.3: test.partial. Older results: only the last test of an aborted run may be partial (unknown)."""
+    if "partial" in t:
+        return bool(t["partial"])
+    return bool(res and res.get("aborted") and res["tests"] and res["tests"][-1] is t)
+
+
+def has_values(t):
+    """False for a 1.3 partial test that ended before measure (summary values null, per_worker/timeseries empty)."""
+    if t.get("partial") and t.get("stopped_in") in ("preparing", "warmup"):
+        return False
+    s = t.get("summary") or {}
+    if t["type"] == "storage":
+        return s.get("iops") is not None
+    if t["type"] in COMPUTE_TYPES:
+        return summary_metric(t)[1] is not None
+    return True
+
+
+def partial_text(t, res=None):
+    """'' for complete tests; 'abgebrochen in Warmup · keine Messwerte' etc. for partial ones."""
+    if not is_partial(t, res):
+        return ""
+    ph = t.get("stopped_in")
+    txt = f"abgebrochen in {PHASE_TXT.get(ph, ph)}" if ph else "abgebrochen · Teilergebnis"
+    if not has_values(t):
+        txt += " · keine Messwerte"
+    elif ph == "measure":
+        txt += " · Werte über die gemessene Zeit"
+    return txt
+
+
+def score_reference(workload, meta=None, summary=None):
+    """(reference ops/s, from_core). Core values first (1.3: summary.score_reference, meta.cpu_score); docs fallback."""
+    ref = sval(summary, "score_reference") or sval(meta, "cpu_score", "ref_ops_per_s", workload)
+    if ref:
+        return ref, True
+    return CPU_REFERENCE.get(workload), False
 
 
 def summary_metric(t):
@@ -202,8 +254,9 @@ def _de(txt):
     return txt.replace(".", ",")
 
 
-def estimated_score(workload, ops_per_s):
-    ref = CPU_REFERENCE.get(workload)
+def estimated_score(workload, ops_per_s, meta=None):
+    """Fallback for cores < 1.3 without tick.score: ops_per_s / reference * 1000 (reference from meta.cpu_score if known)."""
+    ref, _ = score_reference(workload, meta)
     return ops_per_s / ref * 1000 if ref and ops_per_s is not None else None
 
 
@@ -244,12 +297,14 @@ def numa_placement(t):
 FLAT_COLUMNS_11 = ["test", "type", "scope", "id", "iops", "mbps", "read_iops", "write_iops", "read_mbps", "write_mbps",
                    "lat_mean_us", "lat_p99_us", "lat_max_us", "errors"]
 FLAT_COLUMNS_12 = FLAT_COLUMNS_11 + ["ops_per_s", "gbps", "latency_ns", "score"]   # contract 1.2: appended at the end
+FLAT_COLUMNS_13 = FLAT_COLUMNS_12 + ["partial", "stopped_in"]                       # contract 1.3
 
 
 def read_flat_csv(path_or_text):
-    """Parse `sbench export --style flat` (contract 1.1: 14 columns, 1.2: + ops_per_s,gbps,latency_ns,score).
-    Columns are matched by NAME (positions of old columns are stable, new ones are appended; unknown future columns
-    are kept). Numbers -> float/int, empty -> None. Returns (columns, rows as dicts)."""
+    """Parse `sbench export --style flat` (contract 1.1: 14 columns, 1.2: 18 (+ ops_per_s,gbps,latency_ns,score),
+    1.3: 20 (+ partial,stopped_in)). Columns are matched by NAME (old positions are stable, new ones are appended;
+    unknown future columns are kept). Empty = no value -> None, 0 = measured 0. partial -> bool/None.
+    Returns (columns, rows as dicts)."""
     import csv, io, os
     txt = open(path_or_text, encoding="utf-8-sig").read() if os.path.exists(str(path_or_text)) else str(path_or_text)
     rd = csv.reader(io.StringIO(txt))
@@ -262,9 +317,14 @@ def read_flat_csv(path_or_text):
             continue
         d = {}
         for k, v in zip(cols, r + [""] * (len(cols) - len(r))):
-            d[k] = _num(v) if k not in ("type", "scope") else v
-        for k in FLAT_COLUMNS_12[len(FLAT_COLUMNS_11):]:
-            d.setdefault(k, None)                  # 1.1 export: new columns absent -> None
+            if k == "partial":
+                d[k] = {"true": True, "false": False}.get(v)
+            elif k in ("type", "scope", "stopped_in"):
+                d[k] = v if (v or k != "stopped_in") else None
+            else:
+                d[k] = _num(v)
+        for k in FLAT_COLUMNS_13[len(FLAT_COLUMNS_11):]:
+            d.setdefault(k, None)                  # 1.1/1.2 export: new columns absent -> None
         rows.append(d)
     return cols, rows
 

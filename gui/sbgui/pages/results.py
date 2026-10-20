@@ -1,13 +1,16 @@
 """Ergebnisse: one sb-result/1 in detail. Contract 1.2 (M2): cpu score per workload + threads, memory GB/s per mode
 (read/write/copy, NT) + instruction set, latency in ns, NUMA placement (numa_node -> mem_node) and RAM per node with
-its source (meta.numa_nodes[].ram_method). Storage tests as a compact summary table."""
+its source (meta.numa_nodes[].ram_method). Storage tests as a compact summary table.
+Contract 1.3: partial/stopped_in per test (null summary values when stopped before measure), core score reference
+(meta.cpu_score, summary.score_reference), time series at tick_ms."""
 import json, os
 import numpy as np, pyqtgraph as pg
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QComboBox
-from ..widgets import Card, label, chip, table, add_row, plot, fmt_num, Responsive
+from ..widgets import Card, label, chip, table, add_row, plot, fmt_num, Responsive, WrapLabel
 from ..model import (check_schema, host_label, human_bytes, numa_cpus, storage_tests, test_label, summary_metric, fmt_metric,
-                     compute_details, numa_placement, RAM_METHOD_TXT, METRIC_TXT, short_size)
+                     compute_details, numa_placement, RAM_METHOD_TXT, METRIC_TXT, short_size, sval, is_partial, partial_text,
+                     has_values, TYPE_TXT)
 from .. import theme as T
 
 
@@ -37,6 +40,10 @@ class ResultsPage(QWidget):
             self.box.addItem(f"{host_label(r['meta'])} · {_local(r['started_utc'])} · {os.path.basename(f)}", f)
         hdr.addWidget(self.box, 0, Qt.AlignTop)
         v.addLayout(hdr)
+        # contract 1.3: which test stopped where ("abgebrochen in Warmup · keine Messwerte")
+        self.partial_note = WrapLabel("", "muted"); self.partial_note.setObjectName("partialNote")
+        self.partial_note.setStyleSheet(f"QLabel#partialNote {{ color: {T.AMBER}; border: 1px solid {T.AMBER}; border-radius: 8px; padding: 8px 12px; }}")
+        v.addWidget(self.partial_note)
 
         # system / NUMA
         self.sys_card = Card("System", "meta · RAM pro NUMA-Knoten (Quelle: ram_method)", margins=14)
@@ -90,13 +97,25 @@ class ResultsPage(QWidget):
         r = self.results[i][1] if 0 <= i < len(self.results) else None
         for w in (self.sys_card, self.cpu_card, self.mem_card, self.th_card, self.st_card):
             w.setVisible(r is not None)
-        self.empty.setVisible(r is None)
+        self.empty.setVisible(r is None); self.partial_note.setVisible(False)
         if r is None:
             self.state.setText("kein Ergebnis"); return
         m = r["meta"]
         self.sub.setText(f"{host_label(m)} · Kern {r['kern_version']} · Lauf {r.get('run_id', '–')} · {_local(r['started_utc'])}")
         aborted = r.get("aborted")
-        self.state.setText("abgebrochen · Teilergebnis" if aborted else "vollständig"); self.state.setObjectName("chipWarn" if aborted else "chipOk")
+        parts = [t for t in r["tests"] if is_partial(t, r)]
+        failed = [t for t in parts if t.get("errors")]
+        self.state.setText("abgebrochen · Teilergebnis" if aborted else ("Laufzeitfehler · Teilergebnis" if failed else "vollständig"))
+        self.state.setObjectName("chipWarn" if aborted or parts else "chipOk")
+        if parts:
+            lines = []
+            for t in parts:
+                err = "; ".join(e.get("code", "") for e in t.get("errors") or [] if isinstance(e, dict))
+                lines.append(f"Test {t['index'] + 1} ({TYPE_TXT.get(t['type'], 'Storage')}) „{test_label(t['config'])}“: {partial_text(t, r)}"
+                             + (f" · Fehler {err}" if err else ""))
+            if aborted:
+                lines.append("Nachfolgende Tests des Jobs wurden nicht gestartet und fehlen im Ergebnis.")
+            self.partial_note.setText("\n".join(lines)); self.partial_note.setVisible(True)
         self.state.style().unpolish(self.state); self.state.style().polish(self.state)
         cpu = m["cpu"]
         self.sys_line.setText(f"{cpu['model']} · {cpu['sockets']} Sockel · {cpu['cores']}C/{cpu['threads']}T · {human_bytes(m['ram_bytes'])} RAM"
@@ -112,27 +131,38 @@ class ResultsPage(QWidget):
                 self.numa.item(self.numa.rowCount() - 1, 4).setToolTip("SRAT nicht lesbar: Aufteilung des Gesamt-RAM im Verhältnis des freien Speichers (ungenau)")
         self.numa.setFixedHeight(32 * max(1, self.numa.rowCount()) + 38)
 
+        cs = m.get("cpu_score") or {}
+        self.cpu_card.subtitle_label.setText(
+            f"Score = ops/s ÷ Referenz × {cs.get('points', 1000):g} (Werte vom Kern; Referenz: {cs['reference_system']})" if cs.get("reference_system")
+            else "Score = ops/s ÷ Referenz-Thread × 1000 (höher = besser)")
+        self.cpu_card.subtitle_label.setToolTip(cs.get("formula", ""))
         cpu_t = [t for t in r["tests"] if t["type"] == "cpu"]
         mem_t = [t for t in r["tests"] if t["type"] == "memory"]
         self.cpu_card.setVisible(bool(cpu_t)); self.mem_card.setVisible(bool(mem_t)); self.th_card.setVisible(bool(cpu_t or mem_t))
         self.cpu_tab.setRowCount(0)
         for t in cpu_t:
-            s = t["summary"]
-            add_row(self.cpu_tab, [test_label(t["config"]), s["workload"], s["threads"], numa_placement(t) or "alle",
-                                   fmt_metric("ops_per_s", s["ops_per_s"]), fmt_metric("score", s["score"])], {5: T.ACCENT})
+            s = t.get("summary") or {}
+            r_ = add_row(self.cpu_tab, [self._name(t, r), s.get("workload", t["config"].get("workload", "–")), s.get("threads", "–"),
+                                        numa_placement(t) or "alle", fmt_metric("ops_per_s", s.get("ops_per_s")), fmt_metric("score", s.get("score"))],
+                         {5: T.ACCENT, 0: T.AMBER if is_partial(t, r) else None})
+            self._tip(self.cpu_tab, r_, t, r)
+            if s.get("score_reference"):
+                self.cpu_tab.item(r_, 5).setToolTip(f"Referenz {fmt_metric('ops_per_s', s['score_reference'])} ops/s (1 Thread, {s.get('workload')})")
         self._fit(self.cpu_tab)
-        self._bars(self.p_cpu, [test_label(t["config"]) for t in cpu_t], [t["summary"]["score"] for t in cpu_t], T.ACCENT, "Score")
+        self._bars(self.p_cpu, [test_label(t["config"]) for t in cpu_t], [sval(t, "summary", "score") for t in cpu_t], T.ACCENT, "Score")
         self.mem_tab.setRowCount(0)
         for t in mem_t:
-            s = t["summary"]; bw = s.get("mode") == "bandwidth"
+            s = t.get("summary") or {}; bw = s.get("mode", t["config"].get("mode")) == "bandwidth"
             mode = (s.get("op", "read") + (" NT" if s.get("nontemporal") else "")) if bw else "Latenz"
-            add_row(self.mem_tab, [test_label(t["config"]), mode, s.get("simd", "–") if bw else "–", s["threads"],
-                                   short_size(s["buffer_size_bytes"]), numa_placement(t) or "lokal",
-                                   fmt_metric("gbps", s.get("gbps")) if bw else "–", fmt_metric("latency_ns", s.get("latency_ns")) if not bw else "–"],
-                    {6: T.VIOLET, 7: T.TEAL, 5: T.AMBER if "remote" in (numa_placement(t) or "") else None})
+            r_ = add_row(self.mem_tab, [self._name(t, r), mode, s.get("simd", "–") if bw else "–", s.get("threads", "–"),
+                                        short_size(s["buffer_size_bytes"]) if s.get("buffer_size_bytes") else "–", numa_placement(t) or "lokal",
+                                        fmt_metric("gbps", s.get("gbps")) if bw else "–", fmt_metric("latency_ns", s.get("latency_ns")) if not bw else "–"],
+                         {6: T.VIOLET, 7: T.TEAL, 5: T.AMBER if "remote" in (numa_placement(t) or "") else None,
+                          0: T.AMBER if is_partial(t, r) else None})
+            self._tip(self.mem_tab, r_, t, r)
         self._fit(self.mem_tab)
-        bwt = [t for t in mem_t if t["summary"].get("mode") == "bandwidth"]
-        self._bars(self.p_mem, [test_label(t["config"]) for t in bwt], [t["summary"].get("gbps", 0) for t in bwt], T.VIOLET, "GB/s")
+        bwt = [t for t in mem_t if sval(t, "summary", "mode") == "bandwidth"]
+        self._bars(self.p_mem, [test_label(t["config"]) for t in bwt], [sval(t, "summary", "gbps") for t in bwt], T.VIOLET, "GB/s")
         self.tsel.blockSignals(True); self.tsel.clear()
         for t in cpu_t + mem_t:
             self.tsel.addItem(test_label(t["config"]), t["index"])
@@ -141,10 +171,22 @@ class ResultsPage(QWidget):
         st = storage_tests(r)
         self.st_card.setVisible(bool(st)); self.st_tab.setRowCount(0)
         for t in st:
-            s = t["summary"]; l = s["lat_us"]
-            add_row(self.st_tab, [test_label(t["config"]), fmt_num(s["iops"]), f"{s['mbps']:,.0f}".replace(",", " "), f"{l['mean']:,.0f}",
-                                  f"{l['p99']:,.0f}".replace(",", " "), s["errors"]])
+            s = t.get("summary") or {}; l = s.get("lat_us") or {}
+            num = lambda v: "–" if v is None else f"{v:,.0f}".replace(",", " ")   # noqa: E731  (1.3: null = not measured)
+            r_ = add_row(self.st_tab, [self._name(t, r), fmt_num(s.get("iops")), num(s.get("mbps")), num(l.get("mean")), num(l.get("p99")),
+                                       "–" if s.get("errors") is None else s["errors"]], {0: T.AMBER if is_partial(t, r) else None})
+            self._tip(self.st_tab, r_, t, r)
         self._fit(self.st_tab)
+
+    @staticmethod
+    def _name(t, res):
+        return test_label(t["config"]) + (" †" if is_partial(t, res) else "")
+
+    @staticmethod
+    def _tip(tab, row, t, res):
+        p = partial_text(t, res)
+        if p:
+            tab.item(row, 0).setToolTip(p)
 
     @staticmethod
     def _fit(t):
@@ -153,6 +195,7 @@ class ResultsPage(QWidget):
     @staticmethod
     def _bars(p, names, vals, col, unit):
         p.clear()
+        vals = [v if v is not None else 0 for v in vals]      # 1.3: null (stopped before measure) -> no bar
         if not vals:
             return
         x = np.arange(len(vals))
@@ -191,6 +234,9 @@ class ResultsPage(QWidget):
                 facts.append(f"{remote} Thread(s) remote")
             facts += compute_details(t)[:1]
             self.th_info.setText("  ·  ".join(facts))
+        elif not has_values(t):
+            self.th_info.setText(f"Keine Messwerte: {partial_text(t, r)}" + (f" · {t['summary']['threads']} Thread(s) vorgesehen"
+                                                                              if sval(t, "summary", "threads") else ""))
         else:
             self.th_info.setText("keine per_worker-Werte")
         ts = [p for p in t.get("timeseries", []) if key in p]
@@ -198,7 +244,8 @@ class ResultsPage(QWidget):
             x = [p["t"] for p in ts]; y = [p[key] for p in ts]
             self.p_ts.plot(x, y, pen=pg.mkPen(T.VIOLET, width=2), symbol="o", symbolSize=5, symbolBrush=T.VIOLET, symbolPen=None)
             self.p_ts.setYRange(0, max(y) * 1.15 or 1, padding=0)
-            self.p_ts.getPlotItem().setTitle(f"<span style='color:{T.MUTED};font-size:9pt'>{name} über die Zeit ({unit}, 1 s)</span>")
+            iv = f"{r['tick_ms'] / 1000:g} s".replace(".", ",") if r.get("tick_ms") else "1 s"      # 1.3: timeseries at tick_ms
+            self.p_ts.getPlotItem().setTitle(f"<span style='color:{T.MUTED};font-size:9pt'>{name} über die Zeit ({unit}, je {iv})</span>")
 
 
 def _short(name, n=14):

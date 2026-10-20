@@ -1,6 +1,6 @@
 # sbench-gui (Prototyp M2)
 
-PySide6/pyqtgraph-GUI für `sbench.exe`, steuert ausschließlich die CLI (QProcess + JSON Lines, Vertrag 1.2 in [`../schema`](../schema) und [`../docs/cli.md`](../docs/cli.md)).
+PySide6/pyqtgraph-GUI für `sbench.exe`, steuert ausschließlich die CLI (QProcess + JSON Lines, Vertrag 1.3 in [`../schema`](../schema) und [`../docs/cli.md`](../docs/cli.md)).
 Plan: [`../docs/GUI_PLAN.md`](../docs/GUI_PLAN.md) · Kompatibilität: [`../docs/kompatibilitaet.md`](../docs/kompatibilitaet.md)
 
 > **GUI erfordert Desktop Experience, auf Server Core die CLI nutzen.**
@@ -12,7 +12,7 @@ Plan: [`../docs/GUI_PLAN.md`](../docs/GUI_PLAN.md) · Kompatibilität: [`../docs
 3. Vor **jedem** Start von sbench (auch vor `runas`/UAC) wird der SHA-256 gegen den beim Build eingebetteten Wert (`sbgui/_build_info.py`) geprüft. Abweichung → Start verweigert, klare Fehlermeldung, Datei wird aus der eingebetteten Kopie wiederhergestellt. Unter Windows hält die GUI die geprüfte Datei mit `FILE_SHARE_READ` offen (kein Austausch zwischen Prüfung und Start).
 4. Jeder sbench-Aufruf erhält `--data-dir <data_dir>` (runas erbt keine Umgebung, `SBENCH_DATA_DIR` wird dafür nicht genutzt).
 
-Quell-Läufe (Entwicklung/Tests): `SBENCH_EXE` (optional `SBENCH_EXE_SHA256`), sonst der Mock `mock_sbench.py` (Vertrag 1.2 inkl. CPU/RAM-Tests + `--data-dir`, `version --json`; `SBENCH_MOCK_CONTRACT=1.1` = altes M1-Verhalten). Eine eingefrorene EXE nutzt nie den Mock.
+Quell-Läufe (Entwicklung/Tests): `SBENCH_EXE` (optional `SBENCH_EXE_SHA256`), sonst der Mock `mock_sbench.py` (Vertrag 1.3 inkl. CPU/RAM-Tests + `--data-dir`, `version --json`; `SBENCH_MOCK_CONTRACT=1.2` bzw. `1.1` = älteres Verhalten; `SBENCH_MOCK_STOP_AT=<test>:<phase>[:<n>]` stoppt deterministisch, `SBENCH_MOCK_LAG=1` simuliert Storage-Worker ohne Ack). Eine eingefrorene EXE nutzt nie den Mock.
 Versionen (GUI + Kern) stehen im Fenstertitel und unten in der Seitenleiste (Tooltip: Commit, Kern-SHA-256).
 
 Self-Test: `sbench-gui.exe --self-test --report st.json` (ohne Admin) prüft zusätzlich zum GUI-Rendering den Kern: `version --json` (SHA-256 = eingebetteter Wert), `info --json` gegen sb-info/1, 3-s-Storage-Job (4 KiB random read, Datei in `%TEMP%`) mit Exit 0, `io_count > 0`, sb-result/1 und Laden in der GUI, `bundle --all` gegen sb-bundle/1. `--no-core` überspringt den Kern-Teil. Bericht als JSON mit lesbarer `summary`.
@@ -41,8 +41,14 @@ Mock: `SBENCH_MOCK_ELEVATED=1` simuliert Administratorrechte, `SBENCH_MOCK_SPEED
 
 **CPU/RAM (M2, Vertrag 1.2):**
 - Testprofil: Test-Auswahl mit „+ CPU“/„+ RAM“, Formular nach `test_cpu`/`test_memory` (Workload, Modus, Operation, Threads 0 = alle, Puffer/Thread, Befehlssatz, Non-temporal, NUMA-Knoten für Threads und Puffer) und Vorlagen; Profile `profiles/cpu-ram.json`, `profiles/numa-lokal-remote.json`.
-- Live: Kurve des aktuellen Tests (ops/s, GB/s oder ns), CPU-Last (System/sbench), Balken + Tabelle pro Thread aus `tick.workers[]` (keine 128 Linien), Fortschrittsbalken „Puffer wird angelegt“ ab 64 MiB. Score live = Schätzung aus den Referenzwerten in `docs/core.md`.
+- Live: Kurve des aktuellen Tests (ops/s, GB/s oder ns), CPU-Last (System/sbench), Balken + Tabelle pro Thread aus `tick.workers[]` (keine 128 Linien), Fortschrittsbalken „Puffer wird angelegt“ ab 64 MiB. Score live = `tick.score` vom Kern (1.3); nur bei Kernen < 1.3 eine als „Schätzung“ markierte Näherung aus `meta.cpu_score`/`docs/core.md`.
 - Ergebnisse (neue Seite): CPU-Score je Workload/Threads, RAM GB/s je Operation/NT/SIMD und Latenz in ns, NUMA-Platzierung (`numa_node` → `mem_node`), RAM-Quelle pro Knoten (`ram_method`), `per_worker` und Zeitreihe. Abgebrochene Läufe = Teilergebnis.
-- Vergleich: CPU/RAM-Tests Host vs. VM als % des Basislaufs (Latenz invertiert) plus Delta-Tabelle. Flat-CSV (`model.read_flat_csv`) liest 14 (1.1) und 18 Spalten (1.2).
+- Vergleich: CPU/RAM-Tests Host vs. VM als % des Basislaufs (Latenz invertiert) plus Delta-Tabelle. Flat-CSV (`model.read_flat_csv`) liest 14 (1.1), 18 (1.2) und 20 Spalten (1.3).
+
+**Vertrag 1.3:**
+- `tick.metric` bestimmt die Kennzahl (Schlüssel-Raten nur noch als Rückfall); `phase.threads`/`cpus[]` liefern Thread-Zahl und Beschriftung „CPU · Knoten“, SMT-Geschwister werden live violett markiert.
+- Teilergebnisse: `partial`/`stopped_in` → „abgebrochen in Vorbereitung/Warmup/Messung“, „keine Messwerte“; alle Verbraucher (Ergebnisse, Vergleich, Bericht, Guide, CSV, Live) sind null-sicher (`model.sval`). Demo: `demo/result-m2-partial.json`.
+- Storage-Worker ohne Ack (0 in einem Tick) werden geglättet (Ø zweier Ticks) und mit ↻ markiert, nicht als Fehler.
+- Score und Referenz vom Kern (`tick.score`, `summary.score_reference`, `meta.cpu_score`); Zeitreihen je Tick (`tick_ms`); Export-Hinweis: das Iometer-CSV enthält keine CPU/RAM-Tests.
 
 Windows-only und noch nicht auf echtem Windows getestet: `sbgui/pipe_win.py` (Named Pipe mit DACL, runas).

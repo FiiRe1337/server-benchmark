@@ -5,11 +5,11 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QP
 from ..widgets import Card, Kpi, label, chip, table, add_row, plot, fmt_num, short_target, Responsive
 from ..buffers import RingBuffer, minmax_downsample
 from ..model import (test_label, human_bytes, short_size, size_bytes, tick_metric, expected_metric, fmt_metric, estimated_score,
-                     METRIC_TXT, CPU_REFERENCE)
+                     METRIC_TXT, score_reference)
 from .. import theme as T
 
 FIELDS = ("t", "iops", "mbps", "lat_mean", "lat_p50", "lat_p99", "lat_max", "cpu", "r_iops", "w_iops", "r_mbps", "w_mbps", "proc_cpu",
-          "test", "ops_per_s", "gbps", "latency_ns")
+          "test", "ops_per_s", "gbps", "latency_ns", "score")
 COL = {k: i for i, k in enumerate(FIELDS)}
 NAN = float("nan")
 PREP_BAR_MIN = 64 << 20     # memory preparing: show the "Puffer wird angelegt" bar from this total size on (small buffers are instant)
@@ -111,7 +111,8 @@ class LiveView(QWidget):
         wc = Card("Worker", "letzter Tick · Worker i → Ziel i mod n", margins=14); wc.setMinimumHeight(170); self.wc = wc
         self.wtable = table(["#", "Ziel", "IOPS", "MB/s", "Ø µs", "p99 µs"], stretch_col=1, mono_cols=(2, 3, 4, 5))
         wc.add(self.wtable, 1)
-        self.ttable = table(["Thread", "Wert", "Anteil", "Δ zum Ø"], stretch_col=1, mono_cols=(1, 2, 3)); self.ttable.hide()
+        # contract 1.3: phase.cpus -> logical processor / NUMA node / SMT sibling per thread
+        self.ttable = table(["Thread", "CPU · Knoten", "Wert", "Anteil", "Δ zum Ø"], stretch_col=1, mono_cols=(2, 3, 4)); self.ttable.hide()
         wc.add(self.ttable, 1); side.addWidget(wc, 5)
         lc = Card("Ereignisse", "JSON-Lines von sbench", margins=14); lc.setMinimumHeight(110)
         self.log = QPlainTextEdit(); self.log.setReadOnly(True); self.log.setMaximumBlockCount(500); lc.add(self.log, 1)
@@ -119,7 +120,7 @@ class LiveView(QWidget):
         v.addWidget(Responsive([(chart_w, 1, None), (side_w, 0, 380)], breakpoint=1080), 1)
 
         self.timer = QTimer(self); self.timer.timeout.connect(self.refresh)  # 10 Hz redraw, decoupled from tick rate
-        self.mode = None
+        self.mode = None; self.cpu_score = None    # meta.cpu_score from sbench info (contract 1.3), set by MainWindow
         self._reset()
 
     # ------------------------------------------------------------------
@@ -128,6 +129,8 @@ class LiveView(QWidget):
         self.total = 0.0; self.last_workers = []; self.targets = []; self.test_idx = 0; self.test_names = []; self.jobtests = []
         self.skipped = []  # job indices the core skipped (E_NOT_IMPLEMENTED, core M1: absent from result tests[])
         self.test_offset = {}; self.waiting = True; self.prep_bar.hide()
+        self.test_threads = {}; self.test_cpus = {}     # contract 1.3: first phase event per test (threads, cpus[])
+        self.prev_workers = {}; self.lagging = set(); self.smoothed = None     # storage: worker that missed the 250 ms ack shows 0, recounted next tick
         for p, ln in getattr(self, "bounds", []):
             p.removeItem(ln)
         self.bounds = []
@@ -162,7 +165,7 @@ class LiveView(QWidget):
                                   f"{len(t['access_specs'])} Access Specs  ·  {t.get('cache', 'unbuffered')}  ·  "
                                   f"{len(self.targets)} Ziele")
         elif t["type"] in ("cpu", "memory"):
-            self.subtitle.setText("  ·  ".join([self.test_names[idx]] + _compute_facts(t)))
+            self.subtitle.setText("  ·  ".join([self.test_names[idx]] + _compute_facts(t, self.test_threads.get(idx))))
         else:
             self.subtitle.setText(self.test_names[idx])
         self._apply_mode(expected_metric(t) or ("storage" if t["type"] == "storage" else self.mode))
@@ -201,7 +204,7 @@ class LiveView(QWidget):
         name, unit = METRIC_TXT[mode]
         self.k_iops.set_title(name, unit)
         if mode == "ops_per_s":
-            self.k_mbps.set_title("Score (Schätzung)", ""); self.k_lat.set_title("Threads", ""); self.k_p99.set_title("Streuung Threads", "%")
+            self.k_mbps.set_title("Score", ""); self.k_lat.set_title("Threads", ""); self.k_p99.set_title("Streuung Threads", "%")
             self.c_iops.title_label.setText("Operationen pro Sekunde"); self.c_mb.subtitle_label.setText("% aller logischen Prozessoren")
         elif mode == "gbps":
             self.k_mbps.set_title("Pro Thread Ø", "GB/s"); self.k_lat.set_title("Threads", ""); self.k_p99.set_title("Streuung Threads", "%")
@@ -246,13 +249,17 @@ class LiveView(QWidget):
             if k == "iops":
                 self.log.appendPlainText(f'tick t={ev["t"]:>4.0f}  iops={ev["iops"]}  p99={(ev.get("lat_us") or {}).get("p99")}')
             else:
-                self.log.appendPlainText(f'tick t={ev["t"]:>4.0f}  {k}={ev.get(k)}  cpu={ev.get("cpu_pct")}  threads={len(ev.get("workers") or []) or 1}')
+                self.log.appendPlainText(f'tick t={ev["t"]:>4.0f}  {k}={ev.get(k)}  cpu={ev.get("cpu_pct")}  w={len(ev.get("workers") or []) or 1}')
         if e == "start":
             self.run_chip.setText(f"läuft · {ev.get('run_id')}"); self.run_chip.setObjectName("chipAccent")
             self.run_chip.style().polish(self.run_chip)
         elif e == "phase":
             self._set_phase(ev["name"]); self.phase_total = ev.get("duration_s")
-            if ev["test"] != self.test_idx:
+            if "threads" in ev:          # contract 1.3: resolved thread/worker count (also for threads: 0) + bound CPUs
+                self.test_threads[ev["test"]] = ev["threads"]
+                if ev.get("cpus"):
+                    self.test_cpus[ev["test"]] = {c["id"]: c for c in ev["cpus"]}
+            if ev["test"] != self.test_idx or "threads" in ev:
                 self.test_idx = ev["test"]; self._describe(self.test_idx)
             if ev["name"] != "preparing":
                 self.prep_bar.hide()
@@ -268,6 +275,9 @@ class LiveView(QWidget):
                     self.last_workers = []; self.ttable.setRowCount(0)
                     for k in (self.k_iops, self.k_mbps, self.k_lat, self.k_p99, self.k_cpu):
                         k.set("–", " ")
+                    n = self.test_threads.get(ev["test"])
+                    if n and self.mode != "latency_ns":
+                        self.k_lat.set(str(n), self._cpu_summary(ev["test"]) or " ")
                 self.hint.setText("Messwerte erscheinen ab der Messphase (Vorbereitung → Warmup → Messung)"); self.hint.setPos(tot / 2, 0.5)
             if ev["name"] in ("preparing", "warmup", "cleanup"):
                 self.progress.setValue(0); self.time_lbl.setText({"preparing": "Vorbereitung …", "warmup": "Warmup …", "cleanup": "Cleanup …"}[ev["name"]])
@@ -277,6 +287,9 @@ class LiveView(QWidget):
             if ev["unit"] == "bytes" and (cfg.get("type") == "memory" or (not cfg and self.mode in ("gbps", "latency_ns"))):
                 # contract 1.2: memory buffers (threads x buffer_size) are allocated + written once (first touch)
                 done_txt = f"{human_bytes(ev['done'])} / {human_bytes(ev['total'])}"
+                n = self.test_threads.get(ev.get("test"))   # 1.3: total = threads x actual buffer size (also copy)
+                if n and n > 1:
+                    done_txt += f"  ({n} Threads × {human_bytes(ev['total'] // n, 'MiB' if ev['total'] // n < 1 << 30 else 'GiB')})"
                 self.time_lbl.setText(f"Puffer {done_txt}")
                 if ev["total"] >= PREP_BAR_MIN:
                     self.prep_bar.setValue(int(frac * 1000)); self.prep_bar.setFormat(f"Puffer wird angelegt  ·  {done_txt}  ·  {frac * 100:.0f} %")
@@ -304,10 +317,18 @@ class LiveView(QWidget):
             self.buf.append([self.offset + t, ev.get("iops", 0), ev.get("mbps", 0), l.get("mean", 0), l.get("p50", 0),
                              l.get("p99", 0), l.get("max", 0), ev.get("cpu_pct", 0),
                              ev.get("read_iops", NAN), ev.get("write_iops", NAN), ev.get("read_mbps", NAN), ev.get("write_mbps", NAN),
-                             ev.get("proc_cpu_pct", NAN), ev["test"], ev.get("ops_per_s", NAN), ev.get("gbps", NAN), ev.get("latency_ns", NAN)])
+                             ev.get("proc_cpu_pct", NAN), ev["test"], ev.get("ops_per_s", NAN), ev.get("gbps", NAN), ev.get("latency_ns", NAN),
+                             ev.get("score", NAN)])
             if "read_iops" in ev and not self.has_rw:
                 self.has_rw = True; self.rw.setEnabled(True)
-            self.last_workers = ev.get("workers") or []
+            ws = ev.get("workers") or []
+            if mk == "iops":
+                # contract 1.3: a worker that did not ack the interval switch within 250 ms is 0 in this tick and its I/O
+                # counts towards the next tick -> not an error; the table shows the mean of the last two ticks and marks it
+                self.lagging = {w["id"] for w in ws if not w.get("iops") and (self.prev_workers.get(w["id"]) or {}).get("iops")}
+                self.smoothed = [self._smooth(w) for w in ws]
+                self.prev_workers = {w["id"]: w for w in ws}
+            self.last_workers = ws
         elif e == "error" and ev.get("code") == "E_NOT_IMPLEMENTED":
             ti = ev.get("test")
             if isinstance(ti, int) and ti not in self.skipped:
@@ -371,13 +392,41 @@ class LiveView(QWidget):
             self.wtable.setRowCount(0)
             for w in self.last_workers:
                 add_row(self.wtable, [w["id"], "", "", "", "", ""])
-        for i, w in enumerate(self.last_workers):
+        sm = getattr(self, "smoothed", None) or self.last_workers
+        for i, w in enumerate(sm):
             tgt = short_target(self.targets[w["id"] % len(self.targets)]["path"]) if self.targets else "–"  # worker i -> target i mod n
-            wl = w.get("lat_us") or {}  # optional per worker (1.1)
-            for c, val in ((1, tgt), (2, fmt_num(w.get("iops"))), (3, f"{w.get('mbps', 0):,.0f}".replace(",", " ")),
+            wl = w.get("lat_us") or {}  # optional per worker; 1.3: absent in intervals without completed I/O
+            lag = w["id"] in self.lagging
+            for c, val in ((0, f"{w['id']}{' ↻' if lag else ''}"), (1, tgt), (2, fmt_num(w.get("iops"))),
+                           (3, f"{w.get('mbps', 0):,.0f}".replace(",", " ")),
                            (4, f"{wl['mean']:.0f}" if "mean" in wl else "–"), (5, f"{wl['p99']:,.0f}".replace(",", " ") if "p99" in wl else "–")):
-                self.wtable.item(i, c).setText(str(val))
+                it = self.wtable.item(i, c); it.setText(str(val))
+                if c == 0:
+                    it.setForeground(QColor(T.DIM if lag else T.TEXT))
+                    it.setToolTip("Worker hat den Tick-Wechsel nicht innerhalb von 250 ms quittiert (z. B. lange I/O): 0 in diesem Tick, "
+                                  "sein Intervall zählt zum nächsten Tick. Angezeigt: Mittel der letzten zwei Ticks." if lag else "")
 
+
+    def _smooth(self, w):
+        """Storage worker row = mean of this and the previous tick (a late ack moves I/O from one tick to the next)."""
+        p = self.prev_workers.get(w["id"])
+        if not p:
+            return w
+        out = dict(w)
+        for k in ("iops", "mbps"):
+            if isinstance(w.get(k), (int, float)) and isinstance(p.get(k), (int, float)):
+                out[k] = (w[k] + p[k]) / 2
+        if "lat_us" not in w and p.get("lat_us"):
+            out["lat_us"] = p["lat_us"]        # interval without completed I/O: keep the last latency
+        return out
+
+    def _cpu_summary(self, test):
+        """'CPUs 0–63 · Knoten 0, 1 · 64 SMT' from phase.cpus (contract 1.3)."""
+        cpus = list((self.test_cpus.get(test) or {}).values())
+        if not cpus:
+            return ""
+        nodes = sorted({c["numa_node"] for c in cpus}); smt = sum(1 for c in cpus if c.get("smt_sibling_of") is not None)
+        return f"Knoten {', '.join(map(str, nodes))}" + (f" · {smt} SMT" if smt else " · ohne SMT")
 
     def _refresh_compute(self, a):
         """cpu/memory: current test only (values of different workloads differ by orders of magnitude)."""
@@ -406,10 +455,20 @@ class LiveView(QWidget):
         vals = [w.get(key) for w in self.last_workers if isinstance(w.get(key), (int, float))]
         if key == "ops_per_s":
             wl = cfg.get("workload", "mixed") if cfg else None
-            sc = estimated_score(wl, now) if wl else None
-            self.k_mbps.set(fmt_metric("score", sc) if sc is not None else "–",
-                            f"1000 = 1 Ref.-Thread ({fmt_metric('ops_per_s', CPU_REFERENCE[wl])} ops/s {wl})"
-                            if sc is not None else "Workload unbekannt (Job fehlt)")
+            sco = cur[:, COL["score"]]; sco = sco[np.isfinite(sco)]
+            meta = {"cpu_score": self.cpu_score} if self.cpu_score else None
+            ref, from_core = score_reference(wl, meta) if wl else (None, False)
+            if len(sco):                 # contract 1.3: tick.score from the core
+                self.k_mbps.set_title("Score", "")
+                self.k_mbps.set(fmt_metric("score", float(sco[-4:].mean())),
+                                f"vom Kern · Ø Test {fmt_metric('score', float(sco.mean()))}"
+                                + (f" · Ref. {fmt_metric('ops_per_s', ref)} ops/s" if ref and from_core else ""))
+            else:                        # cores < 1.3: estimate (labelled), reference from info meta.cpu_score if known
+                sc = estimated_score(wl, now, meta) if wl else None
+                self.k_mbps.set_title("Score (Schätzung)", "")
+                self.k_mbps.set(fmt_metric("score", sc) if sc is not None else "–",
+                                f"Kern < 1.3 · 1000 = 1 Ref.-Thread ({fmt_metric('ops_per_s', ref)} ops/s {wl})"
+                                if sc is not None else "Workload unbekannt (Job fehlt)")
         elif key == "gbps":
             self.k_mbps.set(fmt_metric("gbps", now / max(1, len(vals))), "Summe ÷ Threads" + (" · copy zählt Lesen + Schreiben" if cfg.get("op") == "copy" else ""))
         else:
@@ -418,8 +477,9 @@ class LiveView(QWidget):
             bs = cfg.get("buffer_size")
             self.k_lat.set(_iec(bs) if bs else "–", "≫ L3 = RAM-Latenz, klein = Cache" if bs else " ")
         if key != "latency_ns":
-            n = len(vals)
-            self.k_lat.set(str(n or "–"), f"Thread min {fmt_metric(key, min(vals))}  ·  max {fmt_metric(key, max(vals))}" if vals else " ")
+            n = len(vals) or self.test_threads.get(self.cur_test, 0)
+            self.k_lat.set(str(n or "–"), f"Thread min {fmt_metric(key, min(vals))}  ·  max {fmt_metric(key, max(vals))}" if vals
+                           else (self._cpu_summary(self.cur_test) or " "))
             if vals:
                 m = sum(vals) / n; spread = (max(vals) - min(vals)) / m * 100 if m else 0
                 slow = min(range(n), key=lambda i: vals[i])
@@ -434,21 +494,30 @@ class LiveView(QWidget):
         if vals:
             m = sum(vals) / len(vals); med = float(np.median(vals))
             ids = [w.get("id", i) for i, w in enumerate(self.last_workers) if isinstance(w.get(key), (int, float))]
-            brushes = [pg.mkBrush(T.AMBER if v < 0.9 * med else T.ACCENT) for v in vals]
+            cpus = self.test_cpus.get(self.cur_test) or {}
+            smt = {i for i in ids if (cpus.get(i) or {}).get("smt_sibling_of") is not None}   # 1.3: SMT sibling of an earlier thread
+            brushes = [pg.mkBrush(T.AMBER if v < 0.9 * med else (T.VIOLET if i in smt else T.ACCENT)) for i, v in zip(ids, vals)]
+            self.c_lat.subtitle_label.setText(f"{METRIC_TXT[key][1]} · letzter Tick · gestrichelt = Ø"
+                                              + (" · violett = SMT-Geschwister" if smt else ""))
             self.thread_bars.setOpts(x=ids, height=vals, width=0.8 if len(vals) < 48 else 1.0, brushes=brushes)
             self.thread_avg.setValue(m); self.thread_avg.setVisible(True); self.bar_hint.setText("")
             self.p_lat.setXRange(-0.7, max(ids) + 0.7, padding=0); self.p_lat.setYRange(0, max(vals) * 1.15, padding=0)
             if self.ttable.rowCount() != len(vals):
                 self.ttable.setRowCount(0)
                 for i in ids:
-                    add_row(self.ttable, [f"#{i}", "", "", ""])
+                    c = cpus.get(i)
+                    r_ = add_row(self.ttable, [f"#{i}", _cpu_txt(c), "", "", ""], {1: T.VIOLET if i in smt else T.MUTED})
+                    if c:
+                        self.ttable.item(r_, 1).setToolTip(
+                            f"logischer Prozessor {c['cpu']} (Gruppe {c['group']}, Nr. {c['number']}) · NUMA-Knoten {c['numa_node']} · Kern {c['core']}"
+                            + (f" · SMT-Geschwister von CPU {c['smt_sibling_of']}" if c.get("smt_sibling_of") is not None else ""))
             tot = sum(vals)
             for r, v in enumerate(vals):
-                self.ttable.item(r, 1).setText(fmt_metric(key, v))
-                self.ttable.item(r, 2).setText(f"{v / tot * 100:.1f} %".replace(".", ",") if tot else "–")
+                self.ttable.item(r, 2).setText(fmt_metric(key, v))
+                self.ttable.item(r, 3).setText(f"{v / tot * 100:.1f} %".replace(".", ",") if tot else "–")
                 d = (v - m) / m * 100 if m else 0
-                self.ttable.item(r, 3).setText(f"{d:+.1f} %".replace(".", ","))
-                self.ttable.item(r, 3).setForeground(QColor(T.AMBER if v < 0.9 * med else T.MUTED))
+                self.ttable.item(r, 4).setText(f"{d:+.1f} %".replace(".", ","))
+                self.ttable.item(r, 4).setForeground(QColor(T.AMBER if v < 0.9 * med else T.MUTED))
         else:
             self.thread_bars.setOpts(x=[], height=[]); self.thread_avg.setVisible(False)
             self.p_lat.setXRange(0, 1, padding=0); self.p_lat.setYRange(0, 1, padding=0); self.bar_hint.setPos(0.5, 0.5)
@@ -457,18 +526,29 @@ class LiveView(QWidget):
                 self.ttable.setRowCount(0)
 
 
-def _compute_facts(t):
-    """Live subtitle facts for cpu/memory jobs (contract 1.2 job fields)."""
+def _cpu_txt(c):
+    """Thread table cell: logical processor, NUMA node, SMT marker (contract 1.3 phase.cpus[])."""
+    if not c:
+        return "–"
+    return f"{c['cpu']} · N{c['numa_node']}" + (" · SMT" if c.get("smt_sibling_of") is not None else "")
+
+
+def _compute_facts(t, resolved=None):
+    """Live subtitle facts for cpu/memory jobs (contract 1.2 job fields; 1.3: resolved thread count from phase.threads)."""
     th = t.get("threads", 0)
+    def thr():
+        if not th:
+            return f"alle Threads ({resolved})" if resolved else "alle Threads"
+        return f"{th} Thread{'s' if th != 1 else ''}"
     if t["type"] == "cpu":
-        out = [f"Workload {t.get('workload', 'mixed')}", "alle Threads" if not th else f"{th} Thread{'s' if th != 1 else ''}"]
+        out = [f"Workload {t.get('workload', 'mixed')}", thr()]
     else:
         bs = _iec(t["buffer_size"])
         if t["mode"] == "latency":
             out = ["Latenz (Pointer Chasing, 1 Thread)", f"Puffer {bs}"]
         else:
             out = [f"Bandbreite {t.get('op', 'read')}" + (" NT" if t.get("nontemporal") else ""),
-                   "alle Threads" if not th else f"{th} Thread{'s' if th != 1 else ''}", f"{bs}/Thread", f"SIMD {t.get('simd', 'auto')}"]
+                   thr(), f"{bs}/Thread", f"SIMD {t.get('simd', 'auto')}"]
         if "mem_node" in t:
             out.append(f"Knoten {t.get('numa_node', '*')} → RAM {t['mem_node']}")
     if "numa_node" in t and not (t["type"] == "memory" and "mem_node" in t):
@@ -488,5 +568,8 @@ def _mmss(s):
 
 
 def _short(ev):
+    """One log line per event; 1.3 phase events carry cpus[] with one entry per thread (128+) -> shown as a count."""
     import json
-    return json.dumps(ev, separators=(",", ":"))[:120]
+    if isinstance(ev.get("cpus"), list):
+        ev = {k: (f"[{len(v)} CPUs]" if k == "cpus" else v) for k, v in ev.items()}
+    return json.dumps(ev, separators=(",", ":"), ensure_ascii=False)[:120]

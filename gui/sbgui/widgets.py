@@ -1,5 +1,5 @@
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QColor, QFont, QPainter
 from PySide6.QtWidgets import (QFrame, QLabel, QVBoxLayout, QHBoxLayout, QWidget, QTableWidget, QTableWidgetItem,
                                QHeaderView, QAbstractItemView, QSizePolicy)
 import pyqtgraph as pg
@@ -41,6 +41,21 @@ class Card(QFrame):
         return w
 
 
+class ElideLabel(QLabel):
+    """Single-line label that elides with "…" instead of clipping mid-glyph; text() keeps the full text (tooltip shows it)."""
+
+    def __init__(self, text="", name=None):
+        super().__init__(text)
+        if name:
+            self.setObjectName(name)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred); self.setMinimumWidth(0)
+
+    def paintEvent(self, _):
+        p = QPainter(self); p.setPen(self.palette().color(self.foregroundRole())); p.setFont(self.font())
+        r = self.contentsRect()
+        p.drawText(r, int(self.alignment()) | Qt.AlignVCenter, self.fontMetrics().elidedText(self.text(), Qt.ElideRight, r.width()))
+
+
 class Kpi(QFrame):
     def __init__(self, title, unit, color=T.ACCENT):
         super().__init__(); self.setObjectName("kpi")
@@ -51,9 +66,8 @@ class Kpi(QFrame):
         self.value = label("–", "kpiValue"); h.addWidget(self.value, 0, Qt.AlignBottom)
         self.unit = label(unit, "kpiUnit"); h.addWidget(self.unit, 0, Qt.AlignBottom); h.addStretch(1)
         v.addLayout(h)
-        self.sub = label(" ", "dim"); v.addWidget(self.sub)
-        # long sub texts (cpu/memory facts) must never widen the KPI row (1280x720 / RDP): clip instead of growing
-        self.sub.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred); self.sub.setMinimumWidth(0)
+        # long sub texts (cpu/memory facts, score reference) must never widen the KPI row (1280x720 / RDP): elide with "…"
+        self.sub = ElideLabel(" ", "dim"); v.addWidget(self.sub)
 
     def set_title(self, title, unit):
         self.title_lbl.setText(title.upper()); self.unit.setText(unit)

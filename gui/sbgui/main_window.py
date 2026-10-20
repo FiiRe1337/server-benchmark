@@ -107,6 +107,7 @@ class MainWindow(QMainWindow):
         self._set_collapsed(False)
 
         self.result_files = list(result_files)
+        self.pages["live"].cpu_score = ((info or {}).get("meta") or {}).get("cpu_score")   # contract 1.3 (sbench info)
         self.pages["profiles"].run_requested.connect(self.start_run)
         self.pages["dashboard"].quickstart.connect(self._quickstart)
         self.pages["live"].stop_requested.connect(self.stop_run)

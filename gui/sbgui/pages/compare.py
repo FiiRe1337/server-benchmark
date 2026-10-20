@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QListWidgetItem
 from ..widgets import Card, label, table, add_row, plot, fmt_num, listw, Responsive
 from .. import theme as T
 from ..model import (match_key, host_label, storage_tests, check_schema, compute_tests, summary_metric, fmt_metric, lower_is_better,
-                     compute_details)
+                     compute_details, sval, is_partial, partial_text)
 
 PCTS = ["p50", "p90", "p95", "p99", "p99_9", "p99_99"]
 PCT_TXT = ["p50", "p90", "p95", "p99", "p99.9", "p99.99"]
@@ -47,12 +47,14 @@ def compute_rows(runs):
     for k, r in enumerate(runs):
         for t in compute_tests(r):
             nm = match_key(t["config"])
-            key, val = ("score", t["summary"].get("score")) if t["type"] == "cpu" else summary_metric(t)
+            key, val = ("score", sval(t, "summary", "score")) if t["type"] == "cpu" else summary_metric(t)
             if nm not in rows:
-                names.append(nm); rows[nm] = [key, [None] * len(runs), " · ".join(compute_details(t))]
+                names.append(nm); rows[nm] = [key, [None] * len(runs), " · ".join(compute_details(t)), [""] * len(runs)]
+            rows[nm][3][k] = partial_text(t, r)      # contract 1.3: partial / stopped_in (null values -> "–")
             if rows[nm][0] == key:
                 rows[nm][1][k] = val
-    return [(nm, rows[nm][0], rows[nm][1], rows[nm][2]) for nm in names]
+    return [(nm, rows[nm][0], rows[nm][1], rows[nm][2] + "".join(f"\n{'ABC'[k]}: {p}" for k, p in enumerate(rows[nm][3]) if p))
+            for nm in names]
 
 
 def rel_delta(val, base, key):
@@ -132,8 +134,9 @@ class Compare(QWidget):
         return [f for f, _ in self.selected()]
 
     def _val(self, t):
-        s = t["summary"]; i = self.metric_box.currentIndex()
-        return [s["iops"], s["mbps"], s["lat_us"]["mean"], s["lat_us"]["p99"]][i]
+        i = self.metric_box.currentIndex()       # null-safe: 1.3 partial tests stopped before measure have null values
+        return [sval(t, "summary", "iops"), sval(t, "summary", "mbps"), sval(t, "summary", "lat_us", "mean"),
+                sval(t, "summary", "lat_us", "p99")][i]
 
     def update(self, *_):
         self._update_compute([r for _, r in self.selected() if compute_tests(r)])
@@ -148,13 +151,13 @@ class Compare(QWidget):
         if not sel:
             return
         names = list(by_name(sel[0][1]))
-        n = len(sel); w = 0.8 / n; lo = hi = 0
+        n = len(sel); w = 0.8 / n; lo = hi = 0; have_pct = False
         mname = self.metric_box.currentText()
         self.bar_card.title_label.setText(f"{mname} je Test")
         for k, (f, r) in enumerate(sel):
             col = T.SERIES[k]
             tests = by_name(r)
-            ys = [self._val(tests[nm]) if nm in tests else 0 for nm in names]
+            ys = [(self._val(tests[nm]) if nm in tests else None) or 0 for nm in names]
             xs = np.arange(len(names)) - 0.4 + w * (k + 0.5)
             self.p_bar.addItem(pg.BarGraphItem(x=xs, height=ys, width=w * 0.86, brush=pg.mkBrush(col), pen=pg.mkPen(None)))
             l = label(f"■  {run_label(r, [x for _, x in sel])}"); l.setStyleSheet(f"color:{col}; font-size:11px;"); self.legend.addWidget(l)
@@ -163,15 +166,20 @@ class Compare(QWidget):
                 self.lc.title_label.setText(f"Latenz-Perzentile · {fkey}")
             else:
                 focus = tests.get(fkey) or next(iter(tests.values()))
-            py = [np.log10(focus["summary"]["lat_us"][p]) for p in PCTS]  # manual log scale -> clean tick labels
+            lat = sval(focus, "summary", "lat_us") or {}
+            if not all(lat.get(p) for p in PCTS):      # partial test without measured values: no line for this run
+                continue
+            py = [np.log10(lat[p]) for p in PCTS]  # manual log scale -> clean tick labels
             self.p_pct.plot(range(len(PCTS)), py, pen=pg.mkPen(col, width=2), symbol="o", symbolSize=7, symbolBrush=col, symbolPen=None)
-            lo = min(lo, min(py)) if k else min(py); hi = max(hi, max(py)) if k else max(py)
+            lo, hi = (min(lo, min(py)), max(hi, max(py))) if have_pct else (min(py), max(py)); have_pct = True
         ax = self.p_bar.getAxis("bottom"); ax.setTicks([[(i, _wrap(nm)) for i, nm in enumerate(names)]]); ax.setHeight(34)
         self.p_bar.setXRange(-0.55, len(names) - 0.45, padding=0)
-        ymax = max((self._val(t) for _, r in sel for t in storage_tests(r)), default=0) or 1
+        ymax = max((v for _, r in sel for t in storage_tests(r) if (v := self._val(t)) is not None), default=0) or 1
         self.p_bar.setYRange(0, ymax * 1.1, padding=0)
         self.p_bar.getAxis("left").setTicks(None)
         self.p_pct.getAxis("bottom").setTicks([list(enumerate(PCT_TXT))]); self.p_pct.setXRange(-0.35, len(PCTS) - 0.55, padding=0)
+        if not have_pct:
+            lo, hi = 1, 4
         nice = [v * 10 ** e for e in range(0, 7) for v in (1, 2, 5)]
         self.p_pct.getAxis("left").setTicks([[(np.log10(v), _us(v)) for v in nice if lo - 0.15 <= np.log10(v) <= hi + 0.15]])
         self.p_pct.setYRange(lo - 0.12, hi + 0.12, padding=0)
@@ -191,21 +199,29 @@ class Compare(QWidget):
         hh = self.delta.horizontalHeader(); hh.setSectionResizeMode(QHeaderView.Stretch)
         hh.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.dc.title_label.setText("Delta-Tabelle  ·  " + "   ".join(f"{letters[k]} = {run_label(r, runs)}" for k, r in enumerate(runs)))
+        any_partial = False
         for nm in names:
-            row, colors = [nm], {}
-            for getter, lower_better in ((lambda s: s["iops"], False), (lambda s: s["lat_us"]["p99"], True)):
+            parts = [(letters[k], partial_text(o, r)) for k, r in enumerate(runs) if (o := by_name(r).get(nm)) and is_partial(o, r)]
+            any_partial |= bool(parts)
+            row, colors = [nm + (" †" if parts else "")], {}
+            for getter, lower_better in ((lambda t: sval(t, "summary", "iops"), False), (lambda t: sval(t, "summary", "lat_us", "p99"), True)):
                 vals = []
                 for r in runs:
                     o = by_name(r).get(nm)
-                    vals.append(getter(o["summary"]) if o else None)
+                    vals.append(getter(o) if o else None)
                 for k, val in enumerate(vals):
                     row.append(fmt_num(val))
                     if k:
-                        d = (val - vals[0]) / vals[0] * 100 if val and vals[0] else 0
+                        if val is None or not vals[0]:
+                            row.append("–"); continue
+                        d = (val - vals[0]) / vals[0] * 100
                         row.append("±0 %" if abs(d) < 0.5 else f"{d:+.0f} %")
                         good = (d < 0) if lower_better else (d > 0)
                         colors[len(row) - 1] = T.GREEN if good or abs(d) < 2 else (T.AMBER if abs(d) < 25 else T.RED)
-            add_row(self.delta, row, colors)
+            r_ = add_row(self.delta, row, colors)
+            if parts:
+                self.delta.item(r_, 0).setToolTip("\n".join(f"{x}: {p}" for x, p in parts))
+        self.dc.subtitle_label.setText("Abweichung gegenüber Basislauf" + ("  ·  † = Teilergebnis (abgebrochen, Tooltip)" if any_partial else ""))
 
 
     def _update_compute(self, runs):
@@ -242,7 +258,7 @@ class Compare(QWidget):
         from PySide6.QtWidgets import QHeaderView
         hh = self.ctab.horizontalHeader(); hh.setSectionResizeMode(QHeaderView.Stretch); hh.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         for nm, key, vals, det in rows:
-            row, colors = [nm, COMPUTE_UNIT[key]], {}
+            row, colors = [nm + (" †" if "\n" in det else ""), COMPUTE_UNIT[key]], {}
             for k, val in enumerate(vals):
                 row.append(fmt_metric(key, val))
                 if k:

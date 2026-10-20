@@ -1,10 +1,12 @@
-"""M2 / contract 1.2: cpu + memory tests in mock, model helpers, live view, results, compare, profile editor."""
+"""M2 / contracts 1.2 + 1.3: cpu + memory tests in mock, model helpers, live view, results, compare, profile editor;
+1.3: tick.metric/score, phase.threads/cpus, partial/stopped_in with null summary values (every consumer null-safe)."""
 import json, os, subprocess, sys, time
 
 import pytest
 
 import sb_contract
 from conftest import GUI, demo, profile
+from PySide6.QtCore import Qt
 
 MOCK = os.path.join(GUI, "mock_sbench.py")
 sys.path.insert(0, os.path.join(GUI, "tools"))
@@ -105,7 +107,7 @@ def test_profile_presets_schema_valid():
     assert not _doc_errs(doc), _doc_errs(doc)
 
 
-def test_mock_run_compute_12(mock_env):
+def test_mock_run_compute_13(mock_env):
     jp = write_job(mock_env, [
         {"type": "cpu", "name": "cpu", "threads": 4, "workload": "int", "warmup_s": 0, "duration_s": 2},
         {"type": "memory", "name": "bw", "mode": "bandwidth", "op": "copy", "threads": 4, "buffer_size": "256MiB",
@@ -126,21 +128,56 @@ def test_mock_run_compute_12(mock_env):
     assert all(n.get("ram_method") in ("total", "srat", "estimate") for n in res["meta"]["numa_nodes"])
     evs = [json.loads(line) for line in prog.read_text(encoding="utf-8").splitlines()]
     assert any(e["ev"] == "progress" and e["phase"] == "preparing" and e["test"] == 1 for e in evs)
-    assert not any(e["ev"] == "phase" and e["name"] == "preparing" and e["test"] == 0 for e in evs)     # cpu: no preparing
+    assert not any(e["ev"] == "progress" and e["phase"] == "preparing" and e["test"] == 0 for e in evs)  # cpu: nothing to prepare
     ticks = [e for e in evs if e["ev"] == "tick"]
+    assert {e["metric"] for e in ticks} == {"ops_per_s", "gbps", "latency_ns"}                     # 1.3: explicit metric
     assert {model.tick_metric(e) for e in ticks} == {"ops_per_s", "gbps", "latency_ns"}
-    assert all(len(e["workers"]) == 4 for e in ticks if "latency_ns" not in e and "workers" in e)
+    assert all(len(e["workers"]) == 4 and [w["id"] for w in e["workers"]] == [0, 1, 2, 3] for e in ticks if e["metric"] != "latency_ns")
+    assert not any("workers" in e for e in ticks if e["metric"] == "latency_ns")
+    assert all(e["score"] > 0 for e in ticks if e["metric"] == "ops_per_s")
+    first = {}
+    for e in evs:
+        if e["ev"] == "phase":
+            first.setdefault(e["test"], e)
+    assert [first[i]["threads"] for i in range(3)] == [4, 4, 1]
+    assert [c["cpu"] for c in first[0]["cpus"]] == [0, 64, 2, 66] and first[0]["cpus"][1]["group"] == 1
+    prep = [e for e in evs if e["ev"] == "progress" and e["phase"] == "preparing" and e["test"] == 1]
+    assert prep[-1]["done"] == prep[-1]["total"] == 4 * 256 * 1024**2                 # threads x actual buffer size (copy too)
+    assert res["tick_ms"] == 250 and len(cpu["timeseries"]) == 8                       # one point per tick
+    assert cpu["summary"]["score_reference"] == res["meta"]["cpu_score"]["ref_ops_per_s"]["int"]
+    assert all(t["partial"] is False and "stopped_in" not in t for t in res["tests"])
+    assert all(t["summary"]["proc_cpu_pct"] is not None for t in res["tests"])
     # flat CSV like core export.c: 18 columns, CRLF, total + worker rows
     csvp = mock_env / "r.csv"
     assert mock("export", str(out), "--csv", str(csvp)).returncode == 0
     raw = csvp.read_bytes()
     assert b"\r\n" in raw
     cols, rows = model.read_flat_csv(str(csvp))
-    assert cols == model.FLAT_COLUMNS_12
+    assert cols == model.FLAT_COLUMNS_13 and len(cols) == 20
     tot = [r for r in rows if r["scope"] == "total"]
     assert [r["type"] for r in tot] == ["cpu", "memory", "memory"]
     assert tot[0]["score"] and tot[1]["gbps"] and tot[2]["latency_ns"]
-    assert any(r["scope"] == "worker" and r["type"] == "cpu" for r in rows)
+    assert all(r["partial"] is False and r["stopped_in"] is None for r in rows)
+    wk = [r for r in rows if r["scope"] == "worker"]
+    assert wk and all(r["score"] is None and r["errors"] is None for r in wk)        # 1.3: empty = no value
+    assert all(r["errors"] is None for r in tot)                                       # cpu/memory have no errors column value
+
+
+def test_mock_contract_12_compat(mock_env):
+    """SBENCH_MOCK_CONTRACT=1.2: no 1.3 fields, 18 CSV columns, stop before measure -> test absent."""
+    jp = write_job(mock_env, [{"type": "cpu", "threads": 2, "workload": "int", "warmup_s": 0, "duration_s": 1}])
+    out, prog = mock_env / "r.json", mock_env / "p.jsonl"
+    p = mock("run", "--job", jp, "--out", str(out), "--progress", f"file:{prog}", env={"SBENCH_MOCK_CONTRACT": "1.2"})
+    assert p.returncode == 0, p.stderr
+    res = json.loads(out.read_text(encoding="utf-8"))
+    assert not _doc_errs(res) and "tick_ms" not in res and "cpu_score" not in res["meta"]
+    assert "partial" not in res["tests"][0] and "score_reference" not in res["tests"][0]["summary"]
+    evs = [json.loads(line) for line in prog.read_text(encoding="utf-8").splitlines()]
+    assert not any("metric" in e or "threads" in e for e in evs)
+    csvp = mock_env / "r.csv"
+    assert mock("export", str(out), "--csv", str(csvp), env={"SBENCH_MOCK_CONTRACT": "1.2"}).returncode == 0
+    cols, rows = model.read_flat_csv(str(csvp))
+    assert cols == model.FLAT_COLUMNS_12 and rows[0]["partial"] is None
 
 
 def test_mock_contract_11_compat(mock_env):
@@ -272,3 +309,179 @@ def test_report_html_compute():
     h = build_html(runs)
     assert "CPU-Test" in h and "RAM-Test" in h and "ACPI SRAT" in h and "IOPS" in h
     assert "RAM-Test" in build_html(runs, compact=True)
+
+
+# ------------------------------------------------------------------ contract 1.3
+EX = os.path.join(sb_contract.base_dir(), "examples")
+
+
+def _partial_storage(tmp):
+    """Storage test stopped in warmup by the mock (1.3): present, partial, every measured summary value null."""
+    jp = write_job(tmp, [{"type": "storage", "name": "4K Teil", "targets": [{"kind": "file", "path": str(tmp / "t.dat"), "file_size": "64MiB"}],
+                          "access_specs": [{"block_size": "4KiB", "read_pct": 70, "random_pct": 100, "weight": 100}],
+                          "workers": 2, "queue_depth": 4, "warmup_s": 5, "duration_s": 5}])
+    out = tmp / "rp.json"
+    p = mock("run", "--job", jp, "--out", str(out), env={"SBENCH_MOCK_STOP_AT": "0:warmup:2"})
+    assert p.returncode == 3, p.stderr
+    return str(out)
+
+
+def test_tick_metric_prefers_field():
+    assert model.tick_metric({"metric": "gbps", "gbps": 1.0, "iops": 5}) == "gbps"        # 1.3 field wins
+    assert model.tick_metric({"metric": "bogus", "ops_per_s": 1.0}) == "ops_per_s"          # unknown -> fallback guessing
+
+
+def test_partial_helpers():
+    r = json.load(open(os.path.join(EX, "result-partial.json"), encoding="utf-8"))
+    done, part = r["tests"][0], r["tests"][1]
+    assert not model.is_partial(done, r) and model.has_values(done) and model.partial_text(done, r) == ""
+    assert model.is_partial(part, r) and not model.has_values(part)
+    assert model.partial_text(part, r) == "abgebrochen in Warmup · keine Messwerte"
+    meas = {"type": "cpu", "partial": True, "stopped_in": "measure", "summary": {"ops_per_s": 5.0}}
+    assert model.partial_text(meas) == "abgebrochen in Messung · Werte über die gemessene Zeit"
+    assert model.score_reference("mixed", r["meta"], part["summary"]) == (380000.0, True)
+    assert model.score_reference("int", {"cpu_score": {"ref_ops_per_s": {"int": 1e8}}}) == (1e8, True)
+    assert model.score_reference("int") == (model.CPU_REFERENCE["int"], False)           # cores < 1.3: docs fallback
+    assert model.estimated_score("int", 1e8, {"cpu_score": {"ref_ops_per_s": {"int": 1e8}}}) == pytest.approx(1000)
+    old = {"aborted": True, "tests": [{"type": "cpu", "summary": {"ops_per_s": 1}}]}        # 1.2 result: last test of aborted run
+    assert model.is_partial(old["tests"][0], old) and "Teilergebnis" in model.partial_text(old["tests"][0], old)
+
+
+def test_read_flat_csv_13_empty_vs_zero():
+    hdr = ",".join(model.FLAT_COLUMNS_13)
+    rows = ["1,memory,total,,,,,,,,,,,,,,,,true,warmup", "0,storage,worker,0,0,0,0,0,,,,,,0,,,,,true,measure"]
+    cols, rr = model.read_flat_csv(hdr + "\r\n" + "\r\n".join(rows) + "\r\n")
+    assert len(cols) == 20
+    assert rr[0]["partial"] is True and rr[0]["stopped_in"] == "warmup" and rr[0]["gbps"] is None
+    assert rr[1]["iops"] == 0 and rr[1]["errors"] == 0 and rr[1]["lat_mean_us"] is None and rr[1]["stopped_in"] == "measure"
+
+
+def test_mock_partial_storage_and_csv(mock_env):
+    out = _partial_storage(mock_env)
+    res = json.load(open(out, encoding="utf-8"))
+    assert not _doc_errs(res), _doc_errs(res)
+    t = res["tests"][0]
+    assert t["partial"] is True and t["stopped_in"] == "warmup"
+    assert t["summary"]["iops"] is None and t["summary"]["lat_us"] is None and t["per_worker"] == [] and t["histogram"] == []
+    csvp = mock_env / "rp.csv"
+    assert mock("export", out, "--csv", str(csvp)).returncode == 0
+    _, rows = model.read_flat_csv(str(csvp))
+    assert len(rows) == 1 and rows[0]["iops"] is None and rows[0]["partial"] is True and rows[0]["stopped_in"] == "warmup"
+    assert mock("export", out, "--csv", str(mock_env / "rp-iom.csv"), "--style", "iometer").returncode == 0
+
+
+def test_partial_consumers_null_safe(qapp, mock_env):
+    """Devend: report.py / guide.py read summary.lat_us and iops directly -> every consumer must survive null values."""
+    from sbgui.report import build_html
+    from sbgui.pages.results import ResultsPage
+    from sbgui.pages.compare import Compare, compute_rows
+    from sbgui.pages.export import ExportPage
+    files = [os.path.join(EX, "result-partial.json"), demo("result-m2-partial.json"), _partial_storage(mock_env),
+             demo("result-m2-host.json"), demo("result-quad-host.json")]
+    runs = [json.load(open(f, encoding="utf-8")) for f in files]
+    for r in runs:
+        assert not _doc_errs(r), _doc_errs(r)
+    h = build_html(runs)
+    assert "abgebrochen in Warmup · keine Messwerte" in h and "abgebrochen in Vorbereitung" in h and "–" in h
+    build_html(runs, compact=True)
+    rp = ResultsPage(files); rp.resize(1300, 700); rp.show()
+    for f in files:
+        assert rp.select_file(f)
+    rp.select_file(files[0])
+    assert rp.partial_note.isVisible() and "Warmup" in rp.partial_note.text() and rp.state.text().startswith("abgebrochen")
+    assert rp.cpu_tab.item(1, 0).text().endswith("†") and rp.cpu_tab.item(1, 5).text() == "–"
+    rp.tsel.setCurrentIndex(1)
+    assert "Keine Messwerte" in rp.th_info.text()
+    rp.select_file(files[2])
+    assert rp.st_tab.item(0, 1).text() == "–"
+    rp.select_file(files[3]); assert not rp.partial_note.isVisible() and rp.state.text() == "vollständig"
+    rp.close()
+    cp = Compare(files); cp.resize(1300, 800); cp.show()
+    for metric in range(4):
+        cp.metric_box.setCurrentIndex(metric)
+        for i in range(cp.list.count()):
+            for j in range(cp.list.count()):
+                for k in range(cp.list.count()):
+                    cp.list.item(k).setCheckState(Qt.Checked if k in (i, j) else Qt.Unchecked)
+    rows = compute_rows([runs[1], runs[3]])
+    assert any(v[0] is None and "Vorbereitung" in det for _, _, v, det in rows)
+    cp.close()
+    ep = ExportPage(files, str(mock_env))
+    for i in range(ep.list.count()):
+        ep.list.item(i).setCheckState(Qt.Checked)
+    assert "1000 ms" in ep.ts_cb.text() and "gewollt" in ep.iom_hint.toolTip()
+    ep.fmt["CSV Iometer"].setChecked(True)
+    assert "CPU/RAM-Test(s) fehlen" in ep.iom_hint.text()
+
+
+def test_guide_summary_null_safe():
+    """guide.py builds its run report with sval (was t['summary']['lat_us']['mean'] -> TypeError on null)."""
+    src = open(os.path.join(GUI, "sbgui", "guide.py"), encoding="utf-8").read()
+    assert 't["summary"]["lat_us"]' not in src and 't["summary"]["iops"]' not in src
+    part = json.load(open(os.path.join(EX, "result-partial.json"), encoding="utf-8"))["tests"][1]
+    assert model.sval(part, "summary", "lat_us", "mean") is None and model.sval(part, "summary", "ops_per_s") is None
+
+
+def test_live_phase_threads_cpus_smt_and_score(qapp):
+    from sbgui.pages.live import LiveView
+    live = LiveView(); live.resize(1300, 700); live.show()
+    # replay up to the first warmup of the 128-thread cpu test: thread count known before any tick (phase.threads)
+    _replay(live, lambda e: e.get("ev") == "progress" and e["test"] == 0 and e["phase"] == "warmup")
+    assert live.test_threads[0] == 128 and live.k_lat.value.text() == "128"
+    assert "alle Threads (128)" in live.subtitle.text()
+    _replay(live, lambda e: e.get("ev") == "tick" and e["test"] == 0 and e["t"] >= 4)
+    cells = [live.ttable.item(r, 1).text() for r in range(live.ttable.rowCount())]
+    assert len(cells) == 128 and cells[0].startswith("0 · N0") and sum("SMT" in c for c in cells) == 64
+    assert live.k_mbps.title_lbl.text().lower() == "score"
+    assert "vom Kern" in live.k_mbps.sub.text()
+    assert "SMT" in live.c_lat.subtitle_label.text()
+    live.close()
+
+
+def test_live_partial_stream_and_estimate_fallback(qapp, tmp_path):
+    """progress-partial.jsonl (1.3 example) replays; a 1.2 stream without tick.score falls back to a labelled estimate."""
+    from sbgui.pages.live import LiveView
+    from sbgui.sbench import Replay
+    live = LiveView(); live.resize(1300, 700); live.show()
+    job = {"schema": "sb-job/1", "name": "x", "tests": [{"type": "cpu", "threads": 1, "workload": "int", "duration_s": 5},
+                                                        {"type": "cpu", "threads": 0, "workload": "mixed", "numa_node": 1, "duration_s": 5}]}
+    rep = Replay(os.path.join(EX, "progress-partial.jsonl")); live.attach(rep, job, tick_ms=1000)
+    rep.feed_until(lambda e: e.get("ev") == "done"); live.refresh(); live.timer.stop()
+    assert live.test_threads == {0: 1, 1: 8} and "alle Threads (8)" in live.subtitle.text()
+    # 1.2 core: no tick.metric / tick.score -> key guessing + estimate labelled as such
+    evs = [json.loads(line) for line in open(demo("progress-m2.jsonl"), encoding="utf-8") if line.strip()]
+    old = tmp_path / "p12.jsonl"
+    old.write_text("".join(json.dumps({k: v for k, v in e.items() if k not in ("metric", "score", "threads", "cpus")}) + "\n"
+                           for e in evs), encoding="utf-8")
+    rep = Replay(str(old)); live.attach(rep, json.load(open(demo("job-m2.json"), encoding="utf-8")), tick_ms=250)
+    rep.feed_until(lambda e: e.get("ev") == "tick" and e["test"] == 0 and e["t"] >= 3); live.refresh(); live.timer.stop()
+    assert live.mode == "ops_per_s" and "schätzung" in live.k_mbps.title_lbl.text().lower() and "Kern < 1.3" in live.k_mbps.sub.text()
+    live.close()
+
+
+def test_live_storage_worker_lag(qapp):
+    from sbgui.pages.live import LiveView
+    from PySide6.QtCore import QObject, Signal
+
+    class Src(QObject):
+        event = Signal(dict); finished = Signal(int, str)
+    live = LiveView(); live.resize(1300, 700); live.show()
+    src = Src(); job = {"schema": "sb-job/1", "name": "s", "tests": [{"type": "storage", "targets": [{"kind": "file", "path": "D:\\t.dat"}],
+                                                                       "access_specs": [], "workers": 2, "duration_s": 3}]}
+    live.attach(src, job, tick_ms=1000)
+    src.event.emit({"ev": "phase", "test": 0, "name": "preparing", "threads": 2})
+    src.event.emit({"ev": "phase", "test": 0, "name": "measure", "duration_s": 3})
+    lat = {"mean": 100, "p50": 90, "p99": 300, "max": 900}
+    w = lambda i, n: {"id": i, "iops": n, "mbps": n / 250, **({"lat_us": {"mean": 100, "p99": 300}} if n else {})}   # noqa: E731
+    src.event.emit({"ev": "tick", "test": 0, "t": 1.0, "metric": "iops", "iops": 2000, "mbps": 8, "lat_us": lat, "cpu_pct": 5,
+                    "workers": [w(0, 1000), w(1, 1000)]})
+    src.event.emit({"ev": "tick", "test": 0, "t": 2.0, "metric": "iops", "iops": 1000, "mbps": 4, "lat_us": lat, "cpu_pct": 5,
+                    "workers": [w(0, 0), w(1, 1000)]})
+    live.refresh(); live.timer.stop()
+    assert live.lagging == {0} and "↻" in live.wtable.item(0, 0).text() and "250 ms" in live.wtable.item(0, 0).toolTip()
+    assert live.wtable.item(0, 2).text() == "500" and live.wtable.item(0, 4).text() == "100"   # smoothed, last latency kept
+    src.event.emit({"ev": "tick", "test": 0, "t": 3.0, "metric": "iops", "iops": 3000, "mbps": 12, "lat_us": lat, "cpu_pct": 5,
+                    "workers": [w(0, 2000), w(1, 1000)]})
+    live.refresh()
+    assert live.lagging == set() and "↻" not in live.wtable.item(0, 0).text()
+    live.close()
