@@ -166,6 +166,7 @@ static void add_err(sb_compute_result *r, const char *code, int worker, double t
 }
 
 void sb_compute_result_free(sb_compute_result *r) {
+    cJSON_Delete(r->cpus_json);
     free(r->cpus); free(r->nodes); free(r->mem_nodes); free(r->w_value); free(r->w_units);
     for (int i = 0; i < r->nticks; i++) free(r->ticks[i].w_value);
     free(r->ticks); free(r->errs);
@@ -264,11 +265,13 @@ int sb_compute_run(int ti, const sb_test *t, const sb_storage_opts *o, const sb_
     double total_prep = 0;
     uint64_t qpf = sb_qpf();
     /* 1. Threads anlegen, binden, starten (preparing) */
+    /* Vertrag 1.3.1: dieselbe CPU-Liste steht auch im Ergebnis (tests[].cpus) */
+    r->cpus_json = sb_phase_cpus_json(&topo, pick, nthreads);
     if (cb->phase) {
         /* Vertrag 1.3: Thread-Anzahl und gebundene CPUs (mit SMT-Geschwistern) beim Teststart */
         cJSON *ex = cJSON_CreateObject();
         cJSON_AddNumberToObject(ex, "threads", nthreads);
-        cJSON_AddItemToObject(ex, "cpus", sb_phase_cpus_json(&topo, pick, nthreads));
+        cJSON_AddItemToObject(ex, "cpus", r->cpus_json ? cJSON_Duplicate(r->cpus_json, 1) : sb_phase_cpus_json(&topo, pick, nthreads));
         cb->phase(cb->ctx, ti, "preparing", -1, ex);
         cJSON_Delete(ex);
     }

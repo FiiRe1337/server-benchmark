@@ -241,6 +241,8 @@ static cJSON *compute_test_json(int idx, const sb_test *t, const sb_compute_resu
     }
     num_or_null(s, "cpu_pct", m, rnd(r->cpu_pct, 1));
     num_or_null(s, "proc_cpu_pct", m, rnd(r->proc_cpu_pct, 2));
+    /* Vertrag 1.3.1: gebundene CPUs mit SMT-Zuordnung wie im phase-Event, auch bei partial */
+    if (r->cpus_json) cJSON_AddItemToObject(o, "cpus", cJSON_Duplicate(r->cpus_json, 1));
     cJSON *pw = cJSON_AddArrayToObject(o, "per_worker");
     for (int i = 0; m && i < r->nthreads; i++) {
         cJSON *x = cJSON_CreateObject();
