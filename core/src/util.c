@@ -176,11 +176,45 @@ static int dir_writable(const wchar_t *dir) {
 
 static char g_data_dir[MAX_PATH * 3];
 
+/* absoluter Pfad (relativ zum Arbeitsverzeichnis) */
+static void to_full(wchar_t *buf, size_t cap) {
+    wchar_t full[MAX_PATH * 2];
+    DWORD n = GetFullPathNameW(buf, MAX_PATH * 2, full, NULL);
+    if (n && n < MAX_PATH * 2) wcscpy_s(buf, cap, full);
+}
+
+static void finish_data_dir(wchar_t *buf) {
+    DWORD n = (DWORD)wcslen(buf);
+    while (n > 3 && (buf[n - 1] == L'\\' || buf[n - 1] == L'/')) buf[--n] = 0;
+    char *u = sb_w_to_u8(buf);
+    if (u) { snprintf(g_data_dir, sizeof g_data_dir, "%s", u); free(u); }
+    sb_mkdirs(g_data_dir);
+    const char *subs[] = {"results", "jobs", "logs", "runs"};
+    for (int i = 0; i < 4; i++) { char *p = sb_path_join(g_data_dir, subs[i]); if (p) { sb_mkdirs(p); free(p); } }
+}
+
+/* --data-dir: hat Vorrang vor allen anderen Regeln. 0 = ok, -1 = nicht anlegbar/beschreibbar */
+int sb_set_data_dir(const char *path_u8) {
+    wchar_t *w = path_u8 && *path_u8 ? sb_u8_to_w(path_u8) : NULL;
+    if (!w) return -1;
+    wchar_t buf[MAX_PATH * 2];
+    wcsncpy_s(buf, MAX_PATH * 2, w, _TRUNCATE);
+    free(w);
+    to_full(buf, MAX_PATH * 2);
+    finish_data_dir(buf);
+    wchar_t *chk = sb_u8_to_w(g_data_dir);
+    int ok = chk && dir_writable(chk);
+    free(chk);
+    return ok ? 0 : -1;
+}
+
 const char *sb_data_dir(void) {
     if (g_data_dir[0]) return g_data_dir;
     wchar_t buf[MAX_PATH * 2];
-    /* 1. SBENCH_DATA_DIR, 2. data\ neben sbench.exe (falls beschreibbar), 3. %ProgramData%\sbench */
+    /* (0. --data-dir, siehe sb_set_data_dir) 1. SBENCH_DATA_DIR, 2. data\ neben sbench.exe
+     * (falls beschreibbar), 3. %ProgramData%\sbench */
     DWORD n = GetEnvironmentVariableW(L"SBENCH_DATA_DIR", buf, MAX_PATH * 2);
+    if (n > 0 && n < MAX_PATH * 2) to_full(buf, MAX_PATH * 2);
     if (n == 0 || n >= MAX_PATH * 2) {
         int ok = 0;
         n = GetModuleFileNameW(NULL, buf, MAX_PATH * 2);
@@ -213,13 +247,7 @@ const char *sb_data_dir(void) {
             }
         }
     }
-    n = (DWORD)wcslen(buf);
-    while (n > 3 && (buf[n - 1] == L'\\' || buf[n - 1] == L'/')) buf[--n] = 0;
-    char *u = sb_w_to_u8(buf);
-    if (u) { snprintf(g_data_dir, sizeof g_data_dir, "%s", u); free(u); }
-    sb_mkdirs(g_data_dir);
-    const char *subs[] = {"results", "jobs", "logs", "runs"};
-    for (int i = 0; i < 4; i++) { char *p = sb_path_join(g_data_dir, subs[i]); if (p) { sb_mkdirs(p); free(p); } }
+    finish_data_dir(buf);
     return g_data_dir;
 }
 

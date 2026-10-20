@@ -12,6 +12,21 @@ endif()
 
 option(SB_BUILD_TESTS "Unit-Tests bauen" ON)
 set(SB_VERSION_STR "${PROJECT_VERSION}" CACHE STRING "Versionsstring des Kerns (SemVer)")
+set(SB_COMMIT "" CACHE STRING "Git-Commit für 'sbench version --json' (leer = per git ermitteln)")
+if(SB_COMMIT STREQUAL "")
+  find_package(Git QUIET)
+  if(GIT_FOUND)
+    execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse HEAD WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                    OUTPUT_VARIABLE SB_COMMIT_GIT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+  endif()
+  if(SB_COMMIT_GIT)
+    set(SB_COMMIT_EFF "${SB_COMMIT_GIT}")
+  else()
+    set(SB_COMMIT_EFF "unknown")
+  endif()
+else()
+  set(SB_COMMIT_EFF "${SB_COMMIT}")
+endif()
 
 set(SB_CORE_SOURCES
   core/src/bundle.c
@@ -71,7 +86,7 @@ set_target_properties(sbcore PROPERTIES PREFIX "" OUTPUT_NAME "sbcore")
 # CLI
 add_executable(sbench cli/main.c)
 target_link_libraries(sbench PRIVATE sbcore_static shell32)
-target_compile_definitions(sbench PRIVATE ${SB_DEFS})
+target_compile_definitions(sbench PRIVATE ${SB_DEFS} SB_COMMIT="${SB_COMMIT_EFF}")
 target_compile_options(sbench PRIVATE ${SB_COPTS})
 target_link_options(sbench PRIVATE ${SB_LOPTS})
 
