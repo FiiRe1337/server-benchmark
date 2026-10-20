@@ -201,7 +201,25 @@ def run_restricted(exe, *args, cwd: Path, timeout=120):
         _fields_ = [("hProcess", wintypes.HANDLE), ("hThread", wintypes.HANDLE),
                     ("dwProcessId", wintypes.DWORD), ("dwThreadId", wintypes.DWORD)]
 
-    k32.GetCurrentProcess.restype = wintypes.HANDLE
+    H, D, B, P = wintypes.HANDLE, wintypes.DWORD, wintypes.BOOL, ctypes.c_void_p
+    k32.GetCurrentProcess.restype = H
+    k32.GetCurrentProcess.argtypes = []
+    k32.WaitForSingleObject.argtypes = [H, D]
+    k32.WaitForSingleObject.restype = D
+    k32.GetExitCodeProcess.argtypes = [H, ctypes.POINTER(D)]
+    k32.CloseHandle.argtypes = [H]
+    adv.OpenProcessToken.argtypes = [H, D, ctypes.POINTER(H)]
+    adv.OpenProcessToken.restype = B
+    adv.CreateRestrictedToken.argtypes = [H, D, D, P, D, P, D, P, ctypes.POINTER(H)]
+    adv.CreateRestrictedToken.restype = B
+    adv.ConvertStringSidToSidW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(P)]
+    adv.ConvertStringSidToSidW.restype = B
+    adv.GetLengthSid.argtypes = [P]
+    adv.GetLengthSid.restype = D
+    adv.SetTokenInformation.argtypes = [H, ctypes.c_int, P, D]
+    adv.SetTokenInformation.restype = B
+    adv.CreateProcessAsUserW.argtypes = [H, wintypes.LPCWSTR, wintypes.LPWSTR, P, P, B, D, P, wintypes.LPCWSTR, P, P]
+    adv.CreateProcessAsUserW.restype = B
     tok, rtok = wintypes.HANDLE(), wintypes.HANDLE()
     # TOKEN_ASSIGN_PRIMARY|DUPLICATE|QUERY|ADJUST_DEFAULT|ADJUST_SESSIONID
     if not adv.OpenProcessToken(k32.GetCurrentProcess(), 0x1 | 0x2 | 0x8 | 0x80 | 0x100, ctypes.byref(tok)):
@@ -224,7 +242,7 @@ def run_restricted(exe, *args, cwd: Path, timeout=120):
         si = SI()
         si.cb = ctypes.sizeof(si)
         si.dwFlags = 0x100  # STARTF_USESTDHANDLES
-        si.hStdOutput, si.hStdError = ho, he
+        si.hStdOutput, si.hStdError = H(ho), H(he)
         pi = PI()
         cmd = ctypes.create_unicode_buffer(subprocess.list2cmdline([str(exe), *map(str, args)]))
         print("$ [eingeschränkt] " + cmd.value, flush=True)
