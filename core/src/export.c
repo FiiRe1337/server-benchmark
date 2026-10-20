@@ -38,6 +38,14 @@ static void put_num(sbuf *b, const cJSON *o, const char *key, double scale) {
     put_field(b, t, 0);
 }
 
+/* Wie put_num, aber mit mehr Stellen (z. B. ops_per_s ~ 1e9) */
+static void put_num_p(sbuf *b, const cJSON *o, const char *key) {
+    const cJSON *c = o ? cJSON_GetObjectItemCaseSensitive(o, key) : NULL;
+    char t[64] = "";
+    if (cJSON_IsNumber(c)) snprintf(t, sizeof t, "%.12g", c->valuedouble);
+    put_field(b, t, 0);
+}
+
 static const cJSON *get(const cJSON *o, const char *k) { return o ? cJSON_GetObjectItemCaseSensitive(o, k) : NULL; }
 
 static void flat_row(sbuf *b, int test, const char *type, const char *scope, const char *id, const cJSON *x,
@@ -63,11 +71,16 @@ static void flat_row(sbuf *b, int test, const char *type, const char *scope, con
     if (cJSON_IsNumber(e)) snprintf(es, sizeof es, "%.0f", e->valuedouble);
     else if (cJSON_IsArray(e)) snprintf(es, sizeof es, "%d", cJSON_GetArraySize(e));
     put_field(b, es, 0);
+    /* cpu/memory (Vertrag 1.2), angehängt, damit bisherige Spaltenpositionen gleich bleiben */
+    put_num_p(b, x, "ops_per_s");
+    put_num_p(b, x, "gbps");
+    put_num_p(b, x, "latency_ns");
+    put_num_p(b, x, "score");
     sb_put(b, "\r\n");
 }
 
 static void export_flat(sbuf *b, const cJSON *tests) {
-    sb_put(b, "test,type,scope,id,iops,mbps,read_iops,write_iops,read_mbps,write_mbps,lat_mean_us,lat_p99_us,lat_max_us,errors\r\n");
+    sb_put(b, "test,type,scope,id,iops,mbps,read_iops,write_iops,read_mbps,write_mbps,lat_mean_us,lat_p99_us,lat_max_us,errors,ops_per_s,gbps,latency_ns,score\r\n");
     const cJSON *t;
     cJSON_ArrayForEach(t, tests) {
         const cJSON *ix = get(t, "index"), *ty = get(t, "type");

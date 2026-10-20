@@ -264,12 +264,20 @@
         "ram_bytes": {
           "type": "integer",
           "minimum": 0,
-          "description": "Arbeitsspeicher des Knotens in Bytes."
+          "description": "Arbeitsspeicher des Knotens in Bytes; Quelle in ram_method."
         },
         "ram_free_bytes": {
           "type": "integer",
           "minimum": 0,
           "description": "Freier Arbeitsspeicher des Knotens in Bytes."
+        },
+        "ram_method": {
+          "enum": [
+            "total",
+            "srat",
+            "estimate"
+          ],
+          "description": "Herkunft von ram_bytes: total = nur ein Knoten, gesamter physischer RAM; srat = Speicherbereiche des Knotens aus der ACPI-SRAT-Tabelle (aktiv, ohne Hotplug/nichtflüchtig); estimate = SRAT nicht lesbar, Aufteilung des Gesamt-RAM im Verhältnis des freien Speichers (ungenau). Seit Vertrag 1.2 (Issue #8)."
         }
       },
       "required": [
@@ -506,12 +514,36 @@
         "ops_per_s": {
           "type": "number",
           "minimum": 0,
-          "description": "Operationen pro Sekunde gesamt."
+          "description": "Operationen pro Sekunde, Summe aller Threads (Definition je workload in docs/core.md)."
         },
         "score": {
           "type": "number",
           "minimum": 0,
-          "description": "Normierter Punktwert (höher = besser)."
+          "description": "ops_per_s geteilt durch die Referenz-Rate eines Threads (docs/core.md) mal 1000: 1000 ≈ ein Thread der Referenzmaschine. Höher = besser."
+        },
+        "ops": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Operationen in der Messphase gesamt."
+        },
+        "numa_node": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Genutzter NUMA-Knoten, falls im Job gesetzt."
+        },
+        "cpus": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "description": "Logische Prozessoren der Threads in Thread-Reihenfolge (globale Indizes wie meta.numa_nodes[].cpus)."
+        },
+        "cpu_pct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Mittlere Systemlast in der Messphase."
         }
       },
       "required": [
@@ -544,17 +576,66 @@
         },
         "buffer_size_bytes": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "description": "Tatsächliche Puffergröße pro Thread (auf 8 KiB bzw. bei latency auf 64 Byte abgerundet)."
         },
         "gbps": {
           "type": "number",
           "minimum": 0,
-          "description": "Bandbreite in GB/s (10^9 Bytes/s), bei mode = bandwidth."
+          "description": "Bandbreite in GB/s (10^9 Bytes/s), Summe aller Threads, bei mode = bandwidth. copy zählt gelesene plus geschriebene Bytes (wie STREAM)."
         },
         "latency_ns": {
           "type": "number",
           "minimum": 0,
-          "description": "Mittlere Zugriffslatenz in Nanosekunden, bei mode = latency."
+          "description": "Mittlere Latenz eines abhängigen Ladezugriffs (Pointer Chasing über zufällig verkettete 64-Byte-Zeilen) in Nanosekunden, bei mode = latency."
+        },
+        "simd": {
+          "enum": [
+            "scalar",
+            "sse2",
+            "avx2",
+            "avx512",
+            "neon"
+          ],
+          "description": "Tatsächlich genutzter Befehlssatz (bandwidth)."
+        },
+        "nontemporal": {
+          "type": "boolean",
+          "description": "Ob Non-temporal Stores tatsächlich genutzt wurden (bandwidth)."
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Übertragene Bytes in der Messphase (bandwidth)."
+        },
+        "loads": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Abhängige Ladezugriffe in der Messphase (latency)."
+        },
+        "numa_node": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "NUMA-Knoten der Threads, falls im Job gesetzt."
+        },
+        "mem_node": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "NUMA-Knoten der Puffer, falls im Job gesetzt."
+        },
+        "cpus": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "description": "Logische Prozessoren der Threads in Thread-Reihenfolge (globale Indizes wie meta.numa_nodes[].cpus)."
+        },
+        "cpu_pct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Mittlere Systemlast in der Messphase."
         }
       },
       "required": [
@@ -845,6 +926,26 @@
           "type": "number",
           "minimum": 0,
           "description": "Memory: GB/s."
+        },
+        "cpu": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "cpu/memory: logischer Prozessor, auf den der Thread gepinnt ist (globaler Index)."
+        },
+        "node": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "cpu/memory: NUMA-Knoten dieses Prozessors."
+        },
+        "mem_node": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "memory: NUMA-Knoten, auf dem der Puffer dieses Threads angelegt wurde."
+        },
+        "latency_ns": {
+          "type": "number",
+          "minimum": 0,
+          "description": "memory latency: ns pro Zugriff."
         }
       },
       "required": [
@@ -976,6 +1077,21 @@
             "minimum": 0,
             "maximum": 100,
             "description": "Gesamt-CPU-Last des Systems in Prozent."
+          },
+          "ops_per_s": {
+            "type": "number",
+            "minimum": 0,
+            "description": "cpu"
+          },
+          "gbps": {
+            "type": "number",
+            "minimum": 0,
+            "description": "memory bandwidth"
+          },
+          "latency_ns": {
+            "type": "number",
+            "minimum": 0,
+            "description": "memory latency"
           }
         },
         "required": [

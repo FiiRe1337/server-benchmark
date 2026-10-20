@@ -3,11 +3,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <malloc.h>
 #include "sb/hist.h"
 #include "sb/rng.h"
 #include "sb/job.h"
 #include "sb/sha256.h"
 #include "sb/util.h"
+#include "sb/topo.h"
+#include "sb/kernels.h"
 
 static int g_fail = 0, g_pass = 0;
 #define CHECK(cond, ...) do { if (cond) g_pass++; else { g_fail++; printf("FAIL %s:%d: ", __FILE__, __LINE__); printf(__VA_ARGS__); printf("\n"); } } while (0)
@@ -308,6 +311,154 @@ static void test_parse_size(void) {
     CHECK(sb_parse_size("12x", &v) != 0, "12x");
 }
 
+/* ---- M2: SRAT, Topologie-Auswahl, Kernel ---- */
+static void srat_mem(uint8_t *p, uint32_t pd, uint64_t base, uint64_t len, uint32_t flags) {
+    memset(p, 0, 40);
+    p[0] = 1; p[1] = 40;
+    memcpy(p + 2, &pd, 4);
+    uint32_t lo = (uint32_t)base, hi = (uint32_t)(base >> 32);
+    memcpy(p + 8, &lo, 4); memcpy(p + 12, &hi, 4);
+    lo = (uint32_t)len; hi = (uint32_t)(len >> 32);
+    memcpy(p + 16, &lo, 4); memcpy(p + 20, &hi, 4);
+    memcpy(p + 28, &flags, 4);
+}
+
+static void test_srat(void) {
+    uint8_t t[48 + 16 + 6 * 40];
+    memset(t, 0, sizeof t);
+    memcpy(t, "SRAT", 4);
+    uint32_t len = sizeof t;
+    memcpy(t + 4, &len, 4);
+    uint8_t *p = t + 48;
+    /* Typ 0 (Prozessor-Affinität, 16 Byte) wird übersprungen */
+    p[0] = 0; p[1] = 16; p += 16;
+    srat_mem(p, 0, 0, 0xA0000ULL, 1); p += 40;                       /* Knoten 0: 640 KiB */
+    srat_mem(p, 0, 1ULL << 32, 63ULL << 30, 1); p += 40;             /* Knoten 0: 63 GiB */
+    srat_mem(p, 1, 64ULL << 30, 64ULL << 30, 1); p += 40;            /* Knoten 1: 64 GiB */
+    srat_mem(p, 1, 128ULL << 30, 256ULL << 30, 1 | 2); p += 40;      /* Hotplug -> ignoriert */
+    srat_mem(p, 2, 384ULL << 30, 16ULL << 30, 1 | 4); p += 40;       /* nichtflüchtig -> ignoriert */
+    srat_mem(p, 3, 400ULL << 30, 8ULL << 30, 0);                     /* nicht aktiv -> ignoriert */
+    uint32_t dom[8]; uint64_t by[8];
+    int n = sb_srat_parse(t, sizeof t, dom, by, 8);
+    CHECK(n == 2, "SRAT: 2 Domänen erwartet, %d", n);
+    if (n == 2) {
+        CHECK(dom[0] == 0 && by[0] == 0xA0000ULL + (63ULL << 30), "SRAT Knoten 0: %llu", (unsigned long long)by[0]);
+        CHECK(dom[1] == 1 && by[1] == 64ULL << 30, "SRAT Knoten 1: %llu", (unsigned long long)by[1]);
+    }
+    CHECK(sb_srat_parse(t, 40, dom, by, 8) < 0, "SRAT zu kurz");
+    t[0] = 'X';
+    CHECK(sb_srat_parse(t, sizeof t, dom, by, 8) < 0, "SRAT falsche Signatur");
+}
+
+static void test_topo_pick(void) {
+    /* 2 Knoten x 2 Kerne x 2 SMT, Knoten 1 in Prozessorgruppe 1 (Index 64..67) */
+    sb_cpu c[8];
+    sb_node nd[2];
+    uint32_t c0[4] = {0, 1, 2, 3}, c1[4] = {64, 65, 66, 67};
+    for (int i = 0; i < 8; i++) {
+        c[i].group = (uint16_t)(i / 4); c[i].bit = (uint8_t)(i % 4);
+        c[i].index = c[i].group * 64u + c[i].bit;
+        c[i].node = i / 4; c[i].core = i / 2; c[i].smt = i % 2;
+    }
+    memset(nd, 0, sizeof nd);
+    nd[0].id = 0; nd[0].cpus = c0; nd[0].ncpus = 4;
+    nd[1].id = 1; nd[1].cpus = c1; nd[1].ncpus = 4;
+    sb_topo t = {c, 8, nd, 2, 4, 0};
+    int out[10];
+    int no = sb_topo_pick(&t, -1, 10, out);
+    /* erst ein Thread pro Kern, Knoten abwechselnd: 0, 64, 2, 66, dann SMT: 1, 65, 3, 67, dann von vorn */
+    static const int want[10] = {0, 4, 2, 6, 1, 5, 3, 7, 0, 4};
+    int ok = no == 8;
+    for (int i = 0; i < 10; i++) ok &= out[i] == want[i];
+    CHECK(ok, "pick alle: %d | %d %d %d %d %d %d %d %d", no, out[0], out[1], out[2], out[3], out[4], out[5], out[6], out[7]);
+    no = sb_topo_pick(&t, 1, 3, out);
+    CHECK(no == 4 && out[0] == 4 && out[1] == 6 && out[2] == 5, "pick Knoten 1: %d | %d %d %d", no, out[0], out[1], out[2]);
+    CHECK(sb_topo_pick(&t, 7, 1, out) == 0, "pick unbekannter Knoten");
+}
+
+static void test_chase(void) {
+    const size_t line = 64, n = 4096;
+    char *b = (char *)malloc(n * line);
+    sb_chase_build(b, n * line, line, 12345);
+    unsigned char *seen = (unsigned char *)calloc(n, 1);
+    void *p = b;
+    size_t steps = 0, dup = 0;
+    for (; steps < n; steps++) {
+        size_t k = (size_t)((char *)p - b) / line;
+        if (k >= n || seen[k]) { dup++; break; }
+        seen[k] = 1;
+        p = *(void **)p;
+    }
+    CHECK(steps == n && dup == 0 && p == (void *)b, "Kette: ein Zyklus über alle %zu Zeilen (Schritte %zu)", n, steps);
+    /* nicht einfach sequentiell */
+    size_t seq = 0;
+    p = b;
+    for (size_t i = 0; i < n; i++) { void *q = *(void **)p; if ((char *)q == (char *)p + line) seq++; p = q; }
+    CHECK(seq < n / 16, "Kette zu sequentiell (%zu)", seq);
+    void *pos = b;
+    sb_chase(&pos, n);
+    CHECK(pos == (void *)b, "sb_chase: nach n Sprüngen zurück am Start");
+    free(seen); free(b);
+}
+
+static void test_memkern(void) {
+    const size_t bytes = 1 << 20;
+    uint8_t *a = (uint8_t *)_aligned_malloc(bytes, 64), *d = (uint8_t *)_aligned_malloc(bytes, 64);
+    for (int isa = SB_SIMD_SCALAR; isa <= SB_SIMD_NEON; isa++) {
+        sb_memkern k;
+        if (!sb_simd_supported((sb_simd)isa) || sb_memkern_get((sb_simd)isa, &k)) continue;
+        for (int nt = 0; nt < 2; nt++) {
+            for (size_t i = 0; i < bytes; i++) a[i] = (uint8_t)(i * 31 + 7);
+            memset(d, 0, bytes);
+            k.copy(d, a, bytes, nt);
+            CHECK(!memcmp(a, d, bytes), "copy %s nt=%d", sb_simd_name((sb_simd)isa), nt);
+            k.write(d, bytes, nt);
+            int changed = memcmp(a, d, bytes) != 0;
+            CHECK(changed, "write %s nt=%d schreibt", sb_simd_name((sb_simd)isa), nt);
+        }
+        (void)k.read(a, bytes);
+        g_pass++;
+    }
+    CHECK(sb_simd_supported(SB_SIMD_SCALAR), "scalar immer unterstützt");
+    CHECK(sb_simd_supported(sb_simd_auto()), "auto unterstützt");
+    _aligned_free(a); _aligned_free(d);
+}
+
+static void test_cpu_kernels(void) {
+    for (int w = 0; w < 4; w++) {
+        uint64_t s1[8] = {1, 2, 3, 4, 5, 6, 7, 8}, s2[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+        sb_cpu_kernel((sb_cpu_workload)w, s1, 100);
+        sb_cpu_kernel((sb_cpu_workload)w, s2, 100);
+        CHECK(!memcmp(s1, s2, sizeof s1), "%s deterministisch", sb_cpu_workload_name((sb_cpu_workload)w));
+        uint64_t s0[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+        CHECK(memcmp(s0, s1, sizeof s1) != 0, "%s verändert den Zustand", sb_cpu_workload_name((sb_cpu_workload)w));
+    }
+}
+
+static void test_job_m2(void) {
+    sb_job j; sb_verrs e = {0};
+    int rc = load("{\"schema\":\"sb-job/1\",\"tests\":["
+                  "{\"type\":\"cpu\",\"workload\":\"crypto\",\"threads\":2,\"duration_s\":3},"
+                  "{\"type\":\"memory\",\"mode\":\"bandwidth\",\"op\":\"copy\",\"buffer_size\":\"1MiB\",\"duration_s\":2,"
+                  "\"nontemporal\":true,\"simd\":\"scalar\",\"warmup_s\":0},"
+                  "{\"type\":\"memory\",\"mode\":\"latency\",\"buffer_size\":\"64KiB\",\"duration_s\":1}]}", &j, &e);
+    CHECK(rc == 0 && e.n == 0, "M2-Job gültig (rc %d, %d Fehler: %s)", rc, e.n, e.n ? e.v[0].code : "");
+    if (rc == 0) {
+        CHECK(j.tests[0].workload == 2 && j.tests[0].threads == 2 && j.tests[0].warmup_s == 1 && j.tests[0].numa_node == -1,
+              "cpu-Felder");
+        CHECK(j.tests[1].mem_mode == 0 && j.tests[1].mem_op == 2 && j.tests[1].buffer_size == 1 << 20 && j.tests[1].nontemporal == 1 &&
+              j.tests[1].simd == SB_SIMD_SCALAR && j.tests[1].warmup_s == 0 && j.tests[1].mem_node == -1, "memory-Felder");
+        CHECK(j.tests[2].mem_mode == 1 && j.tests[2].mem_op == 0 && j.tests[2].simd == SB_SIMD_AUTO, "latency-Felder");
+    }
+    sb_job_free(&j); sb_verrs_free(&e);
+    rc = load("{\"schema\":\"sb-job/1\",\"tests\":[{\"type\":\"memory\",\"mode\":\"bandwidth\",\"buffer_size\":4096,\"duration_s\":1}]}", &j, &e);
+    CHECK(rc != 0 && e.n >= 1 && !strcmp(e.v[0].code, "E_BUFFER_SIZE"), "E_BUFFER_SIZE (%d: %s)", e.n, e.n ? e.v[0].code : "");
+    sb_job_free(&j); sb_verrs_free(&e);
+    rc = load("{\"schema\":\"sb-job/1\",\"tests\":[{\"type\":\"cpu\",\"numa_node\":500,\"duration_s\":1}]}", &j, &e);
+    CHECK(rc != 0 && e.n >= 1 && !strcmp(e.v[0].code, "E_NUMA_NODE"), "E_NUMA_NODE (%d: %s)", e.n, e.n ? e.v[0].code : "");
+    sb_job_free(&j); sb_verrs_free(&e);
+}
+
 int main(void) {
     DWORD n = GetTempPathA(MAX_PATH, g_tmpdir);
     if (!n) strcpy(g_tmpdir, ".\\");
@@ -322,6 +473,12 @@ int main(void) {
     test_job_ok();
     test_job_invalid();
     test_examples();
+    test_srat();
+    test_topo_pick();
+    test_chase();
+    test_memkern();
+    test_cpu_kernels();
+    test_job_m2();
     printf("%d Prüfungen bestanden, %d fehlgeschlagen\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

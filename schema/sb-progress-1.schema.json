@@ -109,7 +109,7 @@
     },
     {
       "type": "object",
-      "description": "Zwischenwerte des letzten Tick-Intervalls (nur in der Phase measure). Storage-Ticks enthalten immer iops, mbps, lat_us und cpu_pct.",
+      "description": "Zwischenwerte des letzten Tick-Intervalls (nur in der Phase measure). Storage-Ticks enthalten immer iops, mbps, lat_us und cpu_pct; cpu-Ticks ops_per_s, memory-Ticks gbps (bandwidth) bzw. latency_ns (latency), jeweils mit cpu_pct und proc_cpu_pct.",
       "properties": {
         "ev": {
           "const": "tick"
@@ -202,6 +202,11 @@
           "minimum": 0,
           "description": "memory: GB/s."
         },
+        "latency_ns": {
+          "type": "number",
+          "minimum": 0,
+          "description": "memory latency: ns pro Zugriff."
+        },
         "workers": {
           "type": "array",
           "items": {
@@ -236,6 +241,14 @@
                   "p99"
                 ],
                 "additionalProperties": false
+              },
+              "ops_per_s": {
+                "type": "number",
+                "minimum": 0
+              },
+              "gbps": {
+                "type": "number",
+                "minimum": 0
               }
             },
             "required": [

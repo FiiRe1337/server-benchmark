@@ -1,0 +1,42 @@
+{
+  "schema": "sb-job/1",
+  "name": "M2: CPU und Arbeitsspeicher",
+  "tests": [
+    {
+      "type": "cpu",
+      "name": "CPU int 1 Thread",
+      "threads": 1,
+      "workload": "int",
+      "warmup_s": 1,
+      "duration_s": 5
+    },
+    {
+      "type": "cpu",
+      "name": "CPU mixed Knoten 1",
+      "threads": 8,
+      "workload": "mixed",
+      "duration_s": 5,
+      "numa_node": 1
+    },
+    {
+      "type": "memory",
+      "name": "RAM copy NT",
+      "mode": "bandwidth",
+      "op": "copy",
+      "threads": 4,
+      "buffer_size": "256MiB",
+      "duration_s": 5,
+      "nontemporal": true,
+      "simd": "avx2"
+    },
+    {
+      "type": "memory",
+      "name": "RAM-Latenz remote",
+      "mode": "latency",
+      "buffer_size": "1GiB",
+      "duration_s": 5,
+      "numa_node": 0,
+      "mem_node": 1
+    }
+  ]
+}

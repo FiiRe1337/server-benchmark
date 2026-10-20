@@ -191,7 +191,7 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check jsonschema
           if ($LASTEXITCODE -ne 0) { python -m pip install --disable-pip-version-check "jsonschema<4.18" }
-      - name: Smoke-Test (Storage, Stop, Pipe, Export, Bundle)
+      - name: Smoke-Test (Storage, CPU, RAM, Stop, Pipe, Export, Bundle)
         env:
           SBENCH_SMOKE_OUT: ${{ github.workspace }}\smoke-out
         run: python tests/smoke/smoke.py art\sbench.exe
