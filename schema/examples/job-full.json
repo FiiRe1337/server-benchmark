@@ -1,0 +1,68 @@
+{
+  "schema": "sb-job/1",
+  "name": "Vollständiger Lauf (alle Testtypen)",
+  "tests": [
+    {"type": "hyperv_info", "include_perfcounters": true, "sample_s": 5},
+    {"type": "cpu", "threads": 0, "workload": "mixed", "duration_s": 30},
+    {
+      "type": "memory",
+      "mode": "bandwidth",
+      "op": "copy",
+      "threads": 0,
+      "buffer_size": "256MiB",
+      "duration_s": 20
+    },
+    {"type": "memory", "mode": "latency", "threads": 1, "buffer_size": "1GiB", "duration_s": 20},
+    {
+      "type": "storage",
+      "targets": [{"path": "\\\\.\\E:", "kind": "volume"}],
+      "workers": 2,
+      "queue_depth": 8,
+      "warmup_s": 5,
+      "duration_s": 30,
+      "cache": "unbuffered",
+      "access_specs": [
+        {
+          "weight": 100,
+          "block_size": 1048576,
+          "read_pct": 100,
+          "random_pct": 0,
+          "burst_len": 4,
+          "delay_ms": 10
+        }
+      ]
+    },
+    {
+      "type": "net_client",
+      "host": "10.0.0.20",
+      "port": 5201,
+      "proto": "tcp",
+      "streams": 4,
+      "duration_s": 30,
+      "packet_size": "128KiB",
+      "mode": "throughput",
+      "reverse": false
+    },
+    {
+      "type": "net_client",
+      "host": "10.0.0.20",
+      "port": 5201,
+      "proto": "udp",
+      "streams": 1,
+      "duration_s": 30,
+      "udp_rate_mbps": 1000,
+      "packet_size": 1400,
+      "mode": "throughput",
+      "reverse": true
+    },
+    {
+      "type": "net_client",
+      "host": "10.0.0.20",
+      "proto": "tcp",
+      "duration_s": 15,
+      "packet_size": 64,
+      "mode": "latency"
+    },
+    {"type": "net_server", "bind": "0.0.0.0", "port": 5202, "proto": "tcp", "once": true}
+  ]
+}

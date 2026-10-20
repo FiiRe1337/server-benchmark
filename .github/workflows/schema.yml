@@ -1,0 +1,29 @@
+name: Schema-Validierung
+
+on:
+  push:
+    paths:
+      - "schema/**"
+      - "tools/validate_examples.py"
+      - ".github/workflows/schema.yml"
+  pull_request:
+    paths:
+      - "schema/**"
+      - "tools/validate_examples.py"
+      - ".github/workflows/schema.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: jsonschema installieren
+        run: pip install jsonschema
+      - name: Schemas und Beispiele prüfen
+        run: python tools/validate_examples.py

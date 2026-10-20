@@ -1,0 +1,217 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/FiiRe1337/server-benchmark/raw/main/schema/sb-progress-1.schema.json",
+  "title": "sbench Fortschritts-Event (sb-progress/1)",
+  "description": "Ein Event pro Zeile (JSON Lines, UTF-8, LF). Jede Zeile wird einzeln gegen dieses Schema validiert.",
+  "oneOf": [
+    {
+      "type": "object",
+      "description": "Lauf beginnt.",
+      "properties": {
+        "ev": {
+          "const": "start"
+        },
+        "run_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,64}$"
+        },
+        "tests": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Anzahl Tests im Job."
+        }
+      },
+      "required": [
+        "ev",
+        "run_id",
+        "tests"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "description": "Phasenwechsel eines Tests.",
+      "properties": {
+        "ev": {
+          "const": "phase"
+        },
+        "test": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Testindex."
+        },
+        "name": {
+          "enum": [
+            "preparing",
+            "warmup",
+            "measure",
+            "cleanup"
+          ]
+        }
+      },
+      "required": [
+        "ev",
+        "test",
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "description": "Zwischenwerte des letzten Tick-Intervalls (nur in der Phase measure). Storage-Ticks enthalten immer iops, mbps, lat_us und cpu_pct.",
+      "properties": {
+        "ev": {
+          "const": "tick"
+        },
+        "test": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Testindex."
+        },
+        "t": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Sekunden seit Beginn der Messphase."
+        },
+        "iops": {
+          "type": "number",
+          "minimum": 0
+        },
+        "mbps": {
+          "type": "number",
+          "minimum": 0,
+          "description": "storage: MB/s; net_*: Mbit/s."
+        },
+        "lat_us": {
+          "type": "object",
+          "description": "Latenz im Tick-Intervall.",
+          "properties": {
+            "mean": {
+              "type": "number",
+              "minimum": 0
+            },
+            "p50": {
+              "type": "number",
+              "minimum": 0
+            },
+            "p99": {
+              "type": "number",
+              "minimum": 0
+            },
+            "max": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "mean",
+            "p50",
+            "p99",
+            "max"
+          ],
+          "additionalProperties": false
+        },
+        "cpu_pct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "ops_per_s": {
+          "type": "number",
+          "minimum": 0,
+          "description": "cpu: Operationen pro Sekunde."
+        },
+        "gbps": {
+          "type": "number",
+          "minimum": 0,
+          "description": "memory: GB/s."
+        },
+        "workers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "iops": {
+                "type": "number",
+                "minimum": 0
+              },
+              "mbps": {
+                "type": "number",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "ev",
+        "test",
+        "t"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "description": "Fehler oder Warnung.",
+      "properties": {
+        "ev": {
+          "const": "error"
+        },
+        "code": {
+          "type": "string",
+          "pattern": "^E_[A-Z0-9_]+$"
+        },
+        "msg": {
+          "type": "string"
+        },
+        "field": {
+          "type": "string",
+          "pattern": "^(/([^/~]|~[01])*)*$",
+          "description": "JSON Pointer auf das betroffene Job-Feld."
+        },
+        "test": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Testindex, falls zuordenbar."
+        }
+      },
+      "required": [
+        "ev",
+        "code",
+        "msg"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "description": "Lauf beendet; immer das letzte Event.",
+      "properties": {
+        "ev": {
+          "const": "done"
+        },
+        "result": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Pfad der geschriebenen Ergebnisdatei."
+        },
+        "aborted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ev",
+        "result",
+        "aborted"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

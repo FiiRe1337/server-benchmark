@@ -1,0 +1,16 @@
+{
+  "schema": "sb-validate/1",
+  "ok": false,
+  "errors": [
+    {
+      "path": "/tests/0/access_specs/1/block_size",
+      "code": "E_BLOCK_ALIGN",
+      "msg": "block_size 1000 ist kein Vielfaches der logischen Sektorgröße (512 Bytes) von \\\\.\\PhysicalDrive2; bei cache = unbuffered erforderlich."
+    },
+    {
+      "path": "/tests/0/access_specs",
+      "code": "E_WEIGHT_SUM",
+      "msg": "Summe der Gewichte ist 90, erwartet 100."
+    }
+  ]
+}
