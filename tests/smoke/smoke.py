@@ -178,6 +178,73 @@ k32.CloseHandle.argtypes = [wintypes.HANDLE]
 INVALID_HANDLE = wintypes.HANDLE(-1).value
 
 
+def run_restricted(exe, *args, cwd: Path, timeout=120):
+    """Startet exe mit eingeschränktem Token (Administratoren nur 'deny only', LUA_TOKEN,
+    Integrität Medium) wie aus einer nicht erhöhten Konsole. Rückgabe (exit_code, stdout,
+    stderr) oder None, wenn der Runner das nicht zulässt (dann wird der Test übersprungen)."""
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    adv = ctypes.WinDLL("advapi32", use_last_error=True)
+
+    class SA(ctypes.Structure):
+        _fields_ = [("Sid", ctypes.c_void_p), ("Attributes", wintypes.DWORD)]
+
+    class SI(ctypes.Structure):
+        _fields_ = [("cb", wintypes.DWORD), ("lpReserved", wintypes.LPWSTR), ("lpDesktop", wintypes.LPWSTR),
+                    ("lpTitle", wintypes.LPWSTR), ("dwX", wintypes.DWORD), ("dwY", wintypes.DWORD),
+                    ("dwXSize", wintypes.DWORD), ("dwYSize", wintypes.DWORD), ("dwXCountChars", wintypes.DWORD),
+                    ("dwYCountChars", wintypes.DWORD), ("dwFillAttribute", wintypes.DWORD), ("dwFlags", wintypes.DWORD),
+                    ("wShowWindow", wintypes.WORD), ("cbReserved2", wintypes.WORD), ("lpReserved2", ctypes.c_void_p),
+                    ("hStdInput", wintypes.HANDLE), ("hStdOutput", wintypes.HANDLE), ("hStdError", wintypes.HANDLE)]
+
+    class PI(ctypes.Structure):
+        _fields_ = [("hProcess", wintypes.HANDLE), ("hThread", wintypes.HANDLE),
+                    ("dwProcessId", wintypes.DWORD), ("dwThreadId", wintypes.DWORD)]
+
+    k32.GetCurrentProcess.restype = wintypes.HANDLE
+    tok, rtok = wintypes.HANDLE(), wintypes.HANDLE()
+    # TOKEN_ASSIGN_PRIMARY|DUPLICATE|QUERY|ADJUST_DEFAULT|ADJUST_SESSIONID
+    if not adv.OpenProcessToken(k32.GetCurrentProcess(), 0x1 | 0x2 | 0x8 | 0x80 | 0x100, ctypes.byref(tok)):
+        print(f"  OpenProcessToken: Fehler {ctypes.get_last_error()}")
+        return None
+    # DISABLE_MAX_PRIVILEGE | LUA_TOKEN
+    if not adv.CreateRestrictedToken(tok, 0x1 | 0x4, 0, None, 0, None, 0, None, ctypes.byref(rtok)):
+        print(f"  CreateRestrictedToken: Fehler {ctypes.get_last_error()}")
+        return None
+    sid = ctypes.c_void_p()
+    if adv.ConvertStringSidToSidW("S-1-16-8192", ctypes.byref(sid)):  # Medium Mandatory Level
+        tml = SA(sid, 0x20)  # SE_GROUP_INTEGRITY
+        adv.SetTokenInformation(rtok, 25, ctypes.byref(tml), ctypes.sizeof(tml) + adv.GetLengthSid(sid))
+    outp, errp = cwd / "restricted.out", cwd / "restricted.err"
+    with open(outp, "wb") as fo, open(errp, "wb") as fe:
+        import msvcrt
+        ho, he = msvcrt.get_osfhandle(fo.fileno()), msvcrt.get_osfhandle(fe.fileno())
+        os.set_handle_inheritable(ho, True)
+        os.set_handle_inheritable(he, True)
+        si = SI()
+        si.cb = ctypes.sizeof(si)
+        si.dwFlags = 0x100  # STARTF_USESTDHANDLES
+        si.hStdOutput, si.hStdError = ho, he
+        pi = PI()
+        cmd = ctypes.create_unicode_buffer(subprocess.list2cmdline([str(exe), *map(str, args)]))
+        print("$ [eingeschränkt] " + cmd.value, flush=True)
+        ok = adv.CreateProcessAsUserW(rtok, None, cmd, None, None, True, 0x08000000, None, str(cwd),
+                                      ctypes.byref(si), ctypes.byref(pi))  # CREATE_NO_WINDOW
+        if not ok:
+            print(f"  CreateProcessAsUserW: Fehler {ctypes.get_last_error()}")
+            return None
+        k32.WaitForSingleObject(pi.hProcess, timeout * 1000)
+        code = wintypes.DWORD()
+        k32.GetExitCodeProcess(pi.hProcess, ctypes.byref(code))
+        k32.CloseHandle(pi.hThread)
+        k32.CloseHandle(pi.hProcess)
+    k32.CloseHandle(rtok)
+    k32.CloseHandle(tok)
+    err = errp.read_bytes()
+    if err:
+        print("  stderr: " + err.decode("utf-8", "replace").strip()[:2000])
+    return code.value, outp.read_bytes(), err
+
+
 def pipe_reader(name: str, out: list, ready: threading.Event, close_after: int = 0):
     h = k32.CreateNamedPipeW(name, 0x00000001, 0, 1, 65536, 65536, 0, None)  # PIPE_ACCESS_INBOUND, Byte-Modus
     if h == INVALID_HANDLE or h is None:
@@ -348,6 +415,10 @@ def main() -> int:
           "Ticks mit read/write-Aufteilung und proc_cpu_pct")
     check(all(abs(t["read_iops"] + t["write_iops"] - t["iops"]) <= 0.2 for t in ticks), "Tick: read_iops + write_iops = iops")
     check(all("lat_us" in w for t in ticks for w in t["workers"] if w["iops"] > 0), "Tick: workers[].lat_us")
+    sm = json.loads(out.read_text(encoding="utf-8")) if out.exists() else {"tests": [{}]}
+    tg = sm["tests"][0].get("targets", [])
+    check(tg == [{"index": 0, "path": str(testfile), "kind": "file", "created": True, "deleted": True}] and not testfile.exists(),
+          f"#5: angelegte Testdatei nach dem Lauf gelöscht, targets[] = {tg}")
     rj = runs_dir / "smoke-run.jsonl"
     check(rj.exists() and read_jsonl(rj) == events, "runs\\smoke-run.jsonl = Events des --progress-Ziels")
     check(not (runs_dir / "smoke-run.lock.json").exists(), "Lock-Datei nach Laufende gelöscht")
@@ -484,10 +555,33 @@ def main() -> int:
     if sres and sres["tests"]:
         s = sres["tests"][0]["summary"]
         check(s["io_count"] > 0, f"Teilergebnis enthält Messwerte ({s['io_count']} I/Os, {s['iops']:.0f} IOPS)")
+        tg = sres["tests"][0].get("targets", [])
+        check(len(tg) == 1 and tg[0]["created"] and tg[0]["deleted"] and not testfile.exists(),
+              f"#5: Testdatei auch nach stop gelöscht ({tg})")
     p = run(sbench, "stop", "--id", "gibt-es-nicht")
     check(p.returncode == 1, "stop ohne laufenden Lauf: Exit 1")
     p = run(sbench, "list", "--running", "--json")
     check(p.returncode == 0 and json.loads(p.stdout.decode("utf-8"))["runs"] == [], "list --running nach Stop leer")
+
+    print("\n== #5: --keep-files, vorhandene Dateien, Aufräumen nach Fehler ==")
+    kj = storage_job(work / "job-keep.json", "keep", testfile, 1, warmup=0)
+    p = run(sbench, "run", "--job", kj, "--out", work / "result-keep.json", "--keep-files")
+    kt = json.loads((work / "result-keep.json").read_text(encoding="utf-8"))["tests"][0].get("targets", []) if p.returncode == 0 else []
+    check(p.returncode == 0 and len(kt) == 1 and kt[0]["created"] and not kt[0]["deleted"] and testfile.exists(),
+          f"--keep-files: angelegt, nicht gelöscht ({kt})")
+    p = run(sbench, "run", "--job", kj, "--out", work / "result-pre.json")
+    kt = json.loads((work / "result-pre.json").read_text(encoding="utf-8"))["tests"][0].get("targets", []) if p.returncode == 0 else []
+    check(p.returncode == 0 and len(kt) == 1 and not kt[0]["created"] and not kt[0]["deleted"] and testfile.exists(),
+          f"vorhandene Datei bleibt unangetastet ({kt})")
+    huge = work / "sbtest-zu-gross.dat"
+    hj = json.loads(kj.read_text(encoding="utf-8"))
+    hj["tests"][0]["targets"][0].update({"path": str(huge), "file_size": 2**50})
+    hjp = work / "job-huge.json"
+    hjp.write_text(json.dumps(hj), encoding="utf-8")
+    p = run(sbench, "run", "--job", hjp, "--out", work / "result-huge.json", "--id", "cleanup-error")
+    hl = data_dir / "logs" / "cleanup-error.log"
+    check(p.returncode == 1 and not huge.exists() and hl.exists() and "gelöscht (von sbench angelegt)" in hl.read_text(encoding="utf-8"),
+          f"Fehler beim Anlegen (1 PiB): Exit 1 (ist {p.returncode}), angelegte Datei gelöscht")
 
     print("\n== nicht implementierte Testtypen ==")
     ni = storage_job(work / "job-ni.json", "ni", testfile, 1, warmup=0,
@@ -504,6 +598,32 @@ def main() -> int:
     nres = check_result(nout, "Ergebnis (not implemented)", expect_aborted=False)
     if nres:
         check([t["index"] for t in nres["tests"]] == [0], "nur der Storage-Test im Ergebnis")
+
+    print("\n== #6: ohne Adminrechte (eingeschränkter Token) ==")
+    rdd = work / "dd-restricted"
+    rjob = work / "job-nonadmin.json"
+    rjob.write_text(json.dumps({"schema": "sb-job/1", "name": "nonadmin", "tests": [{"type": "storage",
+                    "targets": [{"path": "\\\\.\\C:", "kind": "volume"}], "duration_s": 1, "warmup_s": 0,
+                    "access_specs": [{"weight": 100, "block_size": "4KiB", "read_pct": 100, "random_pct": 100}]}]}),
+                    encoding="utf-8")
+    rr = run_restricted(sbench, "--data-dir", rdd, "info", "--json", cwd=work)
+    if rr is None:
+        print("  [SKIP] eingeschränkter Token auf diesem Runner nicht möglich, Exit 4 manuell prüfen (docs/abnahme-m1.md)")
+        SUMMARY.append("#6 Exit 4: übersprungen (kein eingeschränkter Token)")
+    else:
+        el = json.loads(rr[1].decode("utf-8"))["meta"].get("elevated") if rr[0] == 0 else None
+        check(el is False, f"eingeschränkter Token: meta.elevated = false (ist {el})")
+        rr = run_restricted(sbench, "--data-dir", rdd, "validate", "--job", rjob, cwd=work)
+        vd = json.loads(rr[1].decode("utf-8")) if rr and rr[1] else {}
+        check(rr is not None and rr[0] == 0 and any(w["code"] == "W_NEEDS_ADMIN" for w in vd.get("warnings", [])),
+              f"validate ohne Admin: Exit 0 mit W_NEEDS_ADMIN ({vd.get('warnings')})")
+        rr = run_restricted(sbench, "--data-dir", rdd, "run", "--job", rjob, "--out", work / "result-nonadmin.json",
+                            "--progress", f"file:{work / 'progress-nonadmin.jsonl'}", "--id", "nonadmin", cwd=work)
+        pev = read_jsonl(work / "progress-nonadmin.jsonl") if (work / "progress-nonadmin.jsonl").exists() else []
+        check(rr is not None and rr[0] == 4 and not (work / "result-nonadmin.json").exists()
+              and any(e.get("ev") == "error" and e.get("code") == "E_ACCESS_DENIED" for e in pev),
+              f"run ohne Admin: Exit 4 (ist {rr and rr[0]}), E_ACCESS_DENIED, kein Ergebnis")
+        SUMMARY.append(f"#6 Exit 4 ohne Admin: {'ok' if rr and rr[0] == 4 else 'FEHLER'}")
 
     print("\n== export ==")
     for style in ("flat", "iometer"):

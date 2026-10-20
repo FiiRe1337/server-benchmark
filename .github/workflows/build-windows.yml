@@ -3,7 +3,7 @@ name: Windows-Build (sbench)
 on:
   push:
     branches: [main]
-    tags: ["v*"]
+    # Tags v* baut und veröffentlicht release.yml (ruft diesen Workflow per workflow_call auf)
   pull_request:
   workflow_dispatch:
   # Aufruf aus anderen Workflows (z. B. gui-ci.yml, release.yml) per `uses:` + `needs:`.
@@ -229,24 +229,3 @@ jobs:
             out2019
           if-no-files-found: ignore
           retention-days: 14
-
-  release:
-    name: Release (Tag v*)
-    # nur bei direktem Lauf (nicht per workflow_call: dort ist github.workflow der Aufrufer)
-    if: startsWith(github.ref, 'refs/tags/v') && github.workflow == 'Windows-Build (sbench)'
-    needs: [build, test, container]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: sbench-*
-          path: rel
-      - name: Archive packen und Release anlegen
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          cd rel
-          for d in sbench-windows-x64 sbench-windows-arm64 sbench-cli-x64 sbench-cli-arm64; do (cd "$d" && zip -r "../$d-${GITHUB_REF_NAME}.zip" .); done
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "sbench $GITHUB_REF_NAME" --generate-notes *.zip

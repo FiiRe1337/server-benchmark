@@ -65,7 +65,8 @@ bzw. Hyper-V Server. sbench selbst ist immer eine Konsolenanwendung.
   Hyper-V-Isolation; der Container-Job läuft (Stand dieses PRs) erfolgreich.
 - **Server 2016 (Build 14393):** In der CI nicht verfügbar (kein Runner, und
   `servercore:ltsc2016` läuft auf aktuellen Hosts nur mit Hyper-V-Isolation und wird nicht
-  mehr gepflegt). Muss manuell geprüft werden.
+  mehr gepflegt). Muss manuell geprüft werden: Ablauf in `docs/abnahme-m1.md`,
+  Abschnitt 8.3 (Issue #7). Ergebnis: *noch offen*.
 - **Container und Hypervisor-Rolle:** In einem Container mit Prozessisolation teilt sbench
   den Kernel des Hosts. Auf dem `windows-2022`-Runner meldet `info` deshalb
   `role = host` (CPUID-Bit *CreatePartitions*), obwohl der Runner selbst eine Azure-VM ist:

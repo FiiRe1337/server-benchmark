@@ -28,6 +28,7 @@ typedef struct sb_run_options {
     const char *log_path;        /* --log; NULL -> <datenverzeichnis>\logs\<run_id>.log */
     uint32_t    tick_ms;         /* --tick-ms, 0 -> 1000 */
     int         allow_destructive; /* --allow-destructive: Schreibtests auf volume/physical mit allow_destructive */
+    int         keep_files;        /* --keep-files: von sbench angelegte Testdateien nicht löschen */
     const char *cmdline;         /* nur fürs Log */
 } sb_run_options;
 

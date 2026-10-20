@@ -1,0 +1,183 @@
+# Release: Kern (build-windows.yml) und GUI (build-gui.yml) aus demselben Commit bauen,
+# Versionen prüfen, Assets umbenennen, SHA256SUMS.txt erzeugen und als GitHub-Release
+# veröffentlichen. Ablauf und Checkliste: docs/release.md
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Nur Vorschau (Artifact release-preview), nichts veröffentlichen"
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  meta:
+    name: Modus bestimmen
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.m.outputs.publish }}
+      tag: ${{ steps.m.outputs.tag }}
+      core_version: ${{ steps.m.outputs.core_version }}
+    steps:
+      - id: m
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -eu
+          publish=false
+          if [ "$GITHUB_EVENT_NAME" = push ]; then publish=true; fi
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "$DRY_RUN" = false ]; then publish=true; fi
+          tag=""; core_version=""
+          case "$GITHUB_REF" in
+            refs/tags/v*) tag="$GITHUB_REF_NAME"; core_version="${GITHUB_REF_NAME#v}" ;;
+          esac
+          if [ "$publish" = true ] && [ -z "$tag" ]; then
+            echo "::error::Veröffentlichen nur von einem Tag v* aus (Ref ist $GITHUB_REF). Für eine Vorschau dry_run=true nutzen."
+            exit 1
+          fi
+          echo "Ereignis=$GITHUB_EVENT_NAME ref=$GITHUB_REF publish=$publish tag=$tag"
+          { echo "publish=$publish"; echo "tag=$tag"; echo "core_version=$core_version"; } >> "$GITHUB_OUTPUT"
+
+  core:
+    name: Kern
+    needs: meta
+    uses: ./.github/workflows/build-windows.yml
+    with:
+      version: ${{ needs.meta.outputs.core_version }}
+
+  gui:
+    name: GUI
+    needs: core
+    uses: ./.github/workflows/build-gui.yml
+    with:
+      version: ${{ needs.core.outputs.version }}
+      core_artifact: ${{ needs.core.outputs.cli_artifact_x64 }}
+
+  verify:
+    name: Version prüfen (${{ matrix.arch }})
+    needs: [meta, core]
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arch: x64
+            os: windows-latest
+          - arch: arm64
+            os: windows-11-arm
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sbench-cli-${{ matrix.arch }}
+          path: cli
+      - name: sbench version --json gegen Tag und Build prüfen
+        shell: pwsh
+        env:
+          TAG: ${{ needs.meta.outputs.tag }}
+          CORE_VERSION: ${{ needs.core.outputs.version }}
+          CORE_COMMIT: ${{ needs.core.outputs.commit }}
+        run: |
+          $j = & cli\sbench.exe version --json | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw "sbench version --json: Exit $LASTEXITCODE" }
+          $j | ConvertTo-Json -Compress | Write-Host
+          $hash = (Get-FileHash cli\sbench.exe -Algorithm SHA256).Hash.ToLower()
+          $fail = @()
+          if ($env:TAG -and $j.version -ne $env:TAG.Substring(1)) { $fail += "version $($j.version) passt nicht zum Tag $env:TAG" }
+          if ($j.version -ne $env:CORE_VERSION) { $fail += "version $($j.version) <> Build-Output $env:CORE_VERSION" }
+          if ($j.commit -ne $env:CORE_COMMIT) { $fail += "commit $($j.commit) <> $env:CORE_COMMIT" }
+          if ($j.arch -ne "${{ matrix.arch }}") { $fail += "arch $($j.arch) <> ${{ matrix.arch }}" }
+          if ($j.sha256 -ne $hash) { $fail += "sha256 $($j.sha256) <> Datei $hash" }
+          if ($fail) { $fail | ForEach-Object { Write-Host "::error::$_" }; exit 1 }
+          Write-Host "OK: sbench $($j.version) ($($j.arch), $($j.commit.Substring(0,7)))"
+
+  publish:
+    name: ${{ needs.meta.outputs.publish == 'true' && 'Veröffentlichen' || 'Vorschau (dry run)' }}
+    needs: [meta, core, gui, verify]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PUBLISH: ${{ needs.meta.outputs.publish }}
+      VERSION: ${{ needs.core.outputs.version }}
+      META_TAG: ${{ needs.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: docs/release-notes
+      - uses: actions/download-artifact@v4
+        with:
+          path: art
+          pattern: "sbench-*"
+      - name: Assets umbenennen und SHA256SUMS.txt erzeugen
+        run: |
+          set -eu
+          tag="${META_TAG:-v$VERSION}"
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+          ls -R art | head -50
+          test -f art/sbench-gui-x64/sbench-gui.exe || { echo "::error::sbench-gui-x64 enthält keine sbench-gui.exe"; exit 1; }
+          mkdir assets
+          pack() { (cd "art/$1" && zip -q -r -X "$GITHUB_WORKSPACE/assets/$2" .); }
+          for a in x64 arm64; do
+            pack "sbench-windows-$a" "sbench-$tag-windows-$a.zip"
+            pack "sbench-cli-$a"     "sbench-$tag-cli-$a.zip"
+          done
+          pack sbench-gui-x64 "sbench-gui-$tag-x64.zip"
+          (cd assets && sha256sum -- *.zip > SHA256SUMS.txt && cat SHA256SUMS.txt)
+      - name: Release-Notes
+        run: |
+          set -eu
+          f="docs/release-notes/$TAG.md"
+          pre=false
+          case "$TAG" in *-alpha*|*-beta*|*-rc*) pre=true ;; esac
+          if [ -f "$f" ]; then
+            cp "$f" notes.md; src="$f"
+          else
+            src="generate-notes"
+            gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$TAG" -f target_commitish="$GITHUB_SHA" \
+              --jq .body > notes.md 2>/dev/null || echo "(Notizen erzeugt GitHub beim Veröffentlichen: --generate-notes)" > notes.md
+          fi
+          echo "PRERELEASE=$pre" >> "$GITHUB_ENV"
+          echo "NOTES_SRC=$src" >> "$GITHUB_ENV"
+          jq -n --arg tag "$TAG" --arg version "$VERSION" --arg commit "${{ needs.core.outputs.commit }}" \
+                --argjson prerelease "$pre" --arg notes "$src" --argjson publish "$PUBLISH" \
+                '{tag:$tag, version:$version, commit:$commit, prerelease:$prerelease, notes_source:$notes, publish:$publish,
+                  title:("sbench " + $tag)}' > release.json
+          cat release.json
+          {
+            echo "### Release $TAG ($([ "$PUBLISH" = true ] && echo veröffentlichen || echo Vorschau))"
+            echo "- Version: \`$VERSION\`, Pre-release: $pre, Notizen: $src"
+            echo '```'; cat assets/SHA256SUMS.txt; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Vorschau hochladen (dry run)
+        if: env.PUBLISH != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-preview
+          path: |
+            assets
+            notes.md
+            release.json
+          if-no-files-found: error
+      - name: GitHub-Release anlegen
+        if: env.PUBLISH == 'true'
+        run: |
+          set -eu
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Release $TAG existiert bereits"; exit 1
+          fi
+          args=(--repo "$GITHUB_REPOSITORY" --title "sbench $TAG" --verify-tag)
+          if [ "$NOTES_SRC" = generate-notes ]; then args+=(--generate-notes); else args+=(--notes-file notes.md); fi
+          if [ "$PRERELEASE" = true ]; then args+=(--prerelease); fi
+          gh release create "$TAG" "${args[@]}" assets/*

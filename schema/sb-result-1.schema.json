@@ -1043,6 +1043,13 @@
         "summary": {
           "type": "object"
         },
+        "targets": {
+          "type": "array",
+          "description": "Nur storage, optional (seit Issue #5): Ziele mit created/deleted.",
+          "items": {
+            "$ref": "#/$defs/target_state"
+          }
+        },
         "per_worker": {
           "type": "array",
           "items": {
@@ -1247,6 +1254,43 @@
           }
         }
       ]
+    },
+    "target_state": {
+      "type": "object",
+      "description": "Ziel eines Storage-Tests mit Aufräum-Status.",
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Index in config.targets."
+        },
+        "path": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "file",
+            "volume",
+            "physical"
+          ]
+        },
+        "created": {
+          "type": "boolean",
+          "description": "true = sbench hat die Testdatei für diesen Test angelegt (sie existierte vorher nicht). Bei volume/physical immer false."
+        },
+        "deleted": {
+          "type": "boolean",
+          "description": "true = sbench hat die selbst angelegte Testdatei nach dem Test gelöscht (nach Ende, Stop oder Fehler). false bei --keep-files, bei vorher vorhandenen Dateien und wenn das Löschen fehlschlug (Warnung im Log)."
+        }
+      },
+      "required": [
+        "index",
+        "path",
+        "kind",
+        "created",
+        "deleted"
+      ],
+      "additionalProperties": false
     }
   }
 }

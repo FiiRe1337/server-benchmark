@@ -288,6 +288,22 @@
         "errors": 0,
         "io_count": 2874756
       },
+      "targets": [
+        {
+          "index": 0,
+          "path": "D:\\sbench\\testfile.dat",
+          "kind": "file",
+          "created": true,
+          "deleted": true
+        },
+        {
+          "index": 1,
+          "path": "\\\\.\\PhysicalDrive2",
+          "kind": "physical",
+          "created": false,
+          "deleted": false
+        }
+      ],
       "per_worker": [
         {
           "id": 0,
