@@ -11,6 +11,7 @@ Prüft gegen die JSON-Schemas in schema/ (jsonschema):
   * Stop: Lauf starten, nach 2 s 'sbench stop' -> Exit 3, aborted = true
   * nicht implementierte Testtypen (net_*, hyperv_info) -> error-Event E_NOT_IMPLEMENTED
   * Meilenstein 2 (cpu, memory, NUMA): siehe smoke_m2.py
+  * import-icf (Iometer-ICF -> sb-job/1): siehe smoke_icf.py
   * export (flat/iometer), bundle (ZIP, manifest gegen sb-bundle/1, sha256,
     --all/--results/--include/--anonymize)
   * Vertrag 1.1: runs/<id>.jsonl, Lock-Datei, runs/index.jsonl, list --running --json,
@@ -683,6 +684,8 @@ def main() -> int:
 
     import smoke_m2  # noqa: E402  (tests/smoke liegt durch den Skriptaufruf im sys.path)
     m2 = smoke_m2.run_m2(sys.modules[__name__], sbench, work, info, quick)
+    import smoke_icf  # noqa: E402
+    icf = smoke_icf.run_icf(sys.modules[__name__], sbench, work, quick)
 
     print("\n== export ==")
     for style in ("flat", "iometer"):
@@ -844,7 +847,8 @@ def main() -> int:
         for src, name in [(out, "result.json"), (prog, "progress.jsonl"), (sout, "result-stop.json"), (nout, "result-ni.json"),
                           (zp, "bundle.zip"), (zp3, "bundle-anon.zip"),
                           (work / "result-vol.json", "result-volume.json"),
-                          (m2.get("cpu", work / "-"), "result-cpu.json"), (m2.get("memory", work / "-"), "result-memory.json")]:
+                          (m2.get("cpu", work / "-"), "result-cpu.json"), (m2.get("memory", work / "-"), "result-memory.json"),
+                          (icf.get("result", work / "-"), "result-icf.json"), (work / "icf-standard.json", "job-icf-standard.json")]:
             if src.exists():
                 shutil.copy2(src, od / name)
         (od / "info.json").write_text(json.dumps(info, indent=2, ensure_ascii=False), encoding="utf-8")
