@@ -1,3 +1,10 @@
 __pycache__/
 *.pyc
 .venv/
+# GUI (gui/)
+gui/build/
+gui/dist/
+gui/data/
+gui/smoke/
+gui/core-bin/
+*.tmp

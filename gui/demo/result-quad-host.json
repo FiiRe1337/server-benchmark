@@ -1,0 +1,1833 @@
+{
+ "schema": "sb-result/1",
+ "kern_version": "0.1.0-mock",
+ "started_utc": "2026-10-20T12:40:31.906Z",
+ "ended_utc": "2026-10-20T12:40:32.165Z",
+ "aborted": false,
+ "meta": {
+  "host": "SRV-HV01",
+  "os": {
+   "name": "Windows Server 2022 Datacenter",
+   "version": "21H2",
+   "build": "20348.2762"
+  },
+  "cpu": {
+   "model": "Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz",
+   "sockets": 2,
+   "cores": 64,
+   "threads": 128,
+   "base_mhz": 2000
+  },
+  "ram_bytes": 549755813888,
+  "ram_free_bytes": 401338343424,
+  "numa_nodes": [
+   {
+    "id": 0,
+    "cpus": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11,
+     12,
+     13,
+     14,
+     15,
+     16,
+     17,
+     18,
+     19,
+     20,
+     21,
+     22,
+     23,
+     24,
+     25,
+     26,
+     27,
+     28,
+     29,
+     30,
+     31,
+     32,
+     33,
+     34,
+     35,
+     36,
+     37,
+     38,
+     39,
+     40,
+     41,
+     42,
+     43,
+     44,
+     45,
+     46,
+     47,
+     48,
+     49,
+     50,
+     51,
+     52,
+     53,
+     54,
+     55,
+     56,
+     57,
+     58,
+     59,
+     60,
+     61,
+     62,
+     63
+    ],
+    "ram_bytes": 274877906944,
+    "ram_free_bytes": 199715979264
+   },
+   {
+    "id": 1,
+    "cpus": 64,
+    "ram_bytes": 274877906944,
+    "ram_free_bytes": 201622364160
+   }
+  ],
+  "elevated": false,
+  "data_dir": "C:\\Tools\\sbench\\data",
+  "hypervisor": {
+   "present": true,
+   "vendor": "Microsoft Hv",
+   "role": "host",
+   "partition_info": {
+    "is_root": true
+   }
+  },
+  "drives": [
+   {
+    "path": "\\\\.\\PhysicalDrive0",
+    "model": "Dell BOSS-S2",
+    "size_bytes": 480103981056,
+    "bus": "SATA",
+    "sector_logical": 512,
+    "sector_physical": 4096
+   },
+   {
+    "path": "\\\\.\\PhysicalDrive1",
+    "model": "Samsung PM9A3 3.84TB",
+    "size_bytes": 3840755982336,
+    "bus": "NVMe",
+    "sector_logical": 512,
+    "sector_physical": 4096
+   },
+   {
+    "path": "\\\\.\\PhysicalDrive2",
+    "model": "Samsung PM9A3 1.92TB",
+    "size_bytes": 1920383410176,
+    "bus": "NVMe",
+    "sector_logical": 512,
+    "sector_physical": 4096
+   }
+  ],
+  "nics": [
+   {
+    "name": "Mellanox ConnectX-5 #1",
+    "ipv4": [
+     "10.0.0.10"
+    ],
+    "ipv6": [
+     "fe80::1e34:daff:fe5a:10"
+    ],
+    "link_mbps": 25000
+   },
+   {
+    "name": "Intel I350 #1",
+    "ipv4": [
+     "192.168.10.21"
+    ],
+    "ipv6": [],
+    "link_mbps": 1000
+   }
+  ]
+ },
+ "tests": [
+  {
+   "index": 0,
+   "type": "storage",
+   "config": {
+    "type": "storage",
+    "targets": [
+     {
+      "path": "D:\\sbench\\testfile.dat",
+      "kind": "file",
+      "file_size": "16GiB"
+     }
+    ],
+    "workers": 4,
+    "queue_depth": 32,
+    "warmup_s": 2,
+    "duration_s": 10,
+    "cache": "unbuffered",
+    "access_specs": [
+     {
+      "weight": 100,
+      "block_size": "4KiB",
+      "read_pct": 100,
+      "random_pct": 100,
+      "align": "4KiB"
+     }
+    ],
+    "name": "4K Random Read"
+   },
+   "summary": {
+    "iops": 1019085.5,
+    "mbps": 4174.17,
+    "read_iops": 1019085.5,
+    "write_iops": 0.0,
+    "read_mbps": 4174.17,
+    "write_mbps": 0.0,
+    "lat_us": {
+     "min": 7.1,
+     "mean": 126.5,
+     "max": 3641.8,
+     "stddev": 119.8,
+     "p50": 91.9,
+     "p90": 256.1,
+     "p95": 342.5,
+     "p99": 590.7,
+     "p99_9": 1088.3,
+     "p99_99": 1799.8
+    },
+    "errors": 0,
+    "io_count": 10190855
+   },
+   "per_worker": [
+    {
+     "id": 0,
+     "target": 0,
+     "iops": 255797.4,
+     "mbps": 1047.75,
+     "read_iops": 255797.4,
+     "write_iops": 0.0,
+     "lat_us": {
+      "min": 7.3,
+      "mean": 129.9,
+      "max": 3739.3,
+      "stddev": 123.0,
+      "p50": 94.3,
+      "p90": 262.9,
+      "p95": 351.6,
+      "p99": 606.5,
+      "p99_9": 1117.5,
+      "p99_99": 1848.0
+     },
+     "io_count": 2557974,
+     "errors": 0
+    },
+    {
+     "id": 1,
+     "target": 0,
+     "iops": 254712.5,
+     "mbps": 1043.3,
+     "read_iops": 254712.5,
+     "write_iops": 0.0,
+     "lat_us": {
+      "min": 7.2,
+      "mean": 127.4,
+      "max": 3667.1,
+      "stddev": 120.6,
+      "p50": 92.5,
+      "p90": 257.9,
+      "p95": 344.8,
+      "p99": 594.8,
+      "p99_9": 1095.9,
+      "p99_99": 1812.3
+     },
+     "io_count": 2547125,
+     "errors": 0
+    },
+    {
+     "id": 2,
+     "target": 0,
+     "iops": 245732.7,
+     "mbps": 1006.52,
+     "read_iops": 245732.7,
+     "write_iops": 0.0,
+     "lat_us": {
+      "min": 7.0,
+      "mean": 125.5,
+      "max": 3614.1,
+      "stddev": 118.9,
+      "p50": 91.2,
+      "p90": 254.1,
+      "p95": 339.9,
+      "p99": 586.2,
+      "p99_9": 1080.0,
+      "p99_99": 1786.1
+     },
+     "io_count": 2457327,
+     "errors": 0
+    },
+    {
+     "id": 3,
+     "target": 0,
+     "iops": 262842.9,
+     "mbps": 1076.6,
+     "read_iops": 262842.9,
+     "write_iops": 0.0,
+     "lat_us": {
+      "min": 6.9,
+      "mean": 122.2,
+      "max": 3518.0,
+      "stddev": 115.7,
+      "p50": 88.7,
+      "p90": 247.4,
+      "p95": 330.8,
+      "p99": 570.6,
+      "p99_9": 1051.3,
+      "p99_99": 1738.6
+     },
+     "io_count": 2628429,
+     "errors": 0
+    }
+   ],
+   "per_spec": [
+    {
+     "spec": 0,
+     "weight": 100,
+     "block_size_bytes": 4096,
+     "read_pct": 100,
+     "random_pct": 100,
+     "iops": 1019085.5,
+     "mbps": 4174.17,
+     "lat_us": {
+      "min": 7.1,
+      "mean": 126.5,
+      "max": 3641.8,
+      "stddev": 119.8,
+      "p50": 91.9,
+      "p90": 256.1,
+      "p95": 342.5,
+      "p99": 590.7,
+      "p99_9": 1088.3,
+      "p99_99": 1799.8
+     },
+     "io_count": 10190855
+    }
+   ],
+   "histogram": [
+    {
+     "le_us": 1,
+     "count": 0
+    },
+    {
+     "le_us": 2,
+     "count": 9
+    },
+    {
+     "le_us": 4,
+     "count": 447
+    },
+    {
+     "le_us": 8,
+     "count": 11166
+    },
+    {
+     "le_us": 16,
+     "count": 135741
+    },
+    {
+     "le_us": 32,
+     "count": 807821
+    },
+    {
+     "le_us": 64,
+     "count": 2364414
+    },
+    {
+     "le_us": 128,
+     "count": 3414845
+    },
+    {
+     "le_us": 256,
+     "count": 2436642
+    },
+    {
+     "le_us": 512,
+     "count": 858014
+    },
+    {
+     "le_us": 1024,
+     "count": 148620
+    },
+    {
+     "le_us": 2048,
+     "count": 12605
+    },
+    {
+     "le_us": 4096,
+     "count": 521
+    },
+    {
+     "le_us": 8192,
+     "count": 10
+    },
+    {
+     "le_us": 16384,
+     "count": 0
+    },
+    {
+     "le_us": 32768,
+     "count": 0
+    },
+    {
+     "le_us": 65536,
+     "count": 0
+    },
+    {
+     "le_us": null,
+     "count": 0
+    }
+   ],
+   "timeseries": [
+    {
+     "t": 1,
+     "iops": 984677.9,
+     "mbps": 4033.24,
+     "lat_us": {
+      "mean": 136.1,
+      "p99": 637.1,
+      "max": 2095.3
+     },
+     "cpu_pct": 36.3
+    },
+    {
+     "t": 2,
+     "iops": 1026360.9,
+     "mbps": 4203.97,
+     "lat_us": {
+      "mean": 126.9,
+      "p99": 616.5,
+      "max": 2456.7
+     },
+     "cpu_pct": 38.0
+    },
+    {
+     "t": 3,
+     "iops": 1010803.1,
+     "mbps": 4140.25,
+     "lat_us": {
+      "mean": 128.9,
+      "p99": 667.2,
+      "max": 2274.0
+     },
+     "cpu_pct": 37.8
+    },
+    {
+     "t": 4,
+     "iops": 1024566.3,
+     "mbps": 4196.62,
+     "lat_us": {
+      "mean": 123.5,
+      "p99": 613.3,
+      "max": 1762.0
+     },
+     "cpu_pct": 37.5
+    },
+    {
+     "t": 5,
+     "iops": 1024558.0,
+     "mbps": 4196.59,
+     "lat_us": {
+      "mean": 127.9,
+      "p99": 645.0,
+      "max": 2559.7
+     },
+     "cpu_pct": 37.7
+    },
+    {
+     "t": 6,
+     "iops": 1050223.9,
+     "mbps": 4301.72,
+     "lat_us": {
+      "mean": 121.6,
+      "p99": 590.9,
+      "max": 2492.3
+     },
+     "cpu_pct": 38.3
+    },
+    {
+     "t": 7,
+     "iops": 1021595.1,
+     "mbps": 4184.45,
+     "lat_us": {
+      "mean": 126.4,
+      "p99": 623.7,
+      "max": 2187.6
+     },
+     "cpu_pct": 37.3
+    },
+    {
+     "t": 8,
+     "iops": 1017674.6,
+     "mbps": 4168.4,
+     "lat_us": {
+      "mean": 122.3,
+      "p99": 580.7,
+      "max": 1674.6
+     },
+     "cpu_pct": 37.4
+    },
+    {
+     "t": 9,
+     "iops": 1012091.3,
+     "mbps": 4145.53,
+     "lat_us": {
+      "mean": 126.1,
+      "p99": 610.9,
+      "max": 2197.8
+     },
+     "cpu_pct": 38.6
+    },
+    {
+     "t": 10,
+     "iops": 1018303.7,
+     "mbps": 4170.97,
+     "lat_us": {
+      "mean": 125.3,
+      "p99": 611.2,
+      "max": 2621.6
+     },
+     "cpu_pct": 37.8
+    }
+   ],
+   "errors": []
+  },
+  {
+   "index": 1,
+   "type": "storage",
+   "config": {
+    "type": "storage",
+    "targets": [
+     {
+      "path": "D:\\sbench\\testfile.dat",
+      "kind": "file",
+      "file_size": "16GiB"
+     }
+    ],
+    "workers": 4,
+    "queue_depth": 32,
+    "warmup_s": 2,
+    "duration_s": 10,
+    "cache": "unbuffered",
+    "access_specs": [
+     {
+      "weight": 100,
+      "block_size": "4KiB",
+      "read_pct": 0,
+      "random_pct": 100,
+      "align": "4KiB"
+     }
+    ],
+    "name": "4K Random Write"
+   },
+   "summary": {
+    "iops": 268188.0,
+    "mbps": 1098.5,
+    "read_iops": 0.0,
+    "write_iops": 268188.0,
+    "read_mbps": 0.0,
+    "write_mbps": 1098.5,
+    "lat_us": {
+     "min": 26.8,
+     "mean": 477.6,
+     "max": 13750.9,
+     "stddev": 452.2,
+     "p50": 346.8,
+     "p90": 966.9,
+     "p95": 1293.1,
+     "p99": 2230.3,
+     "p99_9": 4109.3,
+     "p99_99": 6795.8
+    },
+    "errors": 0,
+    "io_count": 2681880
+   },
+   "per_worker": [
+    {
+     "id": 0,
+     "target": 0,
+     "iops": 67661.8,
+     "mbps": 277.14,
+     "read_iops": 0.0,
+     "write_iops": 67661.8,
+     "lat_us": {
+      "min": 25.9,
+      "mean": 461.6,
+      "max": 13288.8,
+      "stddev": 437.0,
+      "p50": 335.2,
+      "p90": 934.4,
+      "p95": 1249.6,
+      "p99": 2155.4,
+      "p99_9": 3971.2,
+      "p99_99": 6567.4
+     },
+     "io_count": 676618,
+     "errors": 0
+    },
+    {
+     "id": 1,
+     "target": 0,
+     "iops": 68472.4,
+     "mbps": 280.46,
+     "read_iops": 0.0,
+     "write_iops": 68472.4,
+     "lat_us": {
+      "min": 28.0,
+      "mean": 498.4,
+      "max": 14348.5,
+      "stddev": 471.9,
+      "p50": 361.9,
+      "p90": 1009.0,
+      "p95": 1349.3,
+      "p99": 2327.2,
+      "p99_9": 4287.9,
+      "p99_99": 7091.1
+     },
+     "io_count": 684724,
+     "errors": 0
+    },
+    {
+     "id": 2,
+     "target": 0,
+     "iops": 66173.4,
+     "mbps": 271.05,
+     "read_iops": 0.0,
+     "write_iops": 66173.4,
+     "lat_us": {
+      "min": 26.8,
+      "mean": 477.6,
+      "max": 13748.8,
+      "stddev": 452.2,
+      "p50": 346.8,
+      "p90": 966.8,
+      "p95": 1292.9,
+      "p99": 2230.0,
+      "p99_9": 4108.7,
+      "p99_99": 6794.7
+     },
+     "io_count": 661734,
+     "errors": 0
+    },
+    {
+     "id": 3,
+     "target": 0,
+     "iops": 65880.4,
+     "mbps": 269.85,
+     "read_iops": 0.0,
+     "write_iops": 65880.4,
+     "lat_us": {
+      "min": 27.6,
+      "mean": 491.0,
+      "max": 14136.9,
+      "stddev": 464.9,
+      "p50": 356.6,
+      "p90": 994.1,
+      "p95": 1329.4,
+      "p99": 2292.9,
+      "p99_9": 4224.7,
+      "p99_99": 6986.5
+     },
+     "io_count": 658804,
+     "errors": 0
+    }
+   ],
+   "per_spec": [
+    {
+     "spec": 0,
+     "weight": 100,
+     "block_size_bytes": 4096,
+     "read_pct": 0,
+     "random_pct": 100,
+     "iops": 268188.0,
+     "mbps": 1098.5,
+     "lat_us": {
+      "min": 26.8,
+      "mean": 477.6,
+      "max": 13750.9,
+      "stddev": 452.2,
+      "p50": 346.8,
+      "p90": 966.9,
+      "p95": 1293.1,
+      "p99": 2230.3,
+      "p99_9": 4109.3,
+      "p99_99": 6795.8
+     },
+     "io_count": 2681880
+    }
+   ],
+   "histogram": [
+    {
+     "le_us": 1,
+     "count": 0
+    },
+    {
+     "le_us": 2,
+     "count": 0
+    },
+    {
+     "le_us": 4,
+     "count": 0
+    },
+    {
+     "le_us": 8,
+     "count": 3
+    },
+    {
+     "le_us": 16,
+     "count": 158
+    },
+    {
+     "le_us": 32,
+     "count": 3718
+    },
+    {
+     "le_us": 64,
+     "count": 42580
+    },
+    {
+     "le_us": 128,
+     "count": 238829
+    },
+    {
+     "le_us": 256,
+     "count": 659059
+    },
+    {
+     "le_us": 512,
+     "count": 897601
+    },
+    {
+     "le_us": 1024,
+     "count": 603967
+    },
+    {
+     "le_us": 2048,
+     "count": 200512
+    },
+    {
+     "le_us": 4096,
+     "count": 32734
+    },
+    {
+     "le_us": 8192,
+     "count": 2615
+    },
+    {
+     "le_us": 16384,
+     "count": 102
+    },
+    {
+     "le_us": 32768,
+     "count": 2
+    },
+    {
+     "le_us": 65536,
+     "count": 0
+    },
+    {
+     "le_us": null,
+     "count": 0
+    }
+   ],
+   "timeseries": [
+    {
+     "t": 1,
+     "iops": 267363.9,
+     "mbps": 1095.12,
+     "lat_us": {
+      "mean": 472.4,
+      "p99": 2330.6,
+      "max": 9853.0
+     },
+     "cpu_pct": 15.2
+    },
+    {
+     "t": 2,
+     "iops": 268991.5,
+     "mbps": 1101.79,
+     "lat_us": {
+      "mean": 478.7,
+      "p99": 2375.1,
+      "max": 8184.3
+     },
+     "cpu_pct": 14.3
+    },
+    {
+     "t": 3,
+     "iops": 265178.6,
+     "mbps": 1086.17,
+     "lat_us": {
+      "mean": 479.9,
+      "p99": 2276.0,
+      "max": 7865.7
+     },
+     "cpu_pct": 14.1
+    },
+    {
+     "t": 4,
+     "iops": 270708.2,
+     "mbps": 1108.82,
+     "lat_us": {
+      "mean": 480.2,
+      "p99": 2262.5,
+      "max": 5650.6
+     },
+     "cpu_pct": 13.6
+    },
+    {
+     "t": 5,
+     "iops": 270841.2,
+     "mbps": 1109.37,
+     "lat_us": {
+      "mean": 466.8,
+      "p99": 2199.7,
+      "max": 6866.6
+     },
+     "cpu_pct": 13.5
+    },
+    {
+     "t": 6,
+     "iops": 270807.6,
+     "mbps": 1109.23,
+     "lat_us": {
+      "mean": 480.8,
+      "p99": 2265.4,
+      "max": 8204.5
+     },
+     "cpu_pct": 14.1
+    },
+    {
+     "t": 7,
+     "iops": 259778.9,
+     "mbps": 1064.05,
+     "lat_us": {
+      "mean": 491.8,
+      "p99": 2513.9,
+      "max": 5873.7
+     },
+     "cpu_pct": 13.8
+    },
+    {
+     "t": 8,
+     "iops": 272073.6,
+     "mbps": 1114.41,
+     "lat_us": {
+      "mean": 462.2,
+      "p99": 2351.5,
+      "max": 9538.9
+     },
+     "cpu_pct": 13.9
+    },
+    {
+     "t": 9,
+     "iops": 262875.4,
+     "mbps": 1076.74,
+     "lat_us": {
+      "mean": 486.8,
+      "p99": 2332.2,
+      "max": 6797.5
+     },
+     "cpu_pct": 12.9
+    },
+    {
+     "t": 10,
+     "iops": 273260.8,
+     "mbps": 1119.28,
+     "lat_us": {
+      "mean": 476.8,
+      "p99": 2263.3,
+      "max": 7096.2
+     },
+     "cpu_pct": 13.3
+    }
+   ],
+   "errors": []
+  },
+  {
+   "index": 2,
+   "type": "storage",
+   "config": {
+    "type": "storage",
+    "targets": [
+     {
+      "path": "D:\\sbench\\testfile.dat",
+      "kind": "file",
+      "file_size": "16GiB"
+     }
+    ],
+    "workers": 4,
+    "queue_depth": 32,
+    "warmup_s": 2,
+    "duration_s": 10,
+    "cache": "unbuffered",
+    "access_specs": [
+     {
+      "weight": 100,
+      "block_size": "4KiB",
+      "read_pct": 70,
+      "random_pct": 100,
+      "align": "4KiB"
+     }
+    ],
+    "name": "4K Random 70/30"
+   },
+   "summary": {
+    "iops": 792979.9,
+    "mbps": 3248.05,
+    "read_iops": 555085.9,
+    "write_iops": 237894.0,
+    "read_mbps": 2273.64,
+    "write_mbps": 974.41,
+    "lat_us": {
+     "min": 9.0,
+     "mean": 161.0,
+     "max": 4635.1,
+     "stddev": 152.4,
+     "p50": 116.9,
+     "p90": 325.9,
+     "p95": 435.9,
+     "p99": 751.8,
+     "p99_9": 1385.2,
+     "p99_99": 2290.7
+    },
+    "errors": 0,
+    "io_count": 7929799
+   },
+   "per_worker": [
+    {
+     "id": 0,
+     "target": 0,
+     "iops": 196620.0,
+     "mbps": 805.36,
+     "read_iops": 137634.0,
+     "write_iops": 58986.0,
+     "lat_us": {
+      "min": 9.5,
+      "mean": 168.8,
+      "max": 4861.0,
+      "stddev": 159.9,
+      "p50": 122.6,
+      "p90": 341.8,
+      "p95": 457.1,
+      "p99": 788.4,
+      "p99_9": 1452.7,
+      "p99_99": 2402.4
+     },
+     "io_count": 1966200,
+     "errors": 0
+    },
+    {
+     "id": 1,
+     "target": 0,
+     "iops": 189981.5,
+     "mbps": 778.17,
+     "read_iops": 132987.0,
+     "write_iops": 56994.5,
+     "lat_us": {
+      "min": 9.2,
+      "mean": 164.5,
+      "max": 4735.2,
+      "stddev": 155.7,
+      "p50": 119.4,
+      "p90": 333.0,
+      "p95": 445.3,
+      "p99": 768.0,
+      "p99_9": 1415.1,
+      "p99_99": 2340.2
+     },
+     "io_count": 1899815,
+     "errors": 0
+    },
+    {
+     "id": 2,
+     "target": 0,
+     "iops": 207872.4,
+     "mbps": 851.45,
+     "read_iops": 145510.7,
+     "write_iops": 62361.7,
+     "lat_us": {
+      "min": 9.2,
+      "mean": 164.8,
+      "max": 4743.3,
+      "stddev": 156.0,
+      "p50": 119.6,
+      "p90": 333.5,
+      "p95": 446.0,
+      "p99": 769.3,
+      "p99_9": 1417.5,
+      "p99_99": 2344.2
+     },
+     "io_count": 2078724,
+     "errors": 0
+    },
+    {
+     "id": 3,
+     "target": 0,
+     "iops": 198506.0,
+     "mbps": 813.08,
+     "read_iops": 138954.2,
+     "write_iops": 59551.8,
+     "lat_us": {
+      "min": 9.0,
+      "mean": 159.8,
+      "max": 4600.5,
+      "stddev": 151.3,
+      "p50": 116.0,
+      "p90": 323.5,
+      "p95": 432.6,
+      "p99": 746.2,
+      "p99_9": 1374.8,
+      "p99_99": 2273.6
+     },
+     "io_count": 1985060,
+     "errors": 0
+    }
+   ],
+   "per_spec": [
+    {
+     "spec": 0,
+     "weight": 100,
+     "block_size_bytes": 4096,
+     "read_pct": 70,
+     "random_pct": 100,
+     "iops": 792979.9,
+     "mbps": 3248.05,
+     "lat_us": {
+      "min": 9.0,
+      "mean": 161.0,
+      "max": 4635.1,
+      "stddev": 152.4,
+      "p50": 116.9,
+      "p90": 325.9,
+      "p95": 435.9,
+      "p99": 751.8,
+      "p99_9": 1385.2,
+      "p99_99": 2290.7
+     },
+     "io_count": 7929799
+    }
+   ],
+   "histogram": [
+    {
+     "le_us": 1,
+     "count": 0
+    },
+    {
+     "le_us": 2,
+     "count": 1
+    },
+    {
+     "le_us": 4,
+     "count": 96
+    },
+    {
+     "le_us": 8,
+     "count": 3078
+    },
+    {
+     "le_us": 16,
+     "count": 48043
+    },
+    {
+     "le_us": 32,
+     "count": 366370
+    },
+    {
+     "le_us": 64,
+     "count": 1372004
+    },
+    {
+     "le_us": 128,
+     "count": 2532915
+    },
+    {
+     "le_us": 256,
+     "count": 2309873
+    },
+    {
+     "le_us": 512,
+     "count": 1040214
+    },
+    {
+     "le_us": 1024,
+     "count": 230735
+    },
+    {
+     "le_us": 2048,
+     "count": 25103
+    },
+    {
+     "le_us": 4096,
+     "count": 1333
+    },
+    {
+     "le_us": 8192,
+     "count": 34
+    },
+    {
+     "le_us": 16384,
+     "count": 0
+    },
+    {
+     "le_us": 32768,
+     "count": 0
+    },
+    {
+     "le_us": 65536,
+     "count": 0
+    },
+    {
+     "le_us": null,
+     "count": 0
+    }
+   ],
+   "timeseries": [
+    {
+     "t": 1,
+     "iops": 779840.1,
+     "mbps": 3194.22,
+     "lat_us": {
+      "mean": 166.2,
+      "p99": 778.3,
+      "max": 3309.6
+     },
+     "cpu_pct": 29.1
+    },
+    {
+     "t": 2,
+     "iops": 774674.5,
+     "mbps": 3173.07,
+     "lat_us": {
+      "mean": 165.9,
+      "p99": 795.6,
+      "max": 2644.1
+     },
+     "cpu_pct": 30.9
+    },
+    {
+     "t": 3,
+     "iops": 801546.1,
+     "mbps": 3283.13,
+     "lat_us": {
+      "mean": 162.1,
+      "p99": 808.8,
+      "max": 2075.6
+     },
+     "cpu_pct": 29.6
+    },
+    {
+     "t": 4,
+     "iops": 802943.6,
+     "mbps": 3288.86,
+     "lat_us": {
+      "mean": 159.0,
+      "p99": 747.7,
+      "max": 2147.4
+     },
+     "cpu_pct": 30.8
+    },
+    {
+     "t": 5,
+     "iops": 803369.5,
+     "mbps": 3290.6,
+     "lat_us": {
+      "mean": 154.0,
+      "p99": 779.4,
+      "max": 2022.7
+     },
+     "cpu_pct": 31.2
+    },
+    {
+     "t": 6,
+     "iops": 795164.6,
+     "mbps": 3256.99,
+     "lat_us": {
+      "mean": 157.6,
+      "p99": 776.2,
+      "max": 2321.6
+     },
+     "cpu_pct": 30.5
+    },
+    {
+     "t": 7,
+     "iops": 798421.0,
+     "mbps": 3270.33,
+     "lat_us": {
+      "mean": 161.4,
+      "p99": 764.8,
+      "max": 2787.2
+     },
+     "cpu_pct": 30.0
+    },
+    {
+     "t": 8,
+     "iops": 805839.5,
+     "mbps": 3300.72,
+     "lat_us": {
+      "mean": 159.8,
+      "p99": 788.3,
+      "max": 2334.7
+     },
+     "cpu_pct": 30.1
+    },
+    {
+     "t": 9,
+     "iops": 792882.8,
+     "mbps": 3247.65,
+     "lat_us": {
+      "mean": 160.3,
+      "p99": 766.5,
+      "max": 2710.0
+     },
+     "cpu_pct": 30.3
+    },
+    {
+     "t": 10,
+     "iops": 775117.5,
+     "mbps": 3174.88,
+     "lat_us": {
+      "mean": 163.7,
+      "p99": 817.2,
+      "max": 3214.6
+     },
+     "cpu_pct": 30.2
+    }
+   ],
+   "errors": []
+  },
+  {
+   "index": 3,
+   "type": "storage",
+   "config": {
+    "type": "storage",
+    "targets": [
+     {
+      "path": "D:\\sbench\\testfile.dat",
+      "kind": "file",
+      "file_size": "16GiB"
+     }
+    ],
+    "workers": 2,
+    "queue_depth": 8,
+    "warmup_s": 2,
+    "duration_s": 10,
+    "cache": "unbuffered",
+    "access_specs": [
+     {
+      "weight": 100,
+      "block_size": "64KiB",
+      "read_pct": 100,
+      "random_pct": 0,
+      "align": "64KiB"
+     }
+    ],
+    "name": "64K Seq Read"
+   },
+   "summary": {
+    "iops": 105852.3,
+    "mbps": 6937.14,
+    "read_iops": 105852.3,
+    "write_iops": 0.0,
+    "read_mbps": 6937.14,
+    "write_mbps": 0.0,
+    "lat_us": {
+     "min": 8.5,
+     "mean": 151.8,
+     "max": 4368.8,
+     "stddev": 143.7,
+     "p50": 110.2,
+     "p90": 307.2,
+     "p95": 410.8,
+     "p99": 708.6,
+     "p99_9": 1305.6,
+     "p99_99": 2159.1
+    },
+    "errors": 0,
+    "io_count": 1058523
+   },
+   "per_worker": [
+    {
+     "id": 0,
+     "target": 0,
+     "iops": 50452.2,
+     "mbps": 3306.43,
+     "read_iops": 50452.2,
+     "write_iops": 0.0,
+     "lat_us": {
+      "min": 8.3,
+      "mean": 147.1,
+      "max": 4234.0,
+      "stddev": 139.2,
+      "p50": 106.8,
+      "p90": 297.7,
+      "p95": 398.1,
+      "p99": 686.7,
+      "p99_9": 1265.3,
+      "p99_99": 2092.5
+     },
+     "io_count": 504522,
+     "errors": 0
+    },
+    {
+     "id": 1,
+     "target": 0,
+     "iops": 55400.1,
+     "mbps": 3630.71,
+     "read_iops": 55400.1,
+     "write_iops": 0.0,
+     "lat_us": {
+      "min": 8.5,
+      "mean": 151.0,
+      "max": 4346.0,
+      "stddev": 142.9,
+      "p50": 109.6,
+      "p90": 305.6,
+      "p95": 408.7,
+      "p99": 704.9,
+      "p99_9": 1298.8,
+      "p99_99": 2147.8
+     },
+     "io_count": 554001,
+     "errors": 0
+    }
+   ],
+   "per_spec": [
+    {
+     "spec": 0,
+     "weight": 100,
+     "block_size_bytes": 65536,
+     "read_pct": 100,
+     "random_pct": 0,
+     "iops": 105852.3,
+     "mbps": 6937.14,
+     "lat_us": {
+      "min": 8.5,
+      "mean": 151.8,
+      "max": 4368.8,
+      "stddev": 143.7,
+      "p50": 110.2,
+      "p90": 307.2,
+      "p95": 410.8,
+      "p99": 708.6,
+      "p99_9": 1305.6,
+      "p99_99": 2159.1
+     },
+     "io_count": 1058523
+    }
+   ],
+   "histogram": [
+    {
+     "le_us": 1,
+     "count": 0
+    },
+    {
+     "le_us": 2,
+     "count": 0
+    },
+    {
+     "le_us": 4,
+     "count": 18
+    },
+    {
+     "le_us": 8,
+     "count": 535
+    },
+    {
+     "le_us": 16,
+     "count": 7843
+    },
+    {
+     "le_us": 32,
+     "count": 56278
+    },
+    {
+     "le_us": 64,
+     "count": 198379
+    },
+    {
+     "le_us": 128,
+     "count": 344821
+    },
+    {
+     "le_us": 256,
+     "count": 296089
+    },
+    {
+     "le_us": 512,
+     "count": 125534
+    },
+    {
+     "le_us": 1024,
+     "count": 26207
+    },
+    {
+     "le_us": 2048,
+     "count": 2682
+    },
+    {
+     "le_us": 4096,
+     "count": 134
+    },
+    {
+     "le_us": 8192,
+     "count": 3
+    },
+    {
+     "le_us": 16384,
+     "count": 0
+    },
+    {
+     "le_us": 32768,
+     "count": 0
+    },
+    {
+     "le_us": 65536,
+     "count": 0
+    },
+    {
+     "le_us": null,
+     "count": 0
+    }
+   ],
+   "timeseries": [
+    {
+     "t": 1,
+     "iops": 104137.2,
+     "mbps": 6824.74,
+     "lat_us": {
+      "mean": 155.9,
+      "p99": 812.1,
+      "max": 3220.6
+     },
+     "cpu_pct": 8.2
+    },
+    {
+     "t": 2,
+     "iops": 106456.9,
+     "mbps": 6976.76,
+     "lat_us": {
+      "mean": 154.0,
+      "p99": 751.7,
+      "max": 1812.8
+     },
+     "cpu_pct": 10.0
+    },
+    {
+     "t": 3,
+     "iops": 107956.2,
+     "mbps": 7075.02,
+     "lat_us": {
+      "mean": 150.7,
+      "p99": 765.0,
+      "max": 1827.8
+     },
+     "cpu_pct": 9.5
+    },
+    {
+     "t": 4,
+     "iops": 107511.2,
+     "mbps": 7045.86,
+     "lat_us": {
+      "mean": 151.8,
+      "p99": 717.2,
+      "max": 2739.7
+     },
+     "cpu_pct": 9.0
+    },
+    {
+     "t": 5,
+     "iops": 110166.4,
+     "mbps": 7219.87,
+     "lat_us": {
+      "mean": 138.9,
+      "p99": 710.3,
+      "max": 1856.7
+     },
+     "cpu_pct": 8.9
+    },
+    {
+     "t": 6,
+     "iops": 103605.6,
+     "mbps": 6789.9,
+     "lat_us": {
+      "mean": 151.5,
+      "p99": 778.4,
+      "max": 2024.7
+     },
+     "cpu_pct": 9.9
+    },
+    {
+     "t": 7,
+     "iops": 108350.5,
+     "mbps": 7100.86,
+     "lat_us": {
+      "mean": 152.6,
+      "p99": 737.4,
+      "max": 2088.4
+     },
+     "cpu_pct": 8.3
+    },
+    {
+     "t": 8,
+     "iops": 105038.1,
+     "mbps": 6883.78,
+     "lat_us": {
+      "mean": 149.7,
+      "p99": 733.6,
+      "max": 1962.9
+     },
+     "cpu_pct": 9.8
+    },
+    {
+     "t": 9,
+     "iops": 104321.4,
+     "mbps": 6836.81,
+     "lat_us": {
+      "mean": 151.7,
+      "p99": 742.9,
+      "max": 2655.9
+     },
+     "cpu_pct": 8.2
+    },
+    {
+     "t": 10,
+     "iops": 100979.1,
+     "mbps": 6617.77,
+     "lat_us": {
+      "mean": 160.7,
+      "p99": 777.2,
+      "max": 2967.2
+     },
+     "cpu_pct": 8.8
+    }
+   ],
+   "errors": []
+  },
+  {
+   "index": 4,
+   "type": "storage",
+   "config": {
+    "type": "storage",
+    "targets": [
+     {
+      "path": "D:\\sbench\\testfile.dat",
+      "kind": "file",
+      "file_size": "16GiB"
+     }
+    ],
+    "workers": 2,
+    "queue_depth": 8,
+    "warmup_s": 2,
+    "duration_s": 10,
+    "cache": "unbuffered",
+    "access_specs": [
+     {
+      "weight": 100,
+      "block_size": "1MiB",
+      "read_pct": 0,
+      "random_pct": 0,
+      "align": "1MiB"
+     }
+    ],
+    "name": "1M Seq Write"
+   },
+   "summary": {
+    "iops": 3708.7,
+    "mbps": 3888.85,
+    "read_iops": 0.0,
+    "write_iops": 3708.7,
+    "read_mbps": 0.0,
+    "write_mbps": 3888.85,
+    "lat_us": {
+     "min": 248.6,
+     "mean": 4428.8,
+     "max": 127502.7,
+     "stddev": 4193.3,
+     "p50": 3216.0,
+     "p90": 8965.8,
+     "p95": 11989.8,
+     "p99": 20680.2,
+     "p99_9": 38103.2,
+     "p99_99": 63012.8
+    },
+    "errors": 0,
+    "io_count": 37087
+   },
+   "per_worker": [
+    {
+     "id": 0,
+     "target": 0,
+     "iops": 1878.7,
+     "mbps": 1969.96,
+     "read_iops": 0.0,
+     "write_iops": 1878.7,
+     "lat_us": {
+      "min": 251.4,
+      "mean": 4479.2,
+      "max": 128953.8,
+      "stddev": 4241.1,
+      "p50": 3252.6,
+      "p90": 9067.8,
+      "p95": 12126.3,
+      "p99": 20915.6,
+      "p99_9": 38536.8,
+      "p99_99": 63729.9
+     },
+     "io_count": 18787,
+     "errors": 0
+    },
+    {
+     "id": 1,
+     "target": 0,
+     "iops": 1830.0,
+     "mbps": 1918.89,
+     "read_iops": 0.0,
+     "write_iops": 1830.0,
+     "lat_us": {
+      "min": 256.9,
+      "mean": 4576.7,
+      "max": 131759.9,
+      "stddev": 4333.4,
+      "p50": 3323.4,
+      "p90": 9265.2,
+      "p95": 12390.1,
+      "p99": 21370.7,
+      "p99_9": 39375.4,
+      "p99_99": 65116.7
+     },
+     "io_count": 18300,
+     "errors": 0
+    }
+   ],
+   "per_spec": [
+    {
+     "spec": 0,
+     "weight": 100,
+     "block_size_bytes": 1048576,
+     "read_pct": 0,
+     "random_pct": 0,
+     "iops": 3708.7,
+     "mbps": 3888.85,
+     "lat_us": {
+      "min": 248.6,
+      "mean": 4428.8,
+      "max": 127502.7,
+      "stddev": 4193.3,
+      "p50": 3216.0,
+      "p90": 8965.8,
+      "p95": 11989.8,
+      "p99": 20680.2,
+      "p99_9": 38103.2,
+      "p99_99": 63012.8
+     },
+     "io_count": 37087
+    }
+   ],
+   "histogram": [
+    {
+     "le_us": 1,
+     "count": 0
+    },
+    {
+     "le_us": 2,
+     "count": 0
+    },
+    {
+     "le_us": 4,
+     "count": 0
+    },
+    {
+     "le_us": 8,
+     "count": 0
+    },
+    {
+     "le_us": 16,
+     "count": 0
+    },
+    {
+     "le_us": 32,
+     "count": 0
+    },
+    {
+     "le_us": 64,
+     "count": 0
+    },
+    {
+     "le_us": 128,
+     "count": 1
+    },
+    {
+     "le_us": 256,
+     "count": 28
+    },
+    {
+     "le_us": 512,
+     "count": 372
+    },
+    {
+     "le_us": 1024,
+     "count": 2428
+    },
+    {
+     "le_us": 2048,
+     "count": 7790
+    },
+    {
+     "le_us": 4096,
+     "count": 12330
+    },
+    {
+     "le_us": 8192,
+     "count": 9641
+    },
+    {
+     "le_us": 16384,
+     "count": 3721
+    },
+    {
+     "le_us": 32768,
+     "count": 707
+    },
+    {
+     "le_us": 65536,
+     "count": 66
+    },
+    {
+     "le_us": null,
+     "count": 3
+    }
+   ],
+   "timeseries": [
+    {
+     "t": 1,
+     "iops": 3759.8,
+     "mbps": 3942.48,
+     "lat_us": {
+      "mean": 4321.2,
+      "p99": 20700.0,
+      "max": 67481.3
+     },
+     "cpu_pct": 5.8
+    },
+    {
+     "t": 2,
+     "iops": 2237.4,
+     "mbps": 2346.1,
+     "lat_us": {
+      "mean": 7200.4,
+      "p99": 33917.9,
+      "max": 109553.8
+     },
+     "cpu_pct": 5.9
+    },
+    {
+     "t": 3,
+     "iops": 3992.4,
+     "mbps": 4186.35,
+     "lat_us": {
+      "mean": 3943.8,
+      "p99": 18942.5,
+      "max": 59375.8
+     },
+     "cpu_pct": 4.9
+    },
+    {
+     "t": 4,
+     "iops": 3946.1,
+     "mbps": 4137.81,
+     "lat_us": {
+      "mean": 4074.4,
+      "p99": 20082.6,
+      "max": 61931.3
+     },
+     "cpu_pct": 4.6
+    },
+    {
+     "t": 5,
+     "iops": 3890.0,
+     "mbps": 4078.94,
+     "lat_us": {
+      "mean": 4109.9,
+      "p99": 19576.4,
+      "max": 69047.9
+     },
+     "cpu_pct": 5.6
+    },
+    {
+     "t": 6,
+     "iops": 3829.3,
+     "mbps": 4015.28,
+     "lat_us": {
+      "mean": 4122.7,
+      "p99": 19373.1,
+      "max": 72312.5
+     },
+     "cpu_pct": 4.8
+    },
+    {
+     "t": 7,
+     "iops": 3827.5,
+     "mbps": 4013.42,
+     "lat_us": {
+      "mean": 4188.6,
+      "p99": 20312.7,
+      "max": 85845.4
+     },
+     "cpu_pct": 7.0
+    },
+    {
+     "t": 8,
+     "iops": 3867.6,
+     "mbps": 4055.51,
+     "lat_us": {
+      "mean": 4121.6,
+      "p99": 19364.8,
+      "max": 50108.8
+     },
+     "cpu_pct": 6.4
+    },
+    {
+     "t": 9,
+     "iops": 3873.1,
+     "mbps": 4061.21,
+     "lat_us": {
+      "mean": 4010.2,
+      "p99": 21482.5,
+      "max": 63747.8
+     },
+     "cpu_pct": 6.2
+    },
+    {
+     "t": 10,
+     "iops": 3863.7,
+     "mbps": 4051.35,
+     "lat_us": {
+      "mean": 4195.6,
+      "p99": 21199.1,
+      "max": 85835.5
+     },
+     "cpu_pct": 5.8
+    }
+   ],
+   "errors": []
+  }
+ ]
+}

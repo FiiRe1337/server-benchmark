@@ -1,0 +1,221 @@
+{
+ "schema": "sb-info/1",
+ "meta": {
+  "host": "SRV-HV01",
+  "os": {
+   "name": "Windows Server 2022 Datacenter",
+   "version": "21H2",
+   "build": "20348.2762"
+  },
+  "cpu": {
+   "model": "Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz",
+   "sockets": 2,
+   "cores": 64,
+   "threads": 128,
+   "base_mhz": 2000
+  },
+  "ram_bytes": 549755813888,
+  "ram_free_bytes": 401338343424,
+  "numa_nodes": [
+   {
+    "id": 0,
+    "cpus": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11,
+     12,
+     13,
+     14,
+     15,
+     16,
+     17,
+     18,
+     19,
+     20,
+     21,
+     22,
+     23,
+     24,
+     25,
+     26,
+     27,
+     28,
+     29,
+     30,
+     31,
+     32,
+     33,
+     34,
+     35,
+     36,
+     37,
+     38,
+     39,
+     40,
+     41,
+     42,
+     43,
+     44,
+     45,
+     46,
+     47,
+     48,
+     49,
+     50,
+     51,
+     52,
+     53,
+     54,
+     55,
+     56,
+     57,
+     58,
+     59,
+     60,
+     61,
+     62,
+     63
+    ],
+    "ram_bytes": 274877906944,
+    "ram_free_bytes": 199715979264
+   },
+   {
+    "id": 1,
+    "cpus": 64,
+    "ram_bytes": 274877906944,
+    "ram_free_bytes": 201622364160
+   }
+  ],
+  "elevated": false,
+  "data_dir": "C:\\Tools\\sbench\\data",
+  "hypervisor": {
+   "present": true,
+   "vendor": "Microsoft Hv",
+   "role": "host",
+   "partition_info": {
+    "is_root": true
+   }
+  },
+  "drives": [
+   {
+    "path": "\\\\.\\PhysicalDrive0",
+    "model": "Dell BOSS-S2",
+    "size_bytes": 480103981056,
+    "bus": "SATA",
+    "sector_logical": 512,
+    "sector_physical": 4096
+   },
+   {
+    "path": "\\\\.\\PhysicalDrive1",
+    "model": "Samsung PM9A3 3.84TB",
+    "size_bytes": 3840755982336,
+    "bus": "NVMe",
+    "sector_logical": 512,
+    "sector_physical": 4096
+   },
+   {
+    "path": "\\\\.\\PhysicalDrive2",
+    "model": "Samsung PM9A3 1.92TB",
+    "size_bytes": 1920383410176,
+    "bus": "NVMe",
+    "sector_logical": 512,
+    "sector_physical": 4096
+   }
+  ],
+  "nics": [
+   {
+    "name": "Mellanox ConnectX-5 #1",
+    "ipv4": [
+     "10.0.0.10"
+    ],
+    "ipv6": [
+     "fe80::1e34:daff:fe5a:10"
+    ],
+    "link_mbps": 25000
+   },
+   {
+    "name": "Intel I350 #1",
+    "ipv4": [
+     "192.168.10.21"
+    ],
+    "ipv6": [],
+    "link_mbps": 1000
+   }
+  ]
+ },
+ "targets": {
+  "volumes": [
+   {
+    "path": "\\\\.\\C:",
+    "letter": "C",
+    "label": "System",
+    "fs": "NTFS",
+    "size_bytes": 479555973120,
+    "free_bytes": 391230345216
+   },
+   {
+    "path": "\\\\.\\D:",
+    "letter": "D",
+    "label": "Daten",
+    "fs": "ReFS",
+    "size_bytes": 3840617570304,
+    "free_bytes": 2911349620736
+   }
+  ],
+  "physical_disks": [
+   {
+    "path": "\\\\.\\PhysicalDrive0",
+    "model": "Dell BOSS-S2",
+    "size_bytes": 480103981056,
+    "bus": "SATA",
+    "sector_logical": 512,
+    "sector_physical": 4096
+   },
+   {
+    "path": "\\\\.\\PhysicalDrive1",
+    "model": "Samsung PM9A3 3.84TB",
+    "size_bytes": 3840755982336,
+    "bus": "NVMe",
+    "sector_logical": 512,
+    "sector_physical": 4096
+   },
+   {
+    "path": "\\\\.\\PhysicalDrive2",
+    "model": "Samsung PM9A3 1.92TB",
+    "size_bytes": 1920383410176,
+    "bus": "NVMe",
+    "sector_logical": 512,
+    "sector_physical": 4096
+   }
+  ],
+  "nics": [
+   {
+    "name": "Mellanox ConnectX-5 #1",
+    "ipv4": [
+     "10.0.0.10"
+    ],
+    "ipv6": [
+     "fe80::1e34:daff:fe5a:10"
+    ],
+    "link_mbps": 25000
+   },
+   {
+    "name": "Intel I350 #1",
+    "ipv4": [
+     "192.168.10.21"
+    ],
+    "ipv6": [],
+    "link_mbps": 1000
+   }
+  ]
+ }
+}

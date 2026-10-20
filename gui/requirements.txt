@@ -1,0 +1,7 @@
+# GUI runtime (pinned: Qt 6.12 is the last Qt with Windows 10 / Server 2016-2022 compatibility, see docs/kompatibilitaet.md)
+PySide6-Essentials>=6.12,<6.13
+pyqtgraph>=0.13,<0.15
+numpy>=2.0
+# dev / CI
+jsonschema>=4.23
+pyinstaller>=6.10

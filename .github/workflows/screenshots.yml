@@ -1,0 +1,115 @@
+# DRAFT: README screenshots + GUI self-test on Windows. Only manual / tag triggered.
+# Data: core smoke artifact `sbench-smoke-<runner>-<arch>` (docs/cli.md 1.1: result.json, progress.jsonl, info.json);
+# without a run id the mock data from gui/demo/ is used and the images stay labelled "Mockup mit Beispieldaten".
+name: GUI screenshots & self-test
+
+on:
+  workflow_dispatch:
+    inputs:
+      core_run_id:
+        description: "Run-ID of the core smoke workflow (artifact sbench-smoke-windows-2022-x64); empty = mock data"
+        required: false
+      artifact:
+        description: "Smoke artifact name"
+        required: false
+        default: sbench-smoke-windows-2022-x64
+  push:
+    tags: ["m[0-9]*", "v*"]
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+defaults:
+  run:
+    working-directory: gui          # schemas are read from ../schema (sb_contract.base_dir)
+
+jobs:
+  screenshots:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13", cache: pip, cache-dependency-path: gui/requirements.txt }
+      - run: pip install -r requirements.txt
+      - name: Core smoke artifact (optional)
+        if: inputs.core_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact || 'sbench-smoke-windows-2022-x64' }}
+          path: gui/smoke
+          run-id: ${{ inputs.core_run_id }}
+          github-token: ${{ github.token }}
+      - name: Select data + validate against schemas
+        shell: bash
+        run: |
+          if [ -f smoke/progress.jsonl ] && [ -f smoke/result.json ] && [ -f smoke/info.json ]; then
+            mkdir -p smoke/results && cp smoke/result.json smoke/results/
+            echo "SB_ARGS=--replay smoke/progress.jsonl --info smoke/info.json --results smoke/results" >> "$GITHUB_ENV"
+            echo "SB_SRC=Core-Smoke-Artefakt ${{ inputs.artifact }} (Run ${{ inputs.core_run_id }})" >> "$GITHUB_ENV"
+            python tools/check_mock.py smoke/progress.jsonl smoke/result.json smoke/info.json
+          else
+            echo "SB_ARGS=" >> "$GITHUB_ENV"; echo "SB_SRC=Mock (Mockup mit Beispieldaten)" >> "$GITHUB_ENV"
+            python tools/check_mock.py demo/*.json demo/progress.jsonl
+          fi
+      - name: Render 100 %, 150 % and 1366x768 (RDP)
+        env: { QT_QPA_PLATFORM: offscreen }
+        shell: bash
+        run: |
+          python -m sbgui --screenshot ../docs/img          --scale 1   $SB_ARGS --report ../docs/img/report.json
+          python -m sbgui --screenshot ../docs/img/scale150 --scale 1.5 $SB_ARGS --report ../docs/img/scale150/report.json
+          python -m sbgui --screenshot ../docs/img/rdp1366  --size 1366x768 $SB_ARGS --report ../docs/img/rdp1366/report.json
+          python -c "import json,sys; r=json.load(open('../docs/img/rdp1366/report.json')); bad=[k for k,v in r['layout'].items() if v['h_scroll']]; print('h-scroll:', bad); sys.exit(1 if bad else 0)"
+      - uses: actions/upload-artifact@v4
+        with: { name: screenshots, path: docs/img }
+      - name: PR with updated screenshots
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: docs/screenshots-${{ github.ref_name }}
+          title: "docs: GUI-Screenshots für ${{ github.ref_name }}"
+          commit-message: "docs: update GUI screenshots (${{ github.ref_name }})"
+          add-paths: |
+            docs/img/**
+          body: |
+            Automatisch gerendert mit `sbench-gui --screenshot`. Daten: ${{ env.SB_SRC }}.
+
+  selftest:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025, windows-11-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - run: pip install -r requirements.txt
+      - name: Mock E2E (QProcess, offscreen)
+        env: { QT_QPA_PLATFORM: offscreen }
+        run: python tools/live_qprocess_check.py
+      - name: Build one-file EXE
+        run: pyinstaller --noconfirm sbench-gui.spec
+      - name: Self-test (windows + offscreen platform plugin)
+        run: |
+          start "" /wait dist\sbench-gui.exe --self-test --platforms windows,offscreen --report selftest-${{ matrix.os }}.json
+          type selftest-${{ matrix.os }}.json
+        shell: cmd
+      - name: DLL dependencies of Qt (dumpbin)
+        if: matrix.os != 'windows-11-arm'
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC" -Recurse -Filter dumpbin.exe | Where-Object FullName -like '*Hostx64\x64*' | Select-Object -First 1
+          $qt = python -c "import PySide6, os; print(os.path.dirname(PySide6.__file__))"
+          foreach ($f in @("Qt6Gui.dll", "Qt6Widgets.dll", "plugins\platforms\qwindows.dll")) {
+            "== $f"; & $dumpbin.FullName /nologo /dependents (Join-Path $qt $f) | Select-String "\.dll"
+          } | Tee-Object deps-${{ matrix.os }}.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: selftest-${{ matrix.os }}
+          path: |
+            gui/selftest-*.json
+            gui/deps-*.txt

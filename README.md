@@ -56,6 +56,24 @@ python tools/validate_examples.py
 
 Die Prüfung läuft automatisch per GitHub Actions bei Änderungen unter `schema/`.
 
+## GUI (Prototyp M1)
+
+Die GUI liegt unter [`gui/`](gui/) (PySide6 + pyqtgraph, steuert nur `sbench.exe`; ohne Kern läuft sie gegen einen Mock).
+Plan und Screens: [`docs/GUI_PLAN.md`](docs/GUI_PLAN.md) · Kompatibilität: [`docs/kompatibilitaet.md`](docs/kompatibilitaet.md).
+**GUI erfordert Desktop Experience, auf Server Core die CLI nutzen.**
+
+> **Mockup mit Beispieldaten:** Die folgenden Bilder zeigen den Prototyp gegen den Mock-Kern mit erfundenen Werten
+> (Host `SRV-HV01`, VMs `VM-BENCH01`/`VM-SAN02`). Es sind keine Messergebnisse. Echte Screenshots
+> rendert später `.github/workflows/screenshots.yml` aus dem Smoke-Artefakt `sbench-smoke-windows-2022-x64`.
+
+| | |
+|---|---|
+| ![Übersicht (Mockup mit Beispieldaten)](docs/img/01_dashboard.png)<br>Übersicht – *Mockup mit Beispieldaten* | ![Testprofil (Mockup mit Beispieldaten)](docs/img/02_profile_editor.png)<br>Testprofil mit gewichteten Access Specs – *Mockup mit Beispieldaten* |
+| ![Live-Lauf (Mockup mit Beispieldaten)](docs/img/03_live_run.png)<br>Live-Lauf – *Mockup mit Beispieldaten* | ![Vergleich (Mockup mit Beispieldaten)](docs/img/04_compare.png)<br>Vergleich Host/VM – *Mockup mit Beispieldaten* |
+| ![Destruktiver Schreibtest (Mockup mit Beispieldaten)](docs/img/02c_destructive_confirm.png)<br>Bestätigung destruktiver Schreibtest – *Mockup mit Beispieldaten* | ![Export (Mockup mit Beispieldaten)](docs/img/05_export.png)<br>Export und Support-Paket – *Mockup mit Beispieldaten* |
+
+Weitere Screens (Validierung, Rechte, ICF-Import, Re-Attach, Support-Dialog) in [`docs/img/`](docs/img/), RDP-Größe 1366×768 in [`docs/img/rdp1366/`](docs/img/rdp1366/) – alle *Mockup mit Beispieldaten*.
+
 ## Meilensteine
 
 1. **Storage-Kern + Durchstich** – Storage-Test im C-Kern (Dateien, Volumes,
