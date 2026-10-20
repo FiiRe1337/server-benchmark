@@ -1,0 +1,31 @@
+{
+  "schema": "sb-job/1",
+  "name": "Abnahme M1 – 4K random read QD1",
+  "tests": [
+    {
+      "type": "storage",
+      "name": "4K random read, 1 Worker, QD1",
+      "targets": [
+        {
+          "path": "D:\\sbtest.dat",
+          "kind": "file",
+          "file_size": "8GiB"
+        }
+      ],
+      "workers": 1,
+      "queue_depth": 1,
+      "warmup_s": 5,
+      "duration_s": 30,
+      "cache": "unbuffered",
+      "access_specs": [
+        {
+          "name": "4K random read",
+          "weight": 100,
+          "block_size": "4KiB",
+          "read_pct": 100,
+          "random_pct": 100
+        }
+      ]
+    }
+  ]
+}

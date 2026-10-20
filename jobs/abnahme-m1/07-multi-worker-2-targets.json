@@ -1,0 +1,36 @@
+{
+  "schema": "sb-job/1",
+  "name": "Abnahme M1 – 4 Worker auf 2 Targets",
+  "tests": [
+    {
+      "type": "storage",
+      "name": "4K random read, 4 Worker (2 je Target), QD16",
+      "targets": [
+        {
+          "path": "D:\\sbtest1.dat",
+          "kind": "file",
+          "file_size": "8GiB"
+        },
+        {
+          "path": "E:\\sbtest2.dat",
+          "kind": "file",
+          "file_size": "8GiB"
+        }
+      ],
+      "workers": 4,
+      "queue_depth": 16,
+      "warmup_s": 5,
+      "duration_s": 30,
+      "cache": "unbuffered",
+      "access_specs": [
+        {
+          "name": "4K random read",
+          "weight": 100,
+          "block_size": "4KiB",
+          "read_pct": 100,
+          "random_pct": 100
+        }
+      ]
+    }
+  ]
+}

@@ -17,6 +17,11 @@
       "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+([-+].*)?$",
       "description": "Version des Messkerns (SemVer)."
     },
+    "run_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$",
+      "description": "Lauf-ID (wie --id bzw. erzeugt). Identisch mit logs/<run_id>.log, runs/<run_id>.jsonl und dem Eintrag in runs/index.jsonl. Im Schema optional, sbench gibt es immer aus."
+    },
     "started_utc": {
       "type": "string",
       "format": "date-time",
@@ -248,21 +253,13 @@
           "description": "NUMA-Knoten-Nummer."
         },
         "cpus": {
-          "description": "Logische Prozessoren des Knotens: Liste der Indizes oder nur die Anzahl.",
-          "oneOf": [
-            {
-              "type": "array",
-              "items": {
-                "type": "integer",
-                "minimum": 0
-              },
-              "uniqueItems": true
-            },
-            {
-              "type": "integer",
-              "minimum": 0
-            }
-          ]
+          "type": "array",
+          "description": "Logische Prozessoren des Knotens als globale Indizes: Prozessorgruppe × 64 + Bitnummer in der Gruppenmaske (wie GROUP_AFFINITY). Aufsteigend sortiert.",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "uniqueItems": true
         },
         "ram_bytes": {
           "type": "integer",

@@ -1,0 +1,31 @@
+{
+  "schema": "sb-job/1",
+  "name": "Abnahme M1 – 4K random write QD32",
+  "tests": [
+    {
+      "type": "storage",
+      "name": "4K random write, 4 Worker, QD32",
+      "targets": [
+        {
+          "path": "D:\\sbtest.dat",
+          "kind": "file",
+          "file_size": "8GiB"
+        }
+      ],
+      "workers": 4,
+      "queue_depth": 32,
+      "warmup_s": 5,
+      "duration_s": 30,
+      "cache": "unbuffered",
+      "access_specs": [
+        {
+          "name": "4K random write",
+          "weight": 100,
+          "block_size": "4KiB",
+          "read_pct": 0,
+          "random_pct": 100
+        }
+      ]
+    }
+  ]
+}

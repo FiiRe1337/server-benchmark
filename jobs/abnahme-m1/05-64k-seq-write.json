@@ -1,0 +1,31 @@
+{
+  "schema": "sb-job/1",
+  "name": "Abnahme M1 – 64K sequentiell schreiben",
+  "tests": [
+    {
+      "type": "storage",
+      "name": "64K sequentiell schreiben, 1 Worker, QD8",
+      "targets": [
+        {
+          "path": "D:\\sbtest.dat",
+          "kind": "file",
+          "file_size": "8GiB"
+        }
+      ],
+      "workers": 1,
+      "queue_depth": 8,
+      "warmup_s": 5,
+      "duration_s": 30,
+      "cache": "unbuffered",
+      "access_specs": [
+        {
+          "name": "64K seq write",
+          "weight": 100,
+          "block_size": "64KiB",
+          "read_pct": 0,
+          "random_pct": 0
+        }
+      ]
+    }
+  ]
+}

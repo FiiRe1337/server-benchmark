@@ -1,0 +1,31 @@
+{
+  "schema": "sb-job/1",
+  "name": "Abnahme M1 – Iometer-Mix 8K random 70/30",
+  "tests": [
+    {
+      "type": "storage",
+      "name": "8K random 70 % lesen, 4 Worker, QD16",
+      "targets": [
+        {
+          "path": "D:\\sbtest.dat",
+          "kind": "file",
+          "file_size": "8GiB"
+        }
+      ],
+      "workers": 4,
+      "queue_depth": 16,
+      "warmup_s": 5,
+      "duration_s": 30,
+      "cache": "unbuffered",
+      "access_specs": [
+        {
+          "name": "8K random 70/30",
+          "weight": 100,
+          "block_size": "8KiB",
+          "read_pct": 70,
+          "random_pct": 100
+        }
+      ]
+    }
+  ]
+}

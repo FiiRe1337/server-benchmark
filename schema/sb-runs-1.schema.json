@@ -17,6 +17,11 @@
             "type": "string",
             "pattern": "^[A-Za-z0-9_-]{1,64}$"
           },
+          "job_name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Name des Jobs: job.name, sonst Dateiname der Job-Datei ohne Endung."
+          },
           "pid": {
             "type": "integer",
             "minimum": 1,
@@ -41,6 +46,7 @@
         },
         "required": [
           "run_id",
+          "job_name",
           "pid",
           "started_utc",
           "out",
@@ -63,6 +69,11 @@
         "run_id": {
           "type": "string",
           "pattern": "^[A-Za-z0-9_-]{1,64}$"
+        },
+        "job_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Name des Jobs (job.name, sonst Dateiname ohne Endung). Optional, damit ältere Lock-Dateien gültig bleiben."
         },
         "pid": {
           "type": "integer",
