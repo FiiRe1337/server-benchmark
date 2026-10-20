@@ -5,6 +5,7 @@
   "started_utc": "2026-10-20T12:15:02.120Z",
   "ended_utc": "2026-10-20T12:15:36.884Z",
   "aborted": false,
+  "tick_ms": 1000,
   "meta": {
     "host": "SRV-HV01",
     "os": {
@@ -175,12 +176,25 @@
       "role": "none"
     },
     "drives": [],
-    "nics": []
+    "nics": [],
+    "cpu_score": {
+      "formula": "score = ops_per_s / ref_ops_per_s[workload] * 1000",
+      "points": 1000,
+      "reference_threads": 1,
+      "reference_system": "GitHub-Runner windows-2022/windows-2025, AMD EPYC 7763, 1 Thread",
+      "ref_ops_per_s": {
+        "int": 280000000.0,
+        "float": 150000000.0,
+        "crypto": 3400000.0,
+        "mixed": 380000.0
+      }
+    }
   },
   "tests": [
     {
       "index": 0,
       "type": "cpu",
+      "partial": false,
       "config": {
         "type": "cpu",
         "name": "CPU int 1 Thread",
@@ -195,10 +209,12 @@
         "ops_per_s": 284123456.7,
         "score": 1014.7,
         "ops": 1420617283,
+        "score_reference": 280000000.0,
         "cpus": [
           0
         ],
-        "cpu_pct": 0.9
+        "cpu_pct": 0.9,
+        "proc_cpu_pct": 0.88
       },
       "per_worker": [
         {
@@ -212,27 +228,37 @@
         {
           "t": 1.0,
           "ops_per_s": 283122391.8,
-          "cpu_pct": 0.9
+          "score": 1011.2,
+          "cpu_pct": 0.9,
+          "proc_cpu_pct": 0.88
         },
         {
           "t": 2.0,
           "ops_per_s": 282139417.9,
-          "cpu_pct": 0.9
+          "score": 1007.6,
+          "cpu_pct": 0.9,
+          "proc_cpu_pct": 0.88
         },
         {
           "t": 3.0,
           "ops_per_s": 284981137.2,
-          "cpu_pct": 0.9
+          "score": 1017.8,
+          "cpu_pct": 0.9,
+          "proc_cpu_pct": 0.88
         },
         {
           "t": 4.0,
           "ops_per_s": 281693839.1,
-          "cpu_pct": 0.9
+          "score": 1006.0,
+          "cpu_pct": 0.9,
+          "proc_cpu_pct": 0.88
         },
         {
           "t": 5.0,
           "ops_per_s": 284327355.1,
-          "cpu_pct": 0.9
+          "score": 1015.5,
+          "cpu_pct": 0.9,
+          "proc_cpu_pct": 0.88
         }
       ],
       "errors": []
@@ -240,6 +266,7 @@
     {
       "index": 1,
       "type": "cpu",
+      "partial": false,
       "config": {
         "type": "cpu",
         "name": "CPU mixed Knoten 1",
@@ -254,6 +281,7 @@
         "ops_per_s": 3049005.2,
         "score": 8023.7,
         "ops": 15245026,
+        "score_reference": 380000.0,
         "numa_node": 1,
         "cpus": [
           64,
@@ -265,7 +293,8 @@
           76,
           78
         ],
-        "cpu_pct": 6.4
+        "cpu_pct": 6.4,
+        "proc_cpu_pct": 6.27
       },
       "per_worker": [
         {
@@ -321,27 +350,37 @@
         {
           "t": 1.0,
           "ops_per_s": 3068936.7,
-          "cpu_pct": 6.4
+          "score": 8076.1,
+          "cpu_pct": 6.4,
+          "proc_cpu_pct": 6.27
         },
         {
           "t": 2.0,
           "ops_per_s": 3026064.6,
-          "cpu_pct": 6.4
+          "score": 7963.3,
+          "cpu_pct": 6.4,
+          "proc_cpu_pct": 6.27
         },
         {
           "t": 3.0,
           "ops_per_s": 3032128.3,
-          "cpu_pct": 6.4
+          "score": 7979.3,
+          "cpu_pct": 6.4,
+          "proc_cpu_pct": 6.27
         },
         {
           "t": 4.0,
           "ops_per_s": 3056776.1,
-          "cpu_pct": 6.4
+          "score": 8044.1,
+          "cpu_pct": 6.4,
+          "proc_cpu_pct": 6.27
         },
         {
           "t": 5.0,
           "ops_per_s": 3076306.5,
-          "cpu_pct": 6.4
+          "score": 8095.5,
+          "cpu_pct": 6.4,
+          "proc_cpu_pct": 6.27
         }
       ],
       "errors": []
@@ -349,6 +388,7 @@
     {
       "index": 2,
       "type": "memory",
+      "partial": false,
       "config": {
         "type": "memory",
         "name": "RAM copy NT",
@@ -375,7 +415,8 @@
           2,
           66
         ],
-        "cpu_pct": 3.2
+        "cpu_pct": 3.2,
+        "proc_cpu_pct": 3.14
       },
       "per_worker": [
         {
@@ -411,27 +452,32 @@
         {
           "t": 1.0,
           "gbps": 79.765,
-          "cpu_pct": 3.2
+          "cpu_pct": 3.2,
+          "proc_cpu_pct": 3.14
         },
         {
           "t": 2.0,
           "gbps": 78.864,
-          "cpu_pct": 3.2
+          "cpu_pct": 3.2,
+          "proc_cpu_pct": 3.14
         },
         {
           "t": 3.0,
           "gbps": 78.634,
-          "cpu_pct": 3.2
+          "cpu_pct": 3.2,
+          "proc_cpu_pct": 3.14
         },
         {
           "t": 4.0,
           "gbps": 78.592,
-          "cpu_pct": 3.2
+          "cpu_pct": 3.2,
+          "proc_cpu_pct": 3.14
         },
         {
           "t": 5.0,
           "gbps": 78.894,
-          "cpu_pct": 3.2
+          "cpu_pct": 3.2,
+          "proc_cpu_pct": 3.14
         }
       ],
       "errors": []
@@ -439,6 +485,7 @@
     {
       "index": 3,
       "type": "memory",
+      "partial": false,
       "config": {
         "type": "memory",
         "name": "RAM-Latenz remote",
@@ -459,7 +506,8 @@
         "cpus": [
           0
         ],
-        "cpu_pct": 0.8
+        "cpu_pct": 0.8,
+        "proc_cpu_pct": 0.78
       },
       "per_worker": [
         {
@@ -474,27 +522,32 @@
         {
           "t": 1.0,
           "latency_ns": 139.3,
-          "cpu_pct": 0.8
+          "cpu_pct": 0.8,
+          "proc_cpu_pct": 0.78
         },
         {
           "t": 2.0,
           "latency_ns": 137.54,
-          "cpu_pct": 0.8
+          "cpu_pct": 0.8,
+          "proc_cpu_pct": 0.78
         },
         {
           "t": 3.0,
           "latency_ns": 138.65,
-          "cpu_pct": 0.8
+          "cpu_pct": 0.8,
+          "proc_cpu_pct": 0.78
         },
         {
           "t": 4.0,
           "latency_ns": 138.8,
-          "cpu_pct": 0.8
+          "cpu_pct": 0.8,
+          "proc_cpu_pct": 0.78
         },
         {
           "t": 5.0,
           "latency_ns": 138.07,
-          "cpu_pct": 0.8
+          "cpu_pct": 0.8,
+          "proc_cpu_pct": 0.78
         }
       ],
       "errors": []
