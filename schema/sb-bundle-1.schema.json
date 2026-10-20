@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/FiiRe1337/server-benchmark/raw/main/schema/sb-bundle-1.schema.json",
+  "title": "sbench Bundle-Manifest (sb-bundle/1)",
+  "description": "manifest.json im ZIP von 'sbench bundle'. Listet alle übrigen Dateien des Archivs mit Größe und SHA-256 (manifest.json selbst ist nicht enthalten).",
+  "type": "object",
+  "properties": {
+    "_example": {
+      "type": "boolean",
+      "description": "Nur in Beispieldateien: true = erfundene Beispieldaten."
+    },
+    "schema": {
+      "const": "sb-bundle/1"
+    },
+    "kern_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+([-+].*)?$",
+      "description": "Version des Messkerns (SemVer), der das Bundle erzeugt hat."
+    },
+    "erstellt_utc": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$",
+      "description": "Erstellungszeitpunkt (UTC, RFC 3339, Endung Z)."
+    },
+    "host": {
+      "type": "string",
+      "description": "Rechnername, auf dem das Bundle erstellt wurde (bei anonymized = true pseudonymisiert, z. B. host-1)."
+    },
+    "data_dir": {
+      "type": "string",
+      "description": "Datenverzeichnis von sbench zum Zeitpunkt der Erstellung (bei anonymized = true mit pseudonymisiertem Benutzernamen)."
+    },
+    "anonymized": {
+      "type": "boolean",
+      "description": "true = mit --anonymize erstellt: Hostnamen, Benutzernamen in Pfaden, IPv4/IPv6, MAC-Adressen und Disk-Seriennummern in allen JSON-/Log-Dateien (inkl. manifest.json und extra/) sind durch Pseudonyme ersetzt (host-1, user-1, 10.0.0.x, fd00::x, 02:00:00:00:00:xx, serial-1). Die Zuordnung wird nicht gespeichert."
+    },
+    "includes": {
+      "type": "array",
+      "description": "Mit --include aufgenommene Ordner (Ordnernamen unter extra/; bei gleichen Namen mit -2, -3 … ergänzt).",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[^/\\\\]+$"
+      },
+      "uniqueItems": true
+    },
+    "files": {
+      "type": "array",
+      "description": "Dateien im Archiv: info.json (aktuelles 'sbench info --json'), results/<run_id>.json (sb-result/1), runs/<run_id>.jsonl (sb-progress/1), logs/<run_id>.log (Lauf-Logs), jobs/<run_id>.json (Job-Kopien) und extra/<ordnername>/… (--include).",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "pattern": "^(info\\.json|results/[^/\\\\]+\\.json|runs/[^/\\\\]+\\.jsonl|jobs/[^/\\\\]+\\.json|logs/[^/\\\\]+\\.log|extra/[^/\\\\]+/.+)$",
+            "description": "Pfad im ZIP (Schrägstrich als Trenner)."
+          },
+          "size_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Größe in Bytes (unkomprimiert)."
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "SHA-256 des unkomprimierten Inhalts, hexadezimal klein."
+          }
+        },
+        "required": [
+          "path",
+          "size_bytes",
+          "sha256"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "kern_version",
+    "erstellt_utc",
+    "anonymized",
+    "includes",
+    "files"
+  ],
+  "additionalProperties": false
+}
