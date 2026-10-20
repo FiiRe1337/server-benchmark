@@ -23,8 +23,8 @@ vergleichen und uns die Ergebnisse schicken.
 Laden Sie unter [Releases](../../releases) die Datei `sbench-gui-<version>-x64.zip` herunter, entpacken
 Sie `sbench-gui.exe` in einen beliebigen Ordner (z. B. `C:\Tools\sbench`) und starten Sie sie per
 Doppelklick. Eine Installation ist nicht nötig. Beim ersten Start legt die GUI daneben den Ordner
-`data\` für Ergebnisse, Logs und den Messkern an (ist der Ordner nicht beschreibbar, nimmt sie
-`%ProgramData%\sbench`). Administratorrechte brauchen Sie nur für Tests auf Volumes und physischen
+`data\` für Messkern, Laufdateien und Kern-Logs an (ist der Ordner nicht beschreibbar, nimmt sie
+`%ProgramData%\sbench`); Ergebnisse, Profile und GUI-Logs liegen unter `%LOCALAPPDATA%\sbench-gui`. Administratorrechte brauchen Sie nur für Tests auf Volumes und physischen
 Disks; dann fragt die GUI nach und erhöht nur den Messkern, nicht sich selbst.
 
 ![Ordner mit sbench-gui.exe und data\ nach dem ersten Start](docs/img/guide/01_download.png)

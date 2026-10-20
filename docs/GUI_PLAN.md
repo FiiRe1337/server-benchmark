@@ -27,22 +27,24 @@ Code: `gui/` · Echte Screenshots (GUI + echter Kern, windows-2022): `docs/img/g
 - **Datenordner:** wird **nicht** in der GUI berechnet. Kern-Regel (cli.md 1.1): `SBENCH_DATA_DIR` → `data\` neben `sbench.exe` (wenn beschreibbar) → `%ProgramData%\sbench`. Die GUI zeigt und nutzt ausschließlich `meta.data_dir` aus `sbench info --json`. Eigene Dateien der GUI liegen in `%LOCALAPPDATA%\sbench-gui\` (`logs/gui-*.log`, `profiles/`, `results/<run_id>.json` als `--out`) bzw. `SBENCH_GUI_DIR`; sie kommen per `bundle --include` ins Support-ZIP.
 - **Toleranz:** die 1.1-Felder (`meta.elevated/data_dir/ram_free_bytes/numa_nodes`, `warnings[]`, `progress`, R/W-Split, Worker-`lat_us`, `proc_cpu_pct`, `name`) sind im Schema optional, werden vom Kern immer ausgegeben; die GUI kommt ohne sie aus („Rechte unbekannt“, abgeleitete Labels, kombinierte Kurven, Spalten „–“).
 
-## 2. Screens (Mockups)
+## 2. Screens
 
-| Screen | Datei | Inhalt |
+Spalte „Echter Screenshot“: Aufnahme in `docs/img/guide/` (screenshots.yml, windows-2022, echter Kern); „–“ = Screen existiert, wird aber nicht für die Anleitung aufgenommen.
+
+| Screen | Echter Screenshot | Inhalt |
 |---|---|---|
-| Übersicht | `01_dashboard.png` | Karten CPU/RAM/Hypervisor/Netz aus `sbench info --json` (sb-info/1), Volumes, physische Disks, NICs, Schnellstart-Kacheln |
-| Testprofil | `02_profile_editor.png` | Profilliste, Ziele (file/volume/physical, Worker→Ziel-Zuordnung i mod n), **gewichtete Access Specs** (Gewicht, Block, % Lesen, % Random, Align, Burst, Delay) mit Mix-Balken, Worker/QD/Cache/Warmup/Dauer/Tick, Live-JSON-Vorschau |
-| Validierung | `02b_profile_validation.png` | `sbench validate` → sb-validate/1; `errors[]` und `warnings[]` (W_NEEDS_ADMIN, W_DESTRUCTIVE, W_LOW_DISK_SPACE) in der Karte „Prüfung“, Pfade markieren Zelle/Feld/Ziel |
-| Destruktiv | `02c_destructive_confirm.png` | Rot gestalteter Dialog: je Volume/Disk-Ziel mit Schreibanteil muss der Zielname eingetippt werden; erst dann `allow_destructive: true` im Job **und** `--allow-destructive` beim Start |
-| Rechte | `02d_elevation_offer.png` | bei W_NEEDS_ADMIN: „Als Administrator starten“ (runas) oder „Ohne Rechte starten“ (nur ohne Raw-Ziele) |
-| ICF-Import | `02e_icf_import.png` | Menü „Import ▾ → Iometer-Profil importieren (.icf)“ → `sbench import-icf` → Warnungen (W_ICF_UNSUPPORTED) vor Übernahme |
-| Live-Lauf | `03_live_run.png` (Replay), `03b_live_preparing.png`, `03c_live_qprocess.png` (QProcess gegen Mock) | Phasen-Chips, Fortschrittsbalken auch in preparing (Bytes) / warmup (s) aus `progress` + `phase.duration_s`, KPI IOPS/MB/s/Ø/p99, CPU System + sbench-Prozess, Schalter „Lesen/Schreiben getrennt“, Worker-Tabelle mit Ø µs/p99 µs, Event-Log, Stop |
-| Re-Attach | `03d_reattach_offer.png` | beim GUI-Start gefundener Lauf (sb-runs/1) |
-| Vergleich | `04_compare.png` | 2–3 Läufe (z. B. Host vs. VM vs. VM-SAN), gruppierte Balken je Test (Metrik wählbar), Perzentil-Kurve p50…p99.99 (log), Delta-Tabelle mit Ampel |
-| Export | `05_export.png` | Auswahl, Formate, Optionen, HTML-Vorschau, **„Ergebnisse für Support exportieren“** |
-| Support-Dialog | `06_support_dialog.png` | Umfang alle/ausgewählte, GUI-Logs, Profile, **Anonymisieren** |
-| Support-Toast | `07_support_export_done.png` | Erfolgsmeldung mit Anzahl Dateien, „Ordner öffnen“ |
+| Übersicht | [02_start](img/guide/02_start.png) | Karten CPU/RAM/Hypervisor/Netz aus `sbench info --json` (sb-info/1), Volumes, physische Disks, NICs, Schnellstart-Kacheln |
+| Testprofil | [03_testprofil](img/guide/03_testprofil.png) | Profilliste, Ziele (file/volume/physical, Worker→Ziel-Zuordnung i mod n), **gewichtete Access Specs** (Gewicht, Block, % Lesen, % Random, Align, Burst, Delay) mit Mix-Balken, Worker/QD/Cache/Warmup/Dauer/Tick, Live-JSON-Vorschau |
+| Validierung | [03_testprofil](img/guide/03_testprofil.png) (Karte „Prüfung“) | `sbench validate` → sb-validate/1; `errors[]` und `warnings[]` (W_NEEDS_ADMIN, W_DESTRUCTIVE, W_LOW_DISK_SPACE) in der Karte „Prüfung“, Pfade markieren Zelle/Feld/Ziel |
+| Destruktiv | – | Rot gestalteter Dialog: je Volume/Disk-Ziel mit Schreibanteil muss der Zielname eingetippt werden; erst dann `allow_destructive: true` im Job **und** `--allow-destructive` beim Start |
+| Rechte | – (`03b_ohne_rechte.png` nur ohne Adminrechte) | bei W_NEEDS_ADMIN: „Als Administrator starten“ (runas) oder „Ohne Rechte starten“ (nur ohne Raw-Ziele) |
+| ICF-Import | – | Menü „Import ▾ → Iometer-Profil importieren (.icf)“ → `sbench import-icf` → Warnungen (W_ICF_UNSUPPORTED) vor Übernahme |
+| Live-Lauf | [04_live](img/guide/04_live.png), [04b_gestoppt](img/guide/04b_gestoppt.png) | Phasen-Chips, Fortschrittsbalken auch in preparing (Bytes) / warmup (s) aus `progress` + `phase.duration_s`, KPI IOPS/MB/s/Ø/p99, CPU System + sbench-Prozess, Schalter „Lesen/Schreiben getrennt“, Worker-Tabelle mit Ø µs/p99 µs, Event-Log, Stop |
+| Re-Attach | – | beim GUI-Start gefundener Lauf (sb-runs/1) |
+| Vergleich | [05_vergleich](img/guide/05_vergleich.png) | 2–3 Läufe (z. B. Host vs. VM vs. VM-SAN), gruppierte Balken je Test (Metrik wählbar), Perzentil-Kurve p50…p99.99 (log), Delta-Tabelle mit Ampel |
+| Export | [06_export](img/guide/06_export.png) | Auswahl, Formate, Optionen, HTML-Vorschau, **„Ergebnisse für Support exportieren“** |
+| Support-Dialog | [06b_support_dialog](img/guide/06b_support_dialog.png) | Umfang alle/ausgewählte, GUI-Logs, Profile, **Anonymisieren** |
+| Support-Toast | [06c_support_fertig](img/guide/06c_support_fertig.png) | Erfolgsmeldung mit Anzahl Dateien, „Ordner öffnen“ |
 
 **Kleine Bildschirme / RDP:** Mindestgröße 1280×720. Unter 1400 px Breite klappt die Sidebar auf Icons (64 px) zusammen (Umschalter ☰). Seiten liegen in ScrollAreas; Seitenspalten (`Responsive`-Container) stapeln sich unterhalb der Summe ihrer Mindestbreiten bzw. eines Breakpoints. Geprüft per Screenshot-Bericht (`content_min`, `h_scroll`, `v_scroll`): bei 1440×900, 1366×768 und 1280×720 kein horizontales Scrollen; nur der Profileditor scrollt vertikal (Prüfungs-Karte + JSON).
 
