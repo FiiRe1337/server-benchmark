@@ -24,12 +24,14 @@ def test_run_args():
 
 def test_sbench_command_falls_back_to_mock(mock_env):
     cmd = sbench.sbench_command()
-    assert cmd[-1].endswith("mock_sbench.py") and os.path.isfile(cmd[-1])
+    assert cmd[1].endswith("mock_sbench.py") and os.path.isfile(cmd[1])
+    assert cmd[2:] == ["--data-dir", str(mock_env / "data")]
 
 
-def test_sbench_command_env(monkeypatch):
+def test_sbench_command_env(monkeypatch, tmp_path):
     monkeypatch.setenv("SBENCH_EXE", r"C:\x\sbench.exe")
-    assert sbench.sbench_command() == [r"C:\x\sbench.exe"]
+    monkeypatch.setenv("SBENCH_DATA_DIR", str(tmp_path))
+    assert sbench.sbench_command() == [r"C:\x\sbench.exe", "--data-dir", str(tmp_path)]
 
 
 def test_new_run_id_format():

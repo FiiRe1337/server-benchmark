@@ -1,9 +1,10 @@
 """Binding layer to the core CLI `sbench.exe` (QProcess + JSON lines). No ctypes/DLL for measurements.
 
-Contract: FiiRe1337/server-benchmark main, Vertrag 1.1 (docs/cli.md). The GUI never computes sbench's data_dir;
-it takes meta.data_dir from `sbench info --json` (runas processes don't reliably inherit the environment).
+Contract: FiiRe1337/server-benchmark main, Vertrag 1.1 + PR #10 (docs/cli.md). The data_dir is chosen once by
+sbgui.core (data\\ next to the GUI EXE if writable, else %ProgramData%\\sbench) and passed as `--data-dir` on EVERY
+call (runas processes don't inherit the environment). Displayed paths come from meta.data_dir of `sbench info --json`.
 The GUI's own state (logs, profiles, results it requested via --out) lives in gui_dir()."""
-import json, logging, os, subprocess, sys
+import json, logging, os, subprocess
 from PySide6.QtCore import QObject, QProcess, Signal, QTimer
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -11,17 +12,21 @@ EXIT_TEXT = {0: "ok", 1: "Fehler", 2: "ungültiger Job", 3: "abgebrochen", 4: "f
 log = logging.getLogger("sbench-gui")
 
 
+def core():
+    """Resolved core (sbgui.core): frozen -> verified copy in <data_dir>\\bin, source -> $SBENCH_EXE or mock."""
+    from . import core as _core
+    return _core.get()
+
+
+def command(args, verify=True):
+    """argv for ONE sbench call: <core> --data-dir <data_dir> <args>. Verifies the core's SHA-256 first
+    (raises core.CoreIntegrityError on mismatch). Every launch path below goes through here."""
+    return core().command(args, verify=verify)
+
+
 def sbench_command():
-    """Resolve the core CLI. Order: $SBENCH_EXE, sbench.exe next to the (frozen) GUI, PyInstaller _MEIPASS, mock."""
-    env = os.environ.get("SBENCH_EXE")
-    if env:
-        return [env]
-    base = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else ROOT
-    for d in (base, getattr(sys, "_MEIPASS", base)):
-        exe = os.path.join(d, "sbench.exe")
-        if os.path.exists(exe):
-            return [exe]
-    return [sys.executable, os.path.join(ROOT, "mock_sbench.py")]
+    """Base command incl. --data-dir (no args, not verified; for logging/tests)."""
+    return command([], verify=False)
 
 
 def gui_dir():
@@ -43,7 +48,7 @@ def setup_logging():
 
 
 def run_sync(args, timeout_ms=15000):
-    p = QProcess(); cmd = sbench_command() + args
+    p = QProcess(); cmd = command(args)
     p.start(cmd[0], cmd[1:])
     if not p.waitForFinished(timeout_ms):
         p.kill(); raise TimeoutError(" ".join(args))
@@ -117,10 +122,16 @@ class RunSession(EventSource):
         self.proc.readyReadStandardOutput.connect(self._read)
         self.proc.readyReadStandardError.connect(lambda: self.stderr.emit(bytes(self.proc.readAllStandardError()).decode("utf-8", "replace")))
         self.proc.finished.connect(self._fin)
-        self.cmd = sbench_command() + run_args(job_path, out_path, run_id, tick_ms, allow_destructive, "stdout")
+        self.args = run_args(job_path, out_path, run_id, tick_ms, allow_destructive, "stdout"); self.cmd = None
 
     def start(self):
-        log.info("start %s", " ".join(self.cmd)); self.proc.start(self.cmd[0], self.cmd[1:])
+        from .core import CoreError
+        try:
+            self.cmd = command(self.args)          # SHA-256 check right before the launch
+        except CoreError as e:
+            log.error("start refused: %s", e); self.stderr.emit(str(e))
+            QTimer.singleShot(0, lambda: self.finished.emit(1, "Kern-Integritätsprüfung fehlgeschlagen")); return
+        log.info("start %s", subprocess.list2cmdline(self.cmd)); self.proc.start(self.cmd[0], self.cmd[1:])
 
     def _read(self):
         self._buf = self._emit_lines(bytes(self.proc.readAllStandardOutput()), self._buf)
@@ -136,8 +147,12 @@ class RunSession(EventSource):
 
 def stop_run(run_id):
     """Graceful: `sbench stop --id` (named event Global\\sbench-stop-<id>) -> partial result, exit 3."""
-    cmd = sbench_command() + ["stop", "--id", run_id]
-    QProcess.startDetached(cmd[0], cmd[1:])
+    from .core import CoreError
+    try:
+        cmd = command(["stop", "--id", run_id])
+    except CoreError as e:
+        log.error("stop refused: %s", e); return False
+    return QProcess.startDetached(cmd[0], cmd[1:])
 
 
 class ElevatedRunSession(EventSource):
@@ -148,12 +163,18 @@ class ElevatedRunSession(EventSource):
         super().__init__(parent)
         self.run_id = run_id; self.out_path = out_path; self._buf = b""
         self.pipe_name = f"\\\\.\\pipe\\sbench-{run_id}"
-        self.cmd = sbench_command() + run_args(job_path, out_path, run_id, tick_ms, allow_destructive, f"pipe:{self.pipe_name}")
+        self.args = run_args(job_path, out_path, run_id, tick_ms, allow_destructive, f"pipe:{self.pipe_name}"); self.cmd = None
 
     def start(self):
+        from .core import CoreError
         if os.name != "nt":
             QTimer.singleShot(0, lambda: self.finished.emit(1, "Erhöhung nur unter Windows"))
             return
+        try:
+            self.cmd = command(self.args)          # verified right before ShellExecuteEx runas (elevated!)
+        except CoreError as e:
+            log.error("elevated start refused: %s", e); self.stderr.emit(str(e))
+            QTimer.singleShot(0, lambda: self.finished.emit(1, "Kern-Integritätsprüfung fehlgeschlagen")); return
         from . import pipe_win
         self.reader = pipe_win.PipeServer(self.pipe_name, self)          # create pipe BEFORE starting sbench (10 s connect timeout)
         self.reader.data.connect(lambda b: setattr(self, "_buf", self._emit_lines(b, self._buf)))
@@ -263,7 +284,7 @@ def bundle(out_path, results=None, include=(), anonymize=False, parent=None):
     """Async `sbench bundle ...` (see bundle_args)."""
     p = QProcess(parent)
     args = bundle_args(out_path, results, include, anonymize)
-    cmd = sbench_command() + args
+    cmd = command(args)
     log.info("bundle %s", subprocess.list2cmdline(args))
     p.start(cmd[0], cmd[1:]); return p
 
@@ -283,9 +304,24 @@ def new_run_id():
     return dt.datetime.now().strftime("%Y%m%d-%H%M%S-") + f"{random.randrange(16**4):04x}"
 
 
-def kern_version():
+def version_json():
+    """`sbench version --json` -> {version, commit, arch, sha256, formats} (PR #10). None if unsupported."""
+    code, out = run_sync(["version", "--json"])
     try:
+        return json.loads(out) if code == 0 else None
+    except ValueError:
+        return None
+
+
+def kern_version():
+    from .core import CoreError
+    try:
+        v = version_json()
+        if v and v.get("version"):
+            return v["version"]
         code, out = run_sync(["version"])
         return out.splitlines()[0].split()[1] if code == 0 else "?"
+    except CoreError:
+        raise
     except Exception:  # noqa: BLE001
         return "?"
