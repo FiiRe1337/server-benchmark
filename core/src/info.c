@@ -35,6 +35,7 @@ static void sb_cpuid(int leaf, int r[4]) {
 #include "sb/info.h"
 #include "sb/topo.h"
 #include "sb/util.h"
+#include "sb/vertrag.h"
 int sb_is_admin(void);   /* target.c */
 
 /* ---- Registry-Helfer --------------------------------------------------- */
@@ -523,6 +524,7 @@ static cJSON *meta_with(cJSON *drives, cJSON *nic) {
     cJSON_AddItemToObject(m, "numa_nodes", numa_nodes());
     cJSON_AddBoolToObject(m, "elevated", sb_is_admin());
     cJSON_AddStringToObject(m, "data_dir", sb_data_dir());
+    cJSON_AddItemToObject(m, "cpu_score", sb_cpu_score_json());   /* Vertrag 1.3 */
     return m;
 }
 

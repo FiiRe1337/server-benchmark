@@ -46,6 +46,7 @@ set(SB_CORE_SOURCES
   core/src/target.c
   core/src/topo.c
   core/src/util.c
+  core/src/vertrag.c
   third_party/cjson/cJSON.c
   third_party/miniz/miniz.c
 )

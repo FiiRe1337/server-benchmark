@@ -11,6 +11,7 @@
 #include "sb/compute.h"
 #include "sb/kernels.h"
 #include "sb/topo.h"
+#include "sb/vertrag.h"
 
 #define BLK 4096u
 
@@ -68,10 +69,7 @@ static int prepare(cworker *w) {
     const sb_test *t = e->t;
     for (int i = 0; i < 8; i++) w->state[i] = t->seed ^ ((uint64_t)w->id * 0x9E3779B97F4A7C15ULL + (uint64_t)i);
     if (e->kind == SB_CK_CPU) return 0;
-    size_t bytes = (size_t)t->buffer_size;
-    if (e->kind == SB_CK_MEM_BW) bytes = bytes / (2 * BLK) * (2 * BLK);   /* copy: zwei gleich große Hälften */
-    else bytes = bytes / 64 * 64;
-    if (bytes < 2 * BLK) bytes = 2 * BLK;
+    size_t bytes = (size_t)sb_mem_buffer_bytes(e->kind == SB_CK_MEM_LAT, t->buffer_size);   /* = total von preparing */
     w->bytes = bytes;
     SIZE_T sz = (SIZE_T)bytes;
     w->buf = (char *)VirtualAllocExNuma(GetCurrentProcess(), NULL, sz, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE,
@@ -212,6 +210,7 @@ int sb_compute_run(int ti, const sb_test *t, const sb_storage_opts *o, const sb_
     E.kind = t->type == SB_T_CPU ? SB_CK_CPU : t->mem_mode == 1 ? SB_CK_MEM_LAT : SB_CK_MEM_BW;
     r->kind = E.kind;
     r->simd = SB_SIMD_SCALAR;
+    r->stop_phase = SB_STOP_PREPARING;   /* Fehler vor der Messung: Teilergebnis aus preparing */
     if (E.kind == SB_CK_MEM_BW) {
         sb_simd isa = t->simd == SB_SIMD_AUTO ? sb_simd_auto() : (sb_simd)t->simd;
         if (sb_memkern_get(isa, &E.mk)) {
@@ -265,7 +264,15 @@ int sb_compute_run(int ti, const sb_test *t, const sb_storage_opts *o, const sb_
     double total_prep = 0;
     uint64_t qpf = sb_qpf();
     /* 1. Threads anlegen, binden, starten (preparing) */
-    if (cb->phase) cb->phase(cb->ctx, ti, "preparing", -1);
+    if (cb->phase) {
+        /* Vertrag 1.3: Thread-Anzahl und gebundene CPUs (mit SMT-Geschwistern) beim Teststart */
+        cJSON *ex = cJSON_CreateObject();
+        cJSON_AddNumberToObject(ex, "threads", nthreads);
+        cJSON_AddItemToObject(ex, "cpus", sb_phase_cpus_json(&topo, pick, nthreads));
+        cb->phase(cb->ctx, ti, "preparing", -1, ex);
+        cJSON_Delete(ex);
+    }
+    int ph = SB_STOP_PREPARING;
     for (int i = 0; i < nthreads; i++) {
         cworker *w = &E.w[i];
         w->e = &E; w->id = i;
@@ -274,7 +281,7 @@ int sb_compute_run(int ti, const sb_test *t, const sb_storage_opts *o, const sb_
         r->cpus[i] = w->cpu->index;
         r->nodes[i] = w->cpu->node;
         r->mem_nodes[i] = E.kind == SB_CK_CPU ? -1 : w->mem_node;
-        if (E.kind != SB_CK_CPU) total_prep += (double)t->buffer_size;
+        if (E.kind != SB_CK_CPU) total_prep += (double)sb_mem_buffer_bytes(E.kind == SB_CK_MEM_LAT, t->buffer_size);
         w->th = CreateThread(NULL, 0, worker_main, w, CREATE_SUSPENDED, NULL);
         if (!w->th) {
             add_err(r, "E_INTERNAL", i, 0, "Thread %d nicht anlegbar: %s", i, sb_errtext(GetLastError()));
@@ -314,7 +321,8 @@ int sb_compute_run(int ti, const sb_test *t, const sb_storage_opts *o, const sb_
         E.phase = 1;
         SetEvent(E.start_evt);
         if (t->warmup_s > 0) {
-            if (cb->phase) cb->phase(cb->ctx, ti, "warmup", t->warmup_s);
+            ph = SB_STOP_WARMUP;
+            if (cb->phase) cb->phase(cb->ctx, ti, "warmup", t->warmup_s, NULL);
             uint64_t ws = sb_qpc(), end = ws + (uint64_t)(t->warmup_s * (double)qpf);
             for (;;) {
                 uint64_t step = sb_qpc() + qpf / 2;
@@ -328,7 +336,8 @@ int sb_compute_run(int ti, const sb_test *t, const sb_storage_opts *o, const sb_
     }
     if (rc == 0) {
         /* 3. Messung */
-        if (cb->phase) cb->phase(cb->ctx, ti, "measure", t->duration_s);
+        ph = SB_STOP_MEASURE;
+        if (cb->phase) cb->phase(cb->ctx, ti, "measure", t->duration_s, NULL);
         r->measured = 1;
         uint64_t *u0 = (uint64_t *)calloc((size_t)nthreads, sizeof(uint64_t));
         uint64_t *up = (uint64_t *)calloc((size_t)nthreads, sizeof(uint64_t));
@@ -362,6 +371,7 @@ int sb_compute_run(int ti, const sb_test *t, const sb_storage_opts *o, const sb_
                     up[i] = u;
                 }
                 k.value = to_value(E.kind, sum, dt);
+                k.score = E.kind == SB_CK_CPU ? sb_cpu_score((sb_cpu_workload)t->workload, k.value) : -1;
                 sb_cpu_sample_now(&cn);
                 k.cpu_pct = sb_cpu_pct(&cp, &cn);
                 uint64_t pn = sb_proc_cpu_now();
@@ -386,20 +396,23 @@ int sb_compute_run(int ti, const sb_test *t, const sb_storage_opts *o, const sb_
             r->measured_s = (double)(q1 - q0) / (double)qpf;
             sb_cpu_sample_now(&cn);
             r->cpu_pct = sb_cpu_pct(&c0, &cn);
+            uint64_t p1 = sb_proc_cpu_now();
+            r->proc_cpu_pct = r->measured_s > 0 && p1 >= p0 ? (double)(p1 - p0) / 1e7 / (r->measured_s * (double)ncpu) * 100.0 : 0;
+            if (r->proc_cpu_pct > 100) r->proc_cpu_pct = 100;
             for (int i = 0; i < nthreads; i++) {
                 r->w_units[i] = E.w[i].units - u0[i];
                 r->units += r->w_units[i];
                 r->w_value[i] = to_value(E.kind, r->w_units[i], r->measured_s);
             }
             r->value = to_value(E.kind, r->units, r->measured_s);
-            if (E.kind == SB_CK_CPU) r->score = r->value / sb_cpu_reference((sb_cpu_workload)t->workload) * 1000.0;
+            if (E.kind == SB_CK_CPU) r->score = sb_cpu_score((sb_cpu_workload)t->workload, r->value);
             free(u0); free(up);
         }
     }
     /* 4. Aufräumen */
     E.phase = 2;
     SetEvent(E.start_evt);
-    if (cb->phase) cb->phase(cb->ctx, ti, "cleanup", -1);
+    if (cb->phase) cb->phase(cb->ctx, ti, "cleanup", -1, NULL);
     for (int i = 0; i < nthreads; i++) {
         cworker *w = &E.w[i];
         if (w->th) { WaitForSingleObject(w->th, 60000); CloseHandle(w->th); }
@@ -410,5 +423,6 @@ int sb_compute_run(int ti, const sb_test *t, const sb_storage_opts *o, const sb_
     free(pick);
     sb_topo_free(&topo);
     if (rc == 0 && r->aborted) rc = 3;
+    r->stop_phase = rc == 1 || rc == 3 ? ph : SB_STOP_NONE;
     return rc;
 }

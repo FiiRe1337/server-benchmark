@@ -52,6 +52,69 @@
           "type": "number",
           "minimum": 0,
           "description": "Geplante Dauer der Phase in Sekunden, falls bekannt."
+        },
+        "threads": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Vertrag 1.3, nur im ersten phase-Event eines Tests (preparing): Anzahl Threads (cpu/memory, auch bei threads = 0 im Job bereits aufgelöst) bzw. Worker (storage)."
+        },
+        "cpus": {
+          "type": "array",
+          "description": "Vertrag 1.3, nur cpu/memory, nur im ersten phase-Event eines Tests (preparing): gebundener logischer Prozessor je Thread, Reihenfolge = Thread-id (= tick.workers[].id, per_worker[].id). Storage-Worker sind nicht gebunden (kein cpus).",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Thread-Index."
+              },
+              "cpu": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Globaler Index (Prozessorgruppe × 64 + number) wie meta.numa_nodes[].cpus."
+              },
+              "group": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Prozessorgruppe."
+              },
+              "number": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 63,
+                "description": "Nummer innerhalb der Prozessorgruppe."
+              },
+              "numa_node": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "NUMA-Knoten des Prozessors."
+              },
+              "core": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Laufende Nummer des physischen Kerns (gleicher Wert = SMT-Geschwister), gültig innerhalb des Laufs."
+              },
+              "smt_sibling_of": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "Globaler Index des ersten logischen Prozessors desselben Kerns, null für diesen selbst (bzw. ohne SMT)."
+              }
+            },
+            "required": [
+              "id",
+              "cpu",
+              "group",
+              "number",
+              "numa_node",
+              "core",
+              "smt_sibling_of"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "required": [
@@ -109,7 +172,7 @@
     },
     {
       "type": "object",
-      "description": "Zwischenwerte des letzten Tick-Intervalls (nur in der Phase measure). Storage-Ticks enthalten immer iops, mbps, lat_us und cpu_pct; cpu-Ticks ops_per_s, memory-Ticks gbps (bandwidth) bzw. latency_ns (latency), jeweils mit cpu_pct und proc_cpu_pct.",
+      "description": "Zwischenwerte des letzten Tick-Intervalls (nur in der Phase measure). Storage-Ticks enthalten immer iops, mbps, lat_us und cpu_pct; cpu-Ticks ops_per_s, memory-Ticks gbps (bandwidth) bzw. latency_ns (latency), jeweils mit cpu_pct und proc_cpu_pct. Ab Vertrag 1.3 nennt metric den Hauptwert, cpu-Ticks tragen score. workers[] enthält jeden Worker/Thread genau einmal, aufsteigend nach id; die Werte sind Raten im Intervall (pro Sekunde, nicht Summen). memory latency hat kein workers[] (immer ein Thread = Gesamtwert).",
       "properties": {
         "ev": {
           "const": "tick"
@@ -123,6 +186,16 @@
           "type": "number",
           "minimum": 0,
           "description": "Sekunden seit Beginn der Messphase."
+        },
+        "metric": {
+          "enum": [
+            "iops",
+            "ops_per_s",
+            "gbps",
+            "latency_ns",
+            "mbps"
+          ],
+          "description": "Vertrag 1.3, immer ausgegeben: Name des Hauptwerts dieses Ticks (storage iops, cpu ops_per_s, memory bandwidth gbps, memory latency latency_ns, net_* mbps); das gleichnamige Feld ist vorhanden."
         },
         "iops": {
           "type": "number",
@@ -196,6 +269,11 @@
           "type": "number",
           "minimum": 0,
           "description": "cpu: Operationen pro Sekunde."
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Vertrag 1.3, nur cpu: Score des Intervalls = ops_per_s / meta.cpu_score.ref_ops_per_s[workload] × 1000."
         },
         "gbps": {
           "type": "number",

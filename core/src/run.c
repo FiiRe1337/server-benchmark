@@ -15,6 +15,7 @@
 #include "sb/hist.h"
 #include "sb/runs.h"
 #include "sb/compute.h"
+#include "sb/vertrag.h"
 
 #ifndef SB_VERSION_STR
 #define SB_VERSION_STR "0.1.0"
@@ -55,6 +56,19 @@ static cJSON *lat_obj(const sb_hist *h) {
     return o;
 }
 
+/* Vertrag 1.3: Messwert oder null (Test vor der Messphase beendet, docs/cli.md "Teilergebnisse") */
+static void num_or_null(cJSON *o, const char *k, int ok, double v) {
+    if (ok) cJSON_AddNumberToObject(o, k, v);
+    else cJSON_AddNullToObject(o, k);
+}
+
+/* partial/stopped_in je Test (Vertrag 1.3); partial wird immer ausgegeben */
+static void add_partial(cJSON *o, int stop_phase) {
+    const char *p = sb_stop_phase_name(stop_phase);
+    cJSON_AddBoolToObject(o, "partial", p != NULL);
+    if (p) cJSON_AddStringToObject(o, "stopped_in", p);
+}
+
 /* Histogramm: 32 Buckets pro Zweierpotenz (je 4 interne Unter-Buckets), nur belegte */
 static cJSON *hist_arr(const sb_hist *h) {
     cJSON *a = cJSON_CreateArray();
@@ -87,21 +101,26 @@ static cJSON *hist_arr(const sb_hist *h) {
 static cJSON *storage_test_json(int idx, const sb_test *t, const sb_storage_result *r) {
     cJSON *o = cJSON_CreateObject();
     double d = r->measured_s > 0 ? r->measured_s : 0;
+    int m = r->measured;   /* 0: vor der Messphase beendet -> Messwerte null, Listen leer */
     cJSON_AddNumberToObject(o, "index", idx);
     cJSON_AddStringToObject(o, "type", "storage");
+    add_partial(o, r->stop_phase);
     cJSON_AddItemToObject(o, "config", cJSON_Duplicate(t->raw, 1));
     cJSON *s = cJSON_AddObjectToObject(o, "summary");
 #define RATE(x) (d > 0 ? (double)(x) / d : 0.0)
     const sb_io_counts *c = &r->total;
-    cJSON_AddNumberToObject(s, "iops", rnd(RATE(c->ops_r + c->ops_w), 1));
-    cJSON_AddNumberToObject(s, "mbps", rnd(RATE(c->bytes_r + c->bytes_w) / 1e6, 2));
-    cJSON_AddNumberToObject(s, "read_iops", rnd(RATE(c->ops_r), 1));
-    cJSON_AddNumberToObject(s, "write_iops", rnd(RATE(c->ops_w), 1));
-    cJSON_AddNumberToObject(s, "read_mbps", rnd(RATE(c->bytes_r) / 1e6, 2));
-    cJSON_AddNumberToObject(s, "write_mbps", rnd(RATE(c->bytes_w) / 1e6, 2));
-    cJSON_AddItemToObject(s, "lat_us", lat_obj(r->hist));
-    cJSON_AddNumberToObject(s, "errors", (double)c->errors);
-    cJSON_AddNumberToObject(s, "io_count", (double)(c->ops_r + c->ops_w));
+    num_or_null(s, "iops", m, rnd(RATE(c->ops_r + c->ops_w), 1));
+    num_or_null(s, "mbps", m, rnd(RATE(c->bytes_r + c->bytes_w) / 1e6, 2));
+    num_or_null(s, "read_iops", m, rnd(RATE(c->ops_r), 1));
+    num_or_null(s, "write_iops", m, rnd(RATE(c->ops_w), 1));
+    num_or_null(s, "read_mbps", m, rnd(RATE(c->bytes_r) / 1e6, 2));
+    num_or_null(s, "write_mbps", m, rnd(RATE(c->bytes_w) / 1e6, 2));
+    if (m) cJSON_AddItemToObject(s, "lat_us", lat_obj(r->hist));
+    else cJSON_AddNullToObject(s, "lat_us");
+    num_or_null(s, "errors", m, (double)c->errors);
+    num_or_null(s, "io_count", m, (double)(c->ops_r + c->ops_w));
+    num_or_null(s, "cpu_pct", m, rnd(r->cpu_pct, 1));
+    num_or_null(s, "proc_cpu_pct", m, rnd(r->proc_cpu_pct, 2));
     cJSON *ta = cJSON_AddArrayToObject(o, "targets");
     for (int k = 0; k < t->ntargets; k++) {
         cJSON *x = cJSON_CreateObject();
@@ -113,7 +132,7 @@ static cJSON *storage_test_json(int idx, const sb_test *t, const sb_storage_resu
         cJSON_AddItemToArray(ta, x);
     }
     cJSON *pw = cJSON_AddArrayToObject(o, "per_worker");
-    for (int i = 0; i < r->nworkers; i++) {
+    for (int i = 0; m && i < r->nworkers; i++) {
         const sb_io_counts *w = &r->w_counts[i];
         cJSON *x = cJSON_CreateObject();
         cJSON_AddNumberToObject(x, "id", i);
@@ -128,7 +147,7 @@ static cJSON *storage_test_json(int idx, const sb_test *t, const sb_storage_resu
         cJSON_AddItemToArray(pw, x);
     }
     cJSON *ps = cJSON_AddArrayToObject(o, "per_spec");
-    for (int k = 0; k < r->nspecs; k++) {
+    for (int k = 0; m && k < r->nspecs; k++) {
         const sb_io_counts *sc = &r->s_counts[k];
         const sb_spec *sp = &t->specs[k];
         cJSON *x = cJSON_CreateObject();
@@ -157,6 +176,7 @@ static cJSON *storage_test_json(int idx, const sb_test *t, const sb_storage_resu
         cJSON_AddNumberToObject(l, "p99", rnd(k->lat_p99_us, 3));
         cJSON_AddNumberToObject(l, "max", rnd(k->lat_max_us, 3));
         cJSON_AddNumberToObject(x, "cpu_pct", rnd(k->cpu_pct, 1));
+        cJSON_AddNumberToObject(x, "proc_cpu_pct", rnd(k->proc_cpu_pct, 2));
         cJSON_AddItemToArray(ts, x);
     }
     cJSON *er = cJSON_AddArrayToObject(o, "errors");
@@ -182,16 +202,19 @@ static cJSON *compute_test_json(int idx, const sb_test *t, const sb_compute_resu
     cJSON *o = cJSON_CreateObject();
     cJSON_AddNumberToObject(o, "index", idx);
     cJSON_AddStringToObject(o, "type", sb_test_type_name(t->type));
+    add_partial(o, r->stop_phase);
     cJSON_AddItemToObject(o, "config", cJSON_Duplicate(t->raw, 1));
     cJSON *s = cJSON_AddObjectToObject(o, "summary");
     const char *key = ck_key(r->kind);
     int dg = ck_digits(r->kind);
+    int m = r->measured;   /* 0: vor der Messphase beendet -> Messwerte null */
     if (r->kind == SB_CK_CPU) {
         cJSON_AddStringToObject(s, "workload", sb_cpu_workload_name((sb_cpu_workload)t->workload));
         cJSON_AddNumberToObject(s, "threads", r->nthreads > 0 ? r->nthreads : 1);
-        cJSON_AddNumberToObject(s, "ops_per_s", rnd(r->value, 1));
-        cJSON_AddNumberToObject(s, "score", rnd(r->score, 1));
-        cJSON_AddNumberToObject(s, "ops", (double)r->units);
+        num_or_null(s, "ops_per_s", m, rnd(r->value, 1));
+        num_or_null(s, "score", m, rnd(r->score, 1));
+        num_or_null(s, "ops", m, (double)r->units);
+        cJSON_AddNumberToObject(s, "score_reference", sb_cpu_reference((sb_cpu_workload)t->workload));
     } else {
         cJSON_AddStringToObject(s, "mode", t->mem_mode == 1 ? "latency" : "bandwidth");
         if (t->mem_mode == 0) {
@@ -201,13 +224,13 @@ static cJSON *compute_test_json(int idx, const sb_test *t, const sb_compute_resu
         cJSON_AddNumberToObject(s, "threads", r->nthreads > 0 ? r->nthreads : 1);
         cJSON_AddNumberToObject(s, "buffer_size_bytes", (double)(r->buffer_bytes ? r->buffer_bytes : t->buffer_size));
         if (t->mem_mode == 0) {
-            cJSON_AddNumberToObject(s, "gbps", rnd(r->value, 3));
+            num_or_null(s, "gbps", m, rnd(r->value, 3));
             cJSON_AddStringToObject(s, "simd", sb_simd_name(r->simd));
             cJSON_AddBoolToObject(s, "nontemporal", r->nontemporal);
-            cJSON_AddNumberToObject(s, "bytes", (double)r->units);
+            num_or_null(s, "bytes", m, (double)r->units);
         } else {
-            cJSON_AddNumberToObject(s, "latency_ns", rnd(r->value, 2));
-            cJSON_AddNumberToObject(s, "loads", (double)r->units);
+            num_or_null(s, "latency_ns", m, rnd(r->value, 2));
+            num_or_null(s, "loads", m, (double)r->units);
         }
         if (t->mem_node >= 0) cJSON_AddNumberToObject(s, "mem_node", t->mem_node);
     }
@@ -216,9 +239,10 @@ static cJSON *compute_test_json(int idx, const sb_test *t, const sb_compute_resu
         cJSON *cp = cJSON_AddArrayToObject(s, "cpus");
         for (int i = 0; i < r->nthreads; i++) cJSON_AddItemToArray(cp, cJSON_CreateNumber(r->cpus[i]));
     }
-    cJSON_AddNumberToObject(s, "cpu_pct", rnd(r->cpu_pct, 1));
+    num_or_null(s, "cpu_pct", m, rnd(r->cpu_pct, 1));
+    num_or_null(s, "proc_cpu_pct", m, rnd(r->proc_cpu_pct, 2));
     cJSON *pw = cJSON_AddArrayToObject(o, "per_worker");
-    for (int i = 0; i < r->nthreads; i++) {
+    for (int i = 0; m && i < r->nthreads; i++) {
         cJSON *x = cJSON_CreateObject();
         cJSON_AddNumberToObject(x, "id", i);
         cJSON_AddNumberToObject(x, "cpu", r->cpus[i]);
@@ -232,7 +256,9 @@ static cJSON *compute_test_json(int idx, const sb_test *t, const sb_compute_resu
         cJSON *x = cJSON_CreateObject();
         cJSON_AddNumberToObject(x, "t", rnd(r->ticks[i].t, 3));
         cJSON_AddNumberToObject(x, key, rnd(r->ticks[i].value, dg));
+        if (r->kind == SB_CK_CPU) cJSON_AddNumberToObject(x, "score", rnd(r->ticks[i].score, 1));
         cJSON_AddNumberToObject(x, "cpu_pct", rnd(r->ticks[i].cpu_pct, 1));
+        cJSON_AddNumberToObject(x, "proc_cpu_pct", rnd(r->ticks[i].proc_cpu_pct, 2));
         cJSON_AddItemToArray(ts, x);
     }
     cJSON *er = cJSON_AddArrayToObject(o, "errors");
@@ -250,13 +276,15 @@ static cJSON *compute_test_json(int idx, const sb_test *t, const sb_compute_resu
 
 typedef struct runctx { sb_progress *pr; sb_log *log; } runctx;
 
-static void ev_phase(void *c, int test, const char *name, double duration_s) {
+static void ev_phase(void *c, int test, const char *name, double duration_s, const cJSON *extra) {
     runctx *r = (runctx *)c;
     cJSON *o = cJSON_CreateObject();
     cJSON_AddStringToObject(o, "ev", "phase");
     cJSON_AddNumberToObject(o, "test", test);
     cJSON_AddStringToObject(o, "name", name);
     if (duration_s >= 0) cJSON_AddNumberToObject(o, "duration_s", rnd(duration_s, 3));
+    const cJSON *x;
+    cJSON_ArrayForEach(x, extra) cJSON_AddItemToObject(o, x->string, cJSON_Duplicate(x, 1));
     sb_progress_emit(r->pr, o);
     cJSON_Delete(o);
     sb_log_write(r->log, "INFO", "Test %d: Phase %s", test, name);
@@ -281,6 +309,7 @@ static void ev_tick(void *c, int test, const sb_tick_sample *s) {
     cJSON_AddStringToObject(o, "ev", "tick");
     cJSON_AddNumberToObject(o, "test", test);
     cJSON_AddNumberToObject(o, "t", rnd(s->t, 3));
+    cJSON_AddStringToObject(o, "metric", sb_metric_name(-1));
     cJSON_AddNumberToObject(o, "iops", rnd(s->iops, 1));
     cJSON_AddNumberToObject(o, "mbps", rnd(s->mbps, 2));
     cJSON *l = cJSON_AddObjectToObject(o, "lat_us");
@@ -320,7 +349,9 @@ static void ev_ctick(void *c, int test, int kind, const sb_ctick *s) {
     cJSON_AddStringToObject(o, "ev", "tick");
     cJSON_AddNumberToObject(o, "test", test);
     cJSON_AddNumberToObject(o, "t", rnd(s->t, 3));
+    cJSON_AddStringToObject(o, "metric", sb_metric_name(kind));
     cJSON_AddNumberToObject(o, key, rnd(s->value, dg));
+    if (k == SB_CK_CPU && s->score >= 0) cJSON_AddNumberToObject(o, "score", rnd(s->score, 1));
     cJSON_AddNumberToObject(o, "cpu_pct", rnd(s->cpu_pct, 1));
     cJSON_AddNumberToObject(o, "proc_cpu_pct", rnd(s->proc_cpu_pct, 2));
     if (k != SB_CK_MEM_LAT && s->w_value) {
@@ -712,6 +743,7 @@ int sb_run(const sb_run_options *o) {
         cJSON_AddStringToObject(doc, "started_utc", started);
         cJSON_AddStringToObject(doc, "ended_utc", ended);
         cJSON_AddBoolToObject(doc, "aborted", aborted);
+        cJSON_AddNumberToObject(doc, "tick_ms", so.tick_ms);
         cJSON_AddItemToObject(doc, "meta", meta);
         cJSON_AddItemToObject(doc, "tests", tests);
         if (write_json_atomic(out_path, doc, &log)) {

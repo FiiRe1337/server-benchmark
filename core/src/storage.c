@@ -14,6 +14,7 @@
 #include "sb/storage.h"
 #include "sb/target.h"
 #include "sb/rng.h"
+#include "sb/vertrag.h"
 
 enum { PH_INIT = 0, PH_WARMUP = 1, PH_MEASURE = 2, PH_STOP = 3 };
 
@@ -427,7 +428,8 @@ static int wait_until(HANDLE stop, uint64_t deadline) {
 
 int sb_storage_run(int ti, const sb_test *t, const sb_storage_opts *o, const sb_storage_cb *cb, sb_storage_result *r) {
     memset(r, 0, sizeof *r);
-    int nw = (int)t->workers, rc = 0;
+    int nw = (int)t->workers, rc = 0, ph = SB_STOP_PREPARING;
+    r->stop_phase = SB_STOP_PREPARING;
     r->ntargets = t->ntargets;
     r->t_created = (int *)calloc((size_t)(t->ntargets ? t->ntargets : 1), sizeof(int));
     r->t_deleted = (int *)calloc((size_t)(t->ntargets ? t->ntargets : 1), sizeof(int));
@@ -450,7 +452,13 @@ int sb_storage_run(int ti, const sb_test *t, const sb_storage_opts *o, const sb_
     }
 
     /* 1. Vorbereitung: Testdateien anlegen */
-    if (cb->phase) cb->phase(cb->ctx, ti, "preparing", -1);
+    if (cb->phase) {
+        /* Vertrag 1.3: Anzahl Worker beim Teststart; Storage-Worker sind nicht gebunden, daher keine cpus */
+        cJSON *ex = cJSON_CreateObject();
+        cJSON_AddNumberToObject(ex, "threads", nw);
+        cb->phase(cb->ctx, ti, "preparing", -1, ex);
+        cJSON_Delete(ex);
+    }
     uint64_t prep_all = 0, prep_base = 0;
     for (int k = 0; k < t->ntargets; k++) if (t->targets[k].type == SB_TGT_FILE) prep_all += t->targets[k].file_size;
     for (int k = 0; k < t->ntargets; k++) {
@@ -573,7 +581,8 @@ int sb_storage_run(int ti, const sb_test *t, const sb_storage_opts *o, const sb_
     /* 3. Warmup */
     uint64_t now = sb_qpc();
     if (t->warmup_s > 0) {
-        if (cb->phase) cb->phase(cb->ctx, ti, "warmup", t->warmup_s);
+        ph = SB_STOP_WARMUP;
+        if (cb->phase) cb->phase(cb->ctx, ti, "warmup", t->warmup_s, NULL);
         E.phase = PH_WARMUP;
         SetEvent(E.start_evt);
         uint64_t wend = now + (uint64_t)(t->warmup_s * (double)E.qpf);
@@ -594,13 +603,14 @@ int sb_storage_run(int ti, const sb_test *t, const sb_storage_opts *o, const sb_
     }
     /* 4. Messung */
     if (!r->aborted) {
-        if (cb->phase) cb->phase(cb->ctx, ti, "measure", t->duration_s);
+        ph = SB_STOP_MEASURE;
+        if (cb->phase) cb->phase(cb->ctx, ti, "measure", t->duration_s, NULL);
         sb_cpu_sample c0, cprev, cnow;
         sb_cpu_sample_now(&c0);
         cprev = c0;
         DWORD ncpu = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
         if (!ncpu) ncpu = 1;
-        uint64_t pprev = sb_proc_cpu_now(), pnow;
+        uint64_t pprev = sb_proc_cpu_now(), pnow, pstart = pprev;
         uint64_t mstart = sb_qpc();
         E.phase = PH_MEASURE;
         SetEvent(E.start_evt);
@@ -636,6 +646,7 @@ int sb_storage_run(int ti, const sb_test *t, const sb_storage_opts *o, const sb_
                          proc_pct(pprev, pnow, rest, ncpu), cb, ti);
         r->measured_s = (double)(mend - mstart) / (double)E.qpf;
         r->cpu_pct = sb_cpu_pct(&c0, &cnow);
+        r->proc_cpu_pct = proc_pct(pstart, pnow, r->measured_s, ncpu);
     }
     E.phase = PH_STOP;
     SetEvent(E.start_evt);
@@ -643,7 +654,7 @@ int sb_storage_run(int ti, const sb_test *t, const sb_storage_opts *o, const sb_
 out:
     E.phase = PH_STOP;
     SetEvent(E.start_evt);
-    if (cb->phase && rc != 4) cb->phase(cb->ctx, ti, "cleanup", -1);
+    if (cb->phase && rc != 4) cb->phase(cb->ctx, ti, "cleanup", -1, NULL);
     for (int i = 0; i < nw; i++) if (E.w[i].thread) WaitForSingleObject(E.w[i].thread, 60000);
     /* 5. Zusammenführen */
     for (int i = 0; i < nw; i++) {
@@ -691,5 +702,6 @@ out:
         else logf_(cb, "WARN", "Testdatei %s konnte nicht gelöscht werden: %s", path, sb_errtext(de));
     }
     if (rc == 0 && r->aborted) rc = 3;
+    r->stop_phase = rc == 1 || rc == 3 ? ph : SB_STOP_NONE;
     return rc;
 }

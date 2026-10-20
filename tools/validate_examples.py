@@ -8,6 +8,8 @@ Prüft:
     (z. B. Summe der access_specs-Gewichte = 100, allow_destructive bei
     Schreibtests auf volume/physical, tests[].index streng monoton steigend und
     < Anzahl Tests im Job, disjunkte NUMA-CPU-Listen),
+  * Vertrag 1.3: partial/stopped_in und null-Messwerte (check_partial), Progress-Regeln
+    (check_progress_v13: tick.metric, workers[] vollständig/sortiert, phase.threads/cpus),
   * einen Selbsttest der semantischen Regeln mit absichtlich falschen Dokumenten.
 
 Die Funktionen check_result_indices() und check_numa() nutzen auch die Smoke-Tests
@@ -45,6 +47,7 @@ RESULT_JOBS = {
     "result-storage.json": "job-storage-mix.json",
     "result-gaps.json": "job-mixed-gaps.json",
     "result-compute.json": "job-compute.json",
+    "result-partial.json": "job-compute.json",
 }
 
 
@@ -124,7 +127,7 @@ def check_compute(i: int, t: dict, meta: dict) -> list[str]:
             errs.append(f"{pre}/per_worker: id muss 0..n-1 sein")
         if "cpus" in s and [w.get("cpu") for w in pw] != s["cpus"]:
             errs.append(f"{pre}/per_worker: cpu passt nicht zu summary.cpus")
-        if key in s and all(key in w for w in pw) and not latency:
+        if s.get(key) is not None and all(w.get(key) is not None for w in pw) and not latency:
             tot = sum(w[key] for w in pw)
             if abs(tot - s[key]) > max(1e-3 * s[key], 0.01):
                 errs.append(f"{pre}/per_worker: Summe {key} {tot:.3f} != summary.{key} {s[key]}")
@@ -142,6 +145,76 @@ def check_compute(i: int, t: dict, meta: dict) -> list[str]:
                 errs.append(f"{pre}/summary/cpus: {bad} liegen außerhalb von numa_node {cfg['numa_node']}")
         if "mem_node" in cfg and any(w.get("mem_node", cfg["mem_node"]) != cfg["mem_node"] for w in pw):
             errs.append(f"{pre}/per_worker: mem_node weicht von config.mem_node ab")
+    return errs
+
+
+# Messwerte der summary, die bei einem Teilergebnis vor der Messphase null sind (Vertrag 1.3)
+MEASURED = {
+    "storage": ("iops", "mbps", "read_iops", "write_iops", "read_mbps", "write_mbps", "lat_us", "errors", "io_count"),
+    "cpu": ("ops_per_s", "score", "ops"),
+    "memory": ("gbps", "latency_ns", "bytes", "loads"),
+}
+METRIC_KEY = {"iops": "iops", "ops_per_s": "ops_per_s", "gbps": "gbps", "latency_ns": "latency_ns", "mbps": "mbps"}
+
+
+def check_partial(i: int, t: dict) -> list[str]:
+    """Vertrag 1.3: partial/stopped_in je Test. Vor der Messphase beendet -> Messwerte null und
+    Listen leer; sonst (vollständig oder Stopp in measure) keine null-Messwerte."""
+    errs: list[str] = []
+    pre = f"/tests/{i}"
+    partial, where = t.get("partial"), t.get("stopped_in")
+    if partial is True and where not in ("preparing", "warmup", "measure"):
+        errs.append(f"{pre}: partial true ohne gültiges stopped_in ({where!r})")
+    if partial is not True and where is not None:
+        errs.append(f"{pre}: stopped_in ohne partial: true")
+    s = t.get("summary", {})
+    keys = [k for k in MEASURED.get(t.get("type"), ()) if k in s]
+    if partial is True and where in ("preparing", "warmup"):
+        bad = [k for k in keys if s[k] is not None]
+        if bad:
+            errs.append(f"{pre}/summary: vor der Messphase beendet, aber Messwerte {bad} nicht null")
+        for lst in ("per_worker", "per_spec", "histogram", "timeseries"):
+            if t.get(lst):
+                errs.append(f"{pre}/{lst}: vor der Messphase beendet, Liste muss leer sein")
+    else:
+        bad = [k for k in keys if s[k] is None]
+        if bad:
+            errs.append(f"{pre}/summary: null-Messwerte {bad} nur bei partial: true und stopped_in preparing/warmup")
+    return errs
+
+
+def check_progress_v13(events: list[dict]) -> list[str]:
+    """Vertrag 1.3 im Event-Strom (nur Events, die die neuen Felder tragen bzw. von sbench >= 1.3
+    stammen): tick.metric nennt ein vorhandenes Feld, workers[] ohne Lücken/Doppel aufsteigend,
+    phase.threads = len(phase.cpus), SMT-Geschwister auf demselben Kern."""
+    errs: list[str] = []
+    threads: dict[int, int] = {}
+    for n, e in enumerate(events, 1):
+        if e.get("ev") == "phase" and "threads" in e:
+            threads[e["test"]] = e["threads"]
+            cpus = e.get("cpus")
+            if cpus is not None:
+                if len(cpus) != e["threads"]:
+                    errs.append(f"Zeile {n}: phase.cpus hat {len(cpus)} Einträge, threads = {e['threads']}")
+                if [c["id"] for c in cpus] != list(range(len(cpus))):
+                    errs.append(f"Zeile {n}: phase.cpus[].id muss 0..n-1 sein")
+                core = {c["cpu"]: c["core"] for c in cpus}
+                for c in cpus:
+                    if c["cpu"] != c["group"] * 64 + c["number"]:
+                        errs.append(f"Zeile {n}: cpu {c['cpu']} != group*64+number")
+                    sib = c["smt_sibling_of"]
+                    if sib is not None and (sib == c["cpu"] or (sib in core and core[sib] != c["core"])):
+                        errs.append(f"Zeile {n}: smt_sibling_of {sib} von cpu {c['cpu']} liegt nicht auf demselben Kern")
+        if e.get("ev") == "tick" and "metric" in e:
+            if METRIC_KEY.get(e["metric"]) not in e:
+                errs.append(f"Zeile {n}: tick.metric {e['metric']!r}, Feld fehlt")
+            w = e.get("workers")
+            if w is not None:
+                ids = [x["id"] for x in w]
+                if ids != list(range(len(ids))):
+                    errs.append(f"Zeile {n}: workers[].id {ids[:8]} nicht 0..n-1 aufsteigend")
+                if e["test"] in threads and len(ids) != threads[e["test"]]:
+                    errs.append(f"Zeile {n}: {len(ids)} workers, phase.threads = {threads[e['test']]}")
     return errs
 
 
@@ -170,7 +243,8 @@ def semantic_checks(kind: str, doc, job: dict | None = None) -> list[str]:
         for i, t in enumerate(doc["tests"]):
             if t["type"] != t["config"]["type"]:
                 errs.append(f"/tests/{i}: type passt nicht zu config.type")
-            if t["type"] == "storage":
+            errs += check_partial(i, t)
+            if t["type"] == "storage" and t["summary"].get("io_count") is not None:
                 n = sum(b["count"] for b in t["histogram"])
                 if n != t["summary"]["io_count"]:
                     errs.append(f"/tests/{i}/histogram: Summe {n} != summary.io_count {t['summary']['io_count']}")
@@ -192,6 +266,24 @@ def _ct(ops: float = 3.0, cfg: dict | None = None, node: int = 0) -> dict:
     return {"type": "cpu", "config": cfg or {"type": "cpu"},
             "summary": {"threads": 2, "ops_per_s": ops, "cpus": [0, 1]},
             "per_worker": [{"id": 0, "cpu": 0, "node": node, "ops_per_s": 1.0}, {"id": 1, "cpu": 1, "node": 0, "ops_per_s": 2.0}]}
+
+
+def _pt(partial, where, val) -> dict:
+    t = {"type": "cpu", "partial": partial, "summary": {"ops_per_s": val, "score": val}}
+    if where:
+        t["stopped_in"] = where
+    return t
+
+
+def _ph(n: int, core1: int = 0) -> dict:
+    cpus = [{"id": 0, "cpu": 0, "group": 0, "number": 0, "numa_node": 0, "core": 0, "smt_sibling_of": None},
+            {"id": 1, "cpu": 1, "group": 0, "number": 1, "numa_node": 0, "core": core1, "smt_sibling_of": 0}][:n]
+    return {"ev": "phase", "test": 0, "name": "preparing", "threads": n, "cpus": cpus}
+
+
+def _tk(metric: str, ids: list[int], key: str | None = None) -> dict:
+    k = key or metric
+    return {"ev": "tick", "test": 0, "t": 1.0, "metric": metric, k: 1.0, "workers": [{"id": i, k: 0.5} for i in ids]}
 
 
 def selftest() -> list[str]:
@@ -216,6 +308,22 @@ def selftest() -> list[str]:
         ("cpu Knoten passt nicht", check_compute(0, _ct(node=1), _M2), True),
         ("latency mit 2 Threads", check_compute(0, {"type": "memory", "config": {"type": "memory"},
                                                      "summary": {"mode": "latency", "threads": 2}}, _M2), True),
+        # Vertrag 1.3
+        ("partial warmup null", check_partial(0, _pt(True, "warmup", None)), False),
+        ("partial warmup mit Wert", check_partial(0, _pt(True, "warmup", 5.0)), True),
+        ("partial warmup per_worker", check_partial(0, dict(_pt(True, "warmup", None), per_worker=[{"id": 0}])), True),
+        ("partial measure mit Wert", check_partial(0, _pt(True, "measure", 5.0)), False),
+        ("partial measure null", check_partial(0, _pt(True, "measure", None)), True),
+        ("vollständig null", check_partial(0, _pt(False, None, None)), True),
+        ("partial ohne stopped_in", check_partial(0, _pt(True, None, None)), True),
+        ("stopped_in ohne partial", check_partial(0, _pt(False, "warmup", 1.0)), True),
+        ("1.2 ohne partial", check_partial(0, {"type": "cpu", "summary": {"ops_per_s": 1.0}}), False),
+        ("tick ok", check_progress_v13([_ph(2), _tk("ops_per_s", [0, 1])]), False),
+        ("tick metric fehlt", check_progress_v13([_tk("gbps", [0, 1], key="ops_per_s")]), True),
+        ("workers unsortiert", check_progress_v13([_tk("ops_per_s", [1, 0])]), True),
+        ("workers unvollständig", check_progress_v13([_ph(2), _tk("ops_per_s", [0])]), True),
+        ("cpus != threads", check_progress_v13([dict(_ph(2), threads=3)]), True),
+        ("SMT anderer Kern", check_progress_v13([_ph(2, core1=5)]), True),
     ]
     for name, errs, expect_err in cases:
         if bool(errs) != expect_err:
@@ -265,6 +373,7 @@ def main() -> int:
                 extra.append("erstes Event muss 'start' sein")
             if not evs or evs[-1] != "done" or evs.count("done") != 1:
                 extra.append("letztes (und einziges) 'done'-Event fehlt")
+            extra += check_progress_v13([d for _, d in docs])
         else:
             doc = load_json(p)
             docs = [("", doc)]
@@ -306,7 +415,7 @@ def main() -> int:
         for m in st:
             print(f"         - {m}")
     else:
-        print("[OK]   Selbsttest semantische Regeln (Index-Lücken, NUMA, cpu/memory)")
+        print("[OK]   Selbsttest semantische Regeln (Index-Lücken, NUMA, cpu/memory, Vertrag 1.3)")
 
     print()
     print("Ergebnis:", "alles gültig" if failures == 0 else f"{failures} Datei(en) fehlerhaft")

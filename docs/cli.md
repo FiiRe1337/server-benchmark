@@ -30,6 +30,17 @@ Ergebnis weitere `summary`-, `per_worker`- und `timeseries`-Felder sowie
 `meta.numa_nodes[].ram_method` (Issue #8); im Tick `latency_ns`. Die Formatversionen bleiben
 unverändert. `net_client`, `net_server` und `hyperv_info` melden weiterhin `E_NOT_IMPLEMENTED`.
 
+**Vertragsstand 1.3.** Nur zusätzliche, optionale Felder; Formatversionen unverändert
+(Abschnitt [Vertrag 1.3](#vertrag-13-metric-threadscpus-teilergebnisse-score)). sbench ab 1.3
+gibt sie immer aus: `tick.metric`, `tick.score` (cpu), im ersten `phase`-Event eines Tests
+`threads` und (cpu/memory) `cpus` mit SMT-Geschwistern, je Test `partial` und `stopped_in`,
+`meta.cpu_score` (Score-Formel und Referenzwerte, auch in `sb-info`), `summary.score_reference`
+(cpu), `summary.proc_cpu_pct` (alle Typen), `summary.cpu_pct` (storage),
+`timeseries[].proc_cpu_pct`, `timeseries[].score` (cpu), `tick_ms` im Ergebnis und die
+CSV-Spalten `partial,stopped_in`. **Einzige Lockerung:** Messwerte der `summary` dürfen `null`
+sein, aber nur bei `partial: true` mit `stopped_in` `preparing`/`warmup` (Test vor der
+Messphase beendet); vorher stand dort 0.
+
 ## Allgemeines
 
 - Alle JSON-Ausgaben sind UTF-8 ohne BOM, Zeilenende LF.
@@ -151,7 +162,9 @@ Phasen ohne Bedeutung für einen Testtyp (z. B. `warmup` bei `hyperv_info`) dür
 entfallen. Storage-Ticks enthalten immer `iops`, `mbps`, `lat_us`, `cpu_pct`;
 optional sind `read_iops`, `write_iops`, `read_mbps`, `write_mbps`, `proc_cpu_pct` und
 `workers` (je Worker `id`, `iops`, `mbps`, optional `lat_us{mean,p99}`). CPU-Ticks nutzen `ops_per_s`, Memory-Ticks `gbps`,
-Netz-Ticks `mbps`.
+Netz-Ticks `mbps`. Ab Vertrag 1.3 nennt `metric` in jedem Tick den Hauptwert (`iops` |
+`ops_per_s` | `gbps` | `latency_ns` | `mbps`), und das erste `phase`-Event eines Tests
+(`preparing`) trägt `threads` und bei cpu/memory `cpus` (siehe [Vertrag 1.3](#vertrag-13-metric-threadscpus-teilergebnisse-score)).
 
 Ausführung: Tests laufen in der Reihenfolge des Jobs nacheinander. Bei `storage`
 werden die Worker reihum auf die Targets verteilt (Worker *i* → Target *i* mod Anzahl
@@ -172,7 +185,9 @@ verwendet; `stop` versucht beide Namen.
 Nach dem Stop beendet `run` den laufenden Test sofort, schreibt das **Teilergebnis**
 trotzdem nach `--out` (mit `aborted: true`, bereits abgeschlossene Tests vollständig,
 der laufende Test mit den bis dahin gemessenen Werten, nicht begonnene Tests fehlen),
-sendet `done` mit `aborted: true` und endet mit Exit-Code **3**.
+sendet `done` mit `aborted: true` und endet mit Exit-Code **3**. Ab Vertrag 1.3 trägt der
+laufende Test `partial: true` und `stopped_in`; bei einem Stopp in `preparing` oder `warmup`
+sind seine Messwerte `null` (siehe [Teilergebnisse](#teilergebnisse-partial-stopped_in)).
 
 `sbench stop` selbst endet mit 0, wenn das Event gesetzt wurde, und mit 1, wenn kein
 Lauf mit dieser ID existiert.
@@ -244,11 +259,18 @@ sbench export <result.json> --csv <out.csv> [--style iometer|flat]
   Trennzeichen Komma, Dezimalpunkt, UTF-8. Die Spalten `ops_per_s` (cpu), `gbps` und
   `latency_ns` (memory) sowie `score` (cpu) sind seit Vertrag 1.2 hinten angehängt; die
   Positionen der älteren Spalten bleiben gleich. Bei `cpu`/`memory` gibt es Zeilen
-  `scope = total` und `scope = worker` (je Thread).
+  `scope = total` und `scope = worker` (je Thread). Ab Vertrag 1.3 folgen `partial`
+  (`true`/`false`, auf allen Zeilen eines Tests) und `stopped_in`.
+  **Leeres Feld** heißt „kein Wert“: die Spalte gilt nicht für Testtyp bzw. `scope` (z. B.
+  `errors` und `score` auf cpu/memory-Worker-Zeilen, `score` bei storage, `read_mbps`/`write_mbps`
+  auf Worker-/Spec-Zeilen) oder der Messwert ist `null` (Teilergebnis). `0` ist immer ein
+  gemessener Wert. `scope` ist endgültig: `total` (Summe des Tests, bei allen Testtypen),
+  `worker` (je Worker/Thread), `spec` (nur storage, je Access-Spec).
 - `iometer`: an das Iometer-Ergebnis-CSV angelehnte Spaltennamen
   (`Target Type`, `Target Name`, `Access Specification Name`, `IOps`, `MBps (Decimal)`,
   `Average Response Time`, …) zur Weiterverarbeitung in vorhandenen Auswertungen.
-  Nur Storage-Tests werden exportiert.
+  Nur Storage-Tests werden exportiert (gewollt: das Iometer-Format hat keine Spalten für
+  ops/s, GB/s oder ns; cpu/memory stehen im `flat`-Export).
 
 ### `sbench bundle`
 
@@ -377,9 +399,86 @@ geschriebene Bytes (wie STREAM). `latency_ns` = mittlere Zeit eines abhängigen 
 - `warmup`: `progress` mit `unit: "s"`.
 - `measure`: `tick` mit `ops_per_s` (cpu), `gbps` (bandwidth) oder `latency_ns`
   (latency), dazu `cpu_pct`, `proc_cpu_pct` und – außer bei latency – `workers[]`
-  mit `id` und dem Wert pro Thread.
+  mit `id` und dem Wert pro Thread. Ab 1.3 zusätzlich `metric` und bei cpu `score`.
 - Stop (`sbench stop`, Strg+C) beendet die Messung innerhalb von ≤ 250 ms; das
-  Teilergebnis enthält die bis dahin gemessenen Werte.
+  Teilergebnis enthält die bis dahin gemessenen Werte (ab 1.3 mit `partial: true`).
+
+## Vertrag 1.3: metric, threads/cpus, Teilergebnisse, Score
+
+Alle Felder sind optional im Schema und werden von sbench ab 1.3 immer ausgegeben. Beispiele:
+[`progress-compute.jsonl`](../schema/examples/progress-compute.jsonl),
+[`result-compute.json`](../schema/examples/result-compute.json),
+[`progress-partial.jsonl`](../schema/examples/progress-partial.jsonl),
+[`result-partial.json`](../schema/examples/result-partial.json).
+
+### Ticks
+
+| Feld | Bedeutung |
+|---|---|
+| `metric` | Name des Hauptwerts in diesem Tick: `iops` (storage), `ops_per_s` (cpu), `gbps` (memory bandwidth), `latency_ns` (memory latency), `mbps` (net, später). Das gleichnamige Feld ist immer vorhanden. |
+| `score` | nur cpu: Score des Intervalls = `ops_per_s` ÷ `meta.cpu_score.ref_ops_per_s[workload]` × 1000. |
+| `workers[]` | Jeder Worker/Thread genau einmal, aufsteigend nach `id` (0 … n−1, wie `per_worker[].id` und `phase.cpus[].id`). Werte sind **Raten im Intervall** (IOPS, MB/s, ops/s, GB/s), keine Summen. Storage: Hat ein Worker den Intervallwechsel noch nicht quittiert (≤ 250 ms Wartezeit), zählt sein Intervall zum nächsten Tick; er steht dann mit 0 drin. `lat_us` fehlt bei Workern ohne abgeschlossene I/O im Intervall. memory latency hat kein `workers[]` (immer genau ein Thread, Wert = Gesamtwert). |
+
+### phase-Event beim Teststart
+
+Das erste `phase`-Event eines Tests (`preparing`) trägt `threads`: bei cpu/memory die
+tatsächliche Thread-Anzahl (auch bei `threads: 0` im Job schon aufgelöst; latency immer 1),
+bei storage die Anzahl Worker. cpu/memory zusätzlich `cpus[]`, ein Eintrag je Thread in
+Thread-Reihenfolge:
+
+| Feld | Bedeutung |
+|---|---|
+| `id` | Thread-Index (= `workers[].id`) |
+| `cpu` | globaler Index = `group` × 64 + `number` (wie `meta.numa_nodes[].cpus`, `summary.cpus`) |
+| `group`, `number` | Prozessorgruppe und Nummer in der Gruppe (`PROCESSOR_NUMBER`) |
+| `numa_node` | NUMA-Knoten des Prozessors |
+| `core` | laufende Nummer des physischen Kerns innerhalb des Laufs; gleicher Wert = SMT-Geschwister |
+| `smt_sibling_of` | globaler Index des ersten logischen Prozessors desselben Kerns, `null` für diesen selbst (bzw. ohne SMT) |
+
+Bei mehr Threads als Prozessoren (`W_OVERSUBSCRIBED`) wiederholen sich `cpu`-Werte.
+Storage-Worker werden nicht gebunden; dort gibt es kein `cpus`.
+
+### Teilergebnisse (`partial`, `stopped_in`)
+
+Jeder Test im Ergebnis trägt `partial` (`false` = vollständig gelaufen). `partial: true`
+heißt: der Test endete vorzeitig durch `sbench stop`/Strg+C oder einen Laufzeitfehler (Ursache
+in `errors[]`); `stopped_in` nennt die Phase (`preparing`, `warmup`, `measure`, Namen wie im
+`phase`-Event).
+
+| Ende in | Test im Ergebnis | Messwerte |
+|---|---|---|
+| vor dem Test (Stop zwischen zwei Tests) | fehlt | – |
+| `preparing`, `warmup` | steht drin, `partial: true` | alle Messwerte der `summary` `null` (nicht 0): storage `iops`, `mbps`, `read_*`, `write_*`, `lat_us`, `errors`, `io_count`, `cpu_pct`, `proc_cpu_pct`; cpu `ops_per_s`, `score`, `ops`, `cpu_pct`, `proc_cpu_pct`; memory `gbps`/`latency_ns`, `bytes`/`loads`, `cpu_pct`, `proc_cpu_pct`. `per_worker`, `per_spec`, `histogram`, `timeseries` sind leer. Konfiguration (`threads`, `cpus`, `buffer_size_bytes`, `simd`, `targets[]`) bleibt gesetzt. |
+| `measure` | steht drin, `partial: true` | Werte über die tatsächlich gemessene Zeit (Raten bezogen auf diese Zeit) |
+| – | `partial: false` | vollständig |
+
+Nach dem abgebrochenen Test folgende Tests fehlen. `aborted` im Dokument bleibt wie bisher.
+Ein `null`-Messwert kommt nur bei `partial: true` mit `stopped_in` `preparing`/`warmup` vor.
+
+### Score und Referenzwerte
+
+`meta.cpu_score` (in `sb-result` und `sb-info`): `formula`, `points` (1000), `reference_threads`
+(1), `reference_system` und `ref_ops_per_s` je workload (`int`, `float`, `crypto`, `mixed`).
+`summary.score_reference` (cpu) ist die Referenz des Tests; `score = ops_per_s ÷
+score_reference × 1000`. Die GUI muss keine Werte aus `docs/core.md` übernehmen.
+
+### CPU-Last und Zeitreihe
+
+- `summary.proc_cpu_pct` (alle Typen) und `summary.cpu_pct` (jetzt auch storage): Mittel über
+  die Messphase, Skala wie im Tick.
+- `timeseries[]` hat einen Punkt je `tick`-Event, also im Takt `--tick-ms`, nicht fest 1 s;
+  das Intervall steht in `tick_ms` des Ergebnisses. Neu: `timeseries[].proc_cpu_pct`, bei cpu
+  `timeseries[].score`.
+
+### Fortschritt `preparing`
+
+| Testtyp | Häufigkeit | `total` |
+|---|---|---|
+| storage | ≥ 1 s Abstand beim Füllen einer Testdatei, plus ein Event je fertiger Datei | Summe `file_size` aller `kind: file`-Targets |
+| memory | etwa alle 0,3 s (≥ 250 ms Abstand), plus ein Abschluss-Event mit `done = total` | `threads` × `summary.buffer_size_bytes` (tatsächliche, abgerundete Größe), auch bei `copy` (beide Pufferhälften werden beschrieben) |
+| cpu | keine `progress`-Events (nichts vorzubereiten) | – |
+
+`warmup`: storage etwa jede Sekunde, cpu/memory etwa alle 0,5 s (`unit: "s"`).
 
 ## Exit-Codes
 

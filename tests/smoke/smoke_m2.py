@@ -8,6 +8,7 @@
     Latenz L1-groß vs. RAM-groß, NUMA-Knoten 0 explizit
   * stop während eines cpu-Laufs -> Exit 3, Teilergebnis
   * export --style flat mit ops_per_s/gbps/latency_ns
+  * Vertrag 1.3 (metric, phase.threads/cpus, Score, Teilergebnisse): siehe smoke_v13.py
 Echte Messwerte gehen in die Zusammenfassung (SUMMARY).
 """
 from __future__ import annotations
@@ -209,6 +210,8 @@ def run_m2(h, sbench: Path, work: Path, info: dict, quick: bool) -> dict:
     sres = h.check_result(sout, "Teilergebnis (cpu stop)", expect_aborted=True)
     if sres and sres["tests"]:
         check(sres["tests"][0]["summary"]["ops_per_s"] > 0, "Teilergebnis cpu enthält Messwerte")
+        check(sres["tests"][0].get("partial") is True and sres["tests"][0].get("stopped_in") == "measure",
+              "Teilergebnis cpu: partial true, stopped_in measure (Vertrag 1.3)")
 
     print("\n== M2: export flat ==")
     if res:
@@ -219,4 +222,8 @@ def run_m2(h, sbench: Path, work: Path, info: dict, quick: bool) -> dict:
             tot = [r for r in rows if r["scope"] == "total"]
             check(len(tot) == len(mtests) and all(r["gbps"] or r["latency_ns"] for r in tot),
                   "flat: Spalten gbps/latency_ns gefüllt")
+            check(all(r["partial"] == "false" and r["stopped_in"] == "" for r in rows), "flat: Spalten partial/stopped_in (Vertrag 1.3)")
+
+    import smoke_v13  # noqa: E402
+    smoke_v13.run_v13(h, sbench, work, info, quick, cprog, cout, mprog, mout)
     return out
