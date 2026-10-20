@@ -5,7 +5,17 @@ Plan: [`../docs/GUI_PLAN.md`](../docs/GUI_PLAN.md) · Kompatibilität: [`../docs
 
 > **GUI erfordert Desktop Experience, auf Server Core die CLI nutzen.**
 
-Ohne `sbench.exe` (Variable `SBENCH_EXE`, neben der EXE oder eingebettet) startet die GUI den Mock `mock_sbench.py`, der den Vertrag 1.1 nachbildet.
+**Kern:** Die portable `sbench-gui.exe` (CI-Artefakt `sbench-gui-x64`) bettet den echten `sbench.exe` ein (gleicher Commit, aus `build-windows.yml`). Beim Start:
+
+1. Datenverzeichnis = `data\` neben `sbench-gui.exe`, wenn beschreibbar (echter Schreibtest), sonst `%ProgramData%\sbench`.
+2. Der eingebettete Kern wird **nie** aus dem PyInstaller-Temp-Ordner (`_MEI…`) gestartet, sondern nach `<data_dir>\bin\sbench-<version>.exe` kopiert (fehlt oder weicht ab → neu kopieren).
+3. Vor **jedem** Start von sbench (auch vor `runas`/UAC) wird der SHA-256 gegen den beim Build eingebetteten Wert (`sbgui/_build_info.py`) geprüft. Abweichung → Start verweigert, klare Fehlermeldung, Datei wird aus der eingebetteten Kopie wiederhergestellt. Unter Windows hält die GUI die geprüfte Datei mit `FILE_SHARE_READ` offen (kein Austausch zwischen Prüfung und Start).
+4. Jeder sbench-Aufruf erhält `--data-dir <data_dir>` (runas erbt keine Umgebung, `SBENCH_DATA_DIR` wird dafür nicht genutzt).
+
+Quell-Läufe (Entwicklung/Tests): `SBENCH_EXE` (optional `SBENCH_EXE_SHA256`), sonst der Mock `mock_sbench.py` (Vertrag 1.1 + `--data-dir`, `version --json`). Eine eingefrorene EXE nutzt nie den Mock.
+Versionen (GUI + Kern) stehen im Fenstertitel und unten in der Seitenleiste (Tooltip: Commit, Kern-SHA-256).
+
+Self-Test: `sbench-gui.exe --self-test --report st.json` (ohne Admin) prüft zusätzlich zum GUI-Rendering den Kern: `version --json` (SHA-256 = eingebetteter Wert), `info --json` gegen sb-info/1, 3-s-Storage-Job (4 KiB random read, Datei in `%TEMP%`) mit Exit 0, `io_count > 0`, sb-result/1 und Laden in der GUI, `bundle --all` gegen sb-bundle/1. `--no-core` überspringt den Kern-Teil. Bericht als JSON mit lesbarer `summary`.
 
 ```
 cd gui
@@ -19,14 +29,14 @@ python tools/live_qprocess_check.py               # E2E gegen den Mock (Exit 4/2
 python tools/make_demo.py                         # demo/ neu erzeugen
 ```
 
-CI ([`../.github/workflows/gui-ci.yml`](../.github/workflows/gui-ci.yml)): Windows 2022/2025 (ruff, pytest, `--self-test` offscreen, PyInstaller-EXE + Self-Test der EXE, Artefakt `sbench-gui-<runner>-x64`) und Linux (Schemas, `check_mock.py`, E2E, Self-Test). Lokal:
+CI ([`../.github/workflows/gui-ci.yml`](../.github/workflows/gui-ci.yml)): Windows 2022/2025 (ruff, pytest, `--self-test` gegen den Mock), Linux (Schemas, `check_mock.py`, E2E, Self-Test), Job `core` (`build-windows.yml` per `workflow_call`) und Job `gui` ([`build-gui.yml`](../.github/workflows/build-gui.yml): lädt `sbench-cli-x64` aus demselben Lauf, `tools/gen_build_info.py` schreibt Version/Commit/SHA-256, PyInstaller onefile, Self-Test der EXE mit echtem Kern + Manipulationstest, Artefakt `sbench-gui-x64` mit genau `sbench-gui.exe`). Lokaler EXE-Build: `python tools/gen_build_info.py --core <sbench.exe> --run-core && pyinstaller --noconfirm sbench-gui.spec`. Lokal:
 
 ```
 pip install -r requirements.txt -r requirements-ci.txt     # exakte CI-Pins
 ruff check . && QT_QPA_PLATFORM=offscreen python -m pytest
 ```
 
-Umgebungsvariablen: `SBENCH_EXE` (Kern), `SBENCH_DATA_DIR` (Datenordner des Kerns; die GUI liest ihn nur aus `meta.data_dir`), `SBENCH_GUI_DIR` (GUI-Logs/Profile/Ergebnisse, Standard `%LOCALAPPDATA%\sbench-gui`), `SBENCH_SCHEMA_DIR`.
+Umgebungsvariablen (nur Quell-Läufe): `SBENCH_EXE` (Kern), `SBENCH_DATA_DIR` (Vorgabe für `--data-dir` im Quell-Lauf), `SBENCH_GUI_DIR` (GUI-Logs/Profile/Ergebnisse, Standard `%LOCALAPPDATA%\sbench-gui`), `SBENCH_SCHEMA_DIR`.
 Mock: `SBENCH_MOCK_ELEVATED=1` simuliert Administratorrechte, `SBENCH_MOCK_SPEED` beschleunigt Läufe.
 
 Windows-only und noch nicht auf echtem Windows getestet: `sbgui/pipe_win.py` (Named Pipe mit DACL, runas).

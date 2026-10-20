@@ -89,13 +89,10 @@ jobs:
       - name: Mock E2E (QProcess, offscreen)
         env: { QT_QPA_PLATFORM: offscreen }
         run: python tools/live_qprocess_check.py
-      - name: Build one-file EXE
-        run: pyinstaller --noconfirm sbench-gui.spec
-      - name: Self-test (windows + offscreen platform plugin)
-        run: |
-          start "" /wait dist\sbench-gui.exe --self-test --platforms windows,offscreen --report selftest-${{ matrix.os }}.json
-          type selftest-${{ matrix.os }}.json
-        shell: cmd
+      # The one-file EXE needs the real core embedded (sbench-gui.spec requires core-bin/ + build info) and is built
+      # by build-gui.yml (called from gui-ci.yml after build-windows.yml). Here: self-test from source against the mock.
+      - name: Self-test from source (windows + offscreen platform plugin, mock core)
+        run: python -m sbgui --self-test --platforms windows,offscreen --report selftest-${{ matrix.os }}.json
       - name: DLL dependencies of Qt (dumpbin)
         if: matrix.os != 'windows-11-arm'
         shell: pwsh

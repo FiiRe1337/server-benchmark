@@ -1,9 +1,11 @@
 """Entry point.
 
-  sbench-gui                               normal mode (sbench.exe next to the EXE, else mock)
+  sbench-gui                               normal mode (frozen: embedded real core, see core.py; source: $SBENCH_EXE or mock)
   sbench-gui --demo                        live run of the mock via QProcess
   sbench-gui --screenshot <dir> [--scale 1.5] [--size 1440x900|1366x768] [--replay progress.jsonl] [--results <dir>] [--info info.json]
-  sbench-gui --self-test [--platforms windows,offscreen]   -> JSON report on stdout, exit 0/1
+  sbench-gui --self-test [--platforms windows,offscreen] [--report f.json] [--no-core]
+                                           -> JSON report (stdout and/or --report), exit 0/1. Without --no-core it also
+                                              checks the core: version --json + SHA-256, info, 3 s storage job, bundle --all
 """
 import argparse, glob, json, os, platform, subprocess, sys, time
 
@@ -25,6 +27,9 @@ def parse(argv):
     ap.add_argument("--self-test-child", metavar="PLATFORM")
     ap.add_argument("--platforms", default="windows,offscreen" if os.name == "nt" else "offscreen")
     ap.add_argument("--report", metavar="FILE", help="also write the JSON report to FILE (needed for windowed EXE: no stdout)")
+    ap.add_argument("--no-core", action="store_true", help="self-test: skip the core checks (GUI only)")
+    ap.add_argument("--extra-results", metavar="DIR", action="append", default=[], help=argparse.SUPPRESS)
+    ap.add_argument("--expect-result", metavar="FILE", help=argparse.SUPPRESS)
     return ap.parse_args(argv)
 
 
@@ -66,7 +71,7 @@ def build_window(a, deterministic, extra_results=()):
     else:
         info = sbench.info(); kv = sbench.kern_version()
     check_schema(info, "sb-info/1")
-    return MainWindow(info, kv, result_files(a.results, extra_results))
+    return MainWindow(info, kv, result_files(a.results, list(extra_results) + list(getattr(a, "extra_results", []) or [])))
 
 
 def screenshots(a):
@@ -163,13 +168,23 @@ def self_test(a):
     except ImportError as e:
         report["pyside6"] = f"missing: {e}"
     import tempfile
+    from . import core
+    report["gui_version"] = core.gui_version(); report["build"] = core.build_info()
     me = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, "-m", "sbgui"]
     ok = True
+    child_extra = []
+    work = tempfile.mkdtemp(prefix="sbench-gui-selftest-")
+    if not a.no_core:
+        report["core"] = core_self_test(work)
+        ok &= bool(report["core"]["ok"])
+        if report["core"].get("result_file"):
+            child_extra = ["--extra-results", os.path.dirname(report["core"]["result_file"]), "--expect-result", report["core"]["result_file"]]
     for plat in [p for p in a.platforms.split(",") if p]:
         t0 = time.time()
         rf = os.path.join(tempfile.gettempdir(), f"sbench-gui-selftest-{os.getpid()}-{plat}.json")
         try:
-            cp = subprocess.run(me + ["--self-test-child", plat, "--report", rf], capture_output=True, text=True, timeout=60, cwd=ROOT)
+            cp = subprocess.run(me + ["--self-test-child", plat, "--report", rf] + child_extra, capture_output=True, text=True, timeout=60, cwd=ROOT,
+                                creationflags=_NO_WINDOW)
             try:
                 res = json.load(open(rf, encoding="utf-8")); os.remove(rf)
             except (OSError, ValueError):
@@ -179,8 +194,163 @@ def self_test(a):
         res["seconds"] = round(time.time() - t0, 2)
         report["platforms"][plat] = res; ok &= bool(res.get("ok"))
     report["ok"] = ok
+    report["summary"] = _summary(report)
     _emit(report, a.report)
+    if not ok and sys.stderr:
+        print("\n".join(report["summary"]), file=sys.stderr)
     return 0 if ok else 1
+
+
+_NO_WINDOW = 0x08000000 if os.name == "nt" else 0   # CREATE_NO_WINDOW: windowed EXE must not flash consoles
+
+
+def _summary(report):
+    """Readable one-line-per-check summary (also on stderr when the self-test fails)."""
+    lines = [f"sbench-gui {report.get('gui_version')} Self-Test: {'OK' if report.get('ok') else 'FEHLGESCHLAGEN'}"]
+    c = report.get("core")
+    if c:
+        lines.append(f"Kern ({c.get('mode')}): {c.get('exe')}  data_dir={c.get('data_dir')}")
+        for name, chk in c.get("checks", {}).items():
+            lines.append(f"  {'OK    ' if chk.get('ok') else 'FEHLER'} {name}: {chk.get('detail', '')}")
+    for plat, r in report.get("platforms", {}).items():
+        lines.append(f"  {'OK    ' if r.get('ok') else 'FEHLER'} GUI {plat}: {r.get('error') or r.get('expect_result') or r.get('grab')}")
+    return lines
+
+
+SELFTEST_JOB = {"schema": "sb-job/1", "name": "selftest", "tests": [{
+    "type": "storage", "name": "selftest-4k-rr",
+    "targets": [{"path": None, "kind": "file", "file_size": "64MiB"}],
+    "workers": 1, "queue_depth": 4, "warmup_s": 1, "duration_s": 3, "cache": "unbuffered",
+    "access_specs": [{"weight": 100, "block_size": "4KiB", "read_pct": 100, "random_pct": 100, "align": "4KiB"}]}]}
+
+
+def selftest_job(temp_dir):
+    """The fixed self-test job with the target in the real %TEMP% (sbench does not expand variables)."""
+    import copy
+    job = copy.deepcopy(SELFTEST_JOB)
+    job["tests"][0]["targets"][0]["path"] = os.path.join(temp_dir, "sbench-selftest.dat")
+    return job
+
+
+def _same_path(a, b):
+    return bool(a and b) and os.path.normcase(os.path.normpath(os.path.abspath(a))) == os.path.normcase(os.path.normpath(os.path.abspath(b)))
+
+
+def core_self_test(work):
+    """Real core (frozen) or mock (source): no admin rights needed. Every call goes through sbench.command()
+    (SHA-256 check + --data-dir). Returns {ok, mode, exe, data_dir, checks{...}, result_file}."""
+    import tempfile, zipfile
+    from . import core, sbench
+    from .model import check_schema, storage_tests
+    rep = {"ok": False, "checks": {}}
+    checks = rep["checks"]
+
+    def check(name, ok, detail="", **extra):
+        checks[name] = {"ok": bool(ok), "detail": detail, **extra}; return bool(ok)
+
+    def call(args, timeout=60):
+        cmd = sbench.command(args)
+        cp = subprocess.run(cmd, capture_output=True, timeout=timeout, creationflags=_NO_WINDOW)
+        return cp.returncode, cp.stdout.decode("utf-8", "replace"), cp.stderr.decode("utf-8", "replace")
+
+    try:
+        c = core.get()
+    except core.CoreError as e:
+        check("core_install", False, str(e)); return rep
+    rep.update(mode=c.mode, exe=c.exe, data_dir=c.data_dir, expected_sha256=c.expected_sha)
+    check("core_install", True, f"{c.mode}: {c.exe}")
+    mei = getattr(sys, "_MEIPASS", None)
+    check("not_in_meipass", not (mei and core.is_within(c.exe, mei)), f"{c.exe} (_MEIPASS={mei})")
+    try:
+        import sb_contract
+        val = sb_contract.validators()
+    except (ImportError, FileNotFoundError) as e:
+        val = None; check("schemas", False, f"{type(e).__name__}: {e}")
+    if val is None:
+        check("schemas", False, "jsonschema/Schemas nicht verfügbar"); return rep
+
+    def errs(doc, schema):
+        return [f"{'/'.join(map(str, e.absolute_path))}: {e.message}"[:200] for e in val[schema].iter_errors(doc)][:5]
+
+    try:
+        # 1. version --json, SHA-256 against the value embedded at build time
+        code, out, err = call(["version", "--json"])
+        v = json.loads(out) if code == 0 else {}
+        rep["core_version"] = v.get("version")
+        if c.expected_sha:
+            check("version_sha256", v.get("sha256") == c.expected_sha,
+                  f"version={v.get('version')} sha256={v.get('sha256')} erwartet={c.expected_sha}", exit=code)
+        else:
+            check("version_sha256", code == 0 and len(v.get("sha256") or "") == 64,
+                  f"version={v.get('version')} sha256={v.get('sha256')} (Quell-Lauf: kein eingebetteter Hash)", exit=code)
+        bi = core.build_info()
+        if bi.get("core_version") and v.get("version"):
+            check("version_matches_build", v["version"] == bi["core_version"], f"{v['version']} vs. Build {bi['core_version']}")
+
+        # 2. info --json against sb-info/1, meta.data_dir == our --data-dir
+        code, out, err = call(["info", "--json"])
+        info = json.loads(out) if code == 0 else {}
+        e = errs(info, "sb-info/1") if info else ["keine Ausgabe"]
+        check("info_schema", code == 0 and not e, "; ".join(e) or f"host={info.get('meta', {}).get('host')}", exit=code)
+        dd = info.get("meta", {}).get("data_dir")
+        check("info_data_dir", _same_path(dd, c.data_dir), f"meta.data_dir={dd}")
+
+        # 3. 3 s storage job (4 KiB random read, file in %TEMP%), result only after `done`
+        tmp = tempfile.gettempdir()
+        job_path = os.path.join(work, "selftest-job.json")
+        json.dump(selftest_job(tmp), open(job_path, "w", encoding="utf-8"), indent=1)
+        rdir = os.path.join(work, "results"); os.makedirs(rdir, exist_ok=True)
+        rid = "selftest-" + sbench.new_run_id()
+        out_path = os.path.join(rdir, f"result-{rid}.json")
+        code, out, err = call(sbench.run_args(job_path, out_path, rid, 250, False, "stdout"), timeout=180)
+        evs = []
+        for ln in out.splitlines():
+            try:
+                evs.append(json.loads(ln))
+            except ValueError:
+                pass
+        done = [x for x in evs if x.get("ev") == "done"]
+        errors = [x for x in evs if x.get("ev") == "error"]
+        check("run_exit_0", code == 0 and done, f"exit={code} events={len(evs)} done={bool(done)}"
+              + (f" errors={[x.get('code') for x in errors]}" if errors else "") + (f" stderr={err.strip()[-300:]}" if code else ""))
+        res = json.load(open(out_path, encoding="utf-8")) if done and os.path.isfile(out_path) else None
+        if res is not None:
+            e = errs(res, "sb-result/1")
+            check("result_schema", not e, "; ".join(e) or f"run_id={res.get('run_id')}")
+            check("result_run_id", res.get("run_id") == rid, f"run_id={res.get('run_id')}")
+            st = storage_tests(check_schema(res, "sb-result/1"))
+            n = st[0]["summary"].get("io_count", 0) if st else 0
+            check("io_count", n > 0, f"io_count={n} iops={st[0]['summary'].get('iops') if st else None}")
+            rep["result_file"] = out_path
+            rep["result_summary"] = {"iops": st[0]["summary"].get("iops") if st else None, "io_count": n,
+                                     "lat_mean_us": (st[0]["summary"].get("lat_us") or {}).get("mean") if st else None}
+        else:
+            check("result_schema", False, f"kein Ergebnis {out_path}")
+
+        # 4. bundle --all (contract: without --all/--results only info.json + includes)
+        zp = os.path.join(work, "selftest-bundle.zip")
+        args = sbench.bundle_args(zp)
+        code, out, err = call(args, timeout=120)
+        man = None
+        try:
+            man = json.loads(zipfile.ZipFile(zp).read("manifest.json"))
+        except (OSError, KeyError, ValueError, zipfile.BadZipFile) as ex:
+            err += f" {ex}"
+        e = errs(man, "sb-bundle/1") if man else ["kein manifest.json"]
+        has_run = bool(man) and any(rid in (f.get("path") or "") for f in man.get("files", []))
+        check("bundle_all", "--all" in args and code == 0 and not e and has_run,
+              f"exit={code} files={len(man.get('files', [])) if man else 0} enthält Lauf={has_run} " + ("; ".join(e) or err.strip()[-200:]))
+    except core.CoreIntegrityError as ex:
+        check("integrity", False, str(ex))
+    except Exception as ex:  # noqa: BLE001 -- report everything, never crash the self-test
+        check("exception", False, f"{type(ex).__name__}: {ex}")
+    finally:
+        try:
+            os.remove(os.path.join(tempfile.gettempdir(), "sbench-selftest.dat"))
+        except OSError:
+            pass
+    rep["ok"] = all(x["ok"] for x in checks.values())
+    return rep
 
 
 def _emit(obj, path=None):
@@ -209,9 +379,12 @@ def self_test_child(plat, a):
         res["screens"] = [s.name() for s in QGuiApplication.screens()]
         res["fonts_ok"] = "Inter" in QFontDatabase.families()
         res["pages"] = list(win.pages)
+        if a.expect_result:   # result of the core self-test run must be parsed by the GUI (compare/export pages)
+            files = [f for f, _ in win.pages["compare"].results]
+            res["expect_result"] = "geladen" if any(_same_path(f, a.expect_result) for f in files) else f"fehlt in {len(files)} Ergebnissen"
         if os.name == "nt":
             res["loaded_dlls"] = _loaded_modules()
-        res["ok"] = img.width() > 0 and not img.isNull()
+        res["ok"] = img.width() > 0 and not img.isNull() and res.get("expect_result", "geladen") == "geladen"
     except Exception as e:  # noqa: BLE001
         res["error"] = f"{type(e).__name__}: {e}"
     _emit(res, a.report)
@@ -242,12 +415,18 @@ def main(argv=None):
         return screenshots(a)
     if a.demo:
         return demo(a)
-    from . import sbench
+    from . import sbench, core
     logf = sbench.setup_logging()
     app = make_app()
     import logging
-    logging.getLogger("sbench-gui").info("start, log %s, sbench %s", logf, sbench.sbench_command())
-    win = build_window(a, deterministic=False, extra_results=[os.path.join(sbench.gui_dir(), "results")])
+    try:
+        logging.getLogger("sbench-gui").info("start GUI %s, log %s, sbench %s", core.gui_version(), logf, sbench.sbench_command())
+        win = build_window(a, deterministic=False, extra_results=[os.path.join(sbench.gui_dir(), "results")])
+    except core.CoreError as e:
+        logging.getLogger("sbench-gui").error("core: %s", e)
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.critical(None, "sbench – Kern nicht startbar", f"{e}\n\nProtokoll: {logf}")
+        return 1
     _fit(win); win.show()
     from PySide6.QtCore import QTimer
     QTimer.singleShot(400, win.check_running)        # re-attach to runs that outlived a previous GUI

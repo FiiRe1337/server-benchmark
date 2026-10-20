@@ -1,4 +1,5 @@
-# GUI CI: lint + unit tests + self-test + portable EXE on Windows, schema/contract + mock E2E on Linux.
+# GUI CI: lint + unit tests + self-test (mock) on Windows, schema/contract + mock E2E on Linux, and the portable
+# EXE with the REAL core: job `core` (build-windows.yml via workflow_call) -> job `gui` (build-gui.yml) in the same run.
 # PRs run via pull_request (no duplicate push runs for PR branches); push runs on main.
 name: GUI CI
 
@@ -10,17 +11,30 @@ on:
       - "schema/**"
       - "tools/validate_examples.py"
       - ".github/workflows/gui-ci.yml"
+      - ".github/workflows/build-gui.yml"
+      - ".github/workflows/build-windows.yml"
+      - "cli/**"
+      - "core/**"
+      - "CMakeLists.txt"
   pull_request:
     paths:
       - "gui/**"
       - "schema/**"
       - "tools/validate_examples.py"
       - ".github/workflows/gui-ci.yml"
+      - ".github/workflows/build-gui.yml"
+      - ".github/workflows/build-windows.yml"
+      - "cli/**"
+      - "core/**"
+      - "CMakeLists.txt"
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# Caller group. The called build-windows.yml uses `build-windows-${{ github.workflow }}-${{ github.ref }}`, where
+# github.workflow is this caller's name ("GUI CI") -> different group, no caller/callee deadlock, and it does not cancel
+# the standalone "Windows-Build (sbench)" run of the same PR. build-gui.yml defines no group of its own.
 concurrency:
   group: gui-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -73,30 +87,6 @@ jobs:
           python -m sbgui --self-test --platforms offscreen --report build/selftest-src.json
           if ($LASTEXITCODE -ne 0) { Get-Content build/selftest-src.json -ErrorAction SilentlyContinue; exit 1 }
 
-      - name: Build portable EXE (PyInstaller, onefile)
-        run: |
-          python -m PyInstaller --noconfirm --clean sbench-gui.spec
-          $exe = Get-Item dist\sbench-gui.exe
-          "{0} {1:N1} MB" -f $exe.FullName, ($exe.Length / 1MB)
-
-      - name: Self-test of the built EXE (offscreen)
-        run: |
-          # windowed EXE (console=False): no stdout, so wait for the process and read the --report file
-          $report = Join-Path $PWD "build\selftest-exe.json"
-          $p = Start-Process -FilePath dist\sbench-gui.exe -ArgumentList @("--self-test", "--platforms", "offscreen", "--report", "`"$report`"") -Wait -PassThru -NoNewWindow
-          Write-Host "exit code: $($p.ExitCode)"
-          if (Test-Path $report) { Get-Content $report } else { Write-Host "no report written" }
-          if ($p.ExitCode -ne 0) { exit 1 }
-          $r = Get-Content $report -Raw | ConvertFrom-Json
-          if (-not $r.ok -or -not $r.frozen) { Write-Host "self-test not ok / not frozen"; exit 1 }
-
-      - name: Upload EXE
-        uses: actions/upload-artifact@v4
-        with:
-          name: sbench-gui-${{ matrix.os }}-x64
-          path: gui/dist/sbench-gui.exe
-          if-no-files-found: error
-
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -106,6 +96,25 @@ jobs:
             gui/build/pytest-*.xml
             gui/build/selftest-*.json
           if-no-files-found: ignore
+
+  # Real core from the same commit (Devend's build-windows.yml, workflow_call since #10).
+  core:
+    name: core
+    uses: ./.github/workflows/build-windows.yml
+    # build-windows.yml contains the tag-only `release` job requesting contents: write (skipped under workflow_call,
+    # `if: github.workflow == ...`). GitHub validates nested job permissions statically, so the caller must allow it.
+    permissions:
+      contents: write
+
+  gui:
+    name: gui
+    needs: core
+    uses: ./.github/workflows/build-gui.yml
+    permissions:
+      contents: read
+    with:
+      version: ${{ needs.core.outputs.version }}
+      core_artifact: ${{ needs.core.outputs.cli_artifact_x64 }}
 
   linux:
     name: linux (schema + E2E)

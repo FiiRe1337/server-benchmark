@@ -12,11 +12,12 @@ core M1 5670020 incl. sb-bundle/1).
   sbench export <result.json> --csv <out.csv> [--style iometer|flat]
   sbench bundle --out <zip> [--results ...] [--all] [--include <dir>]... [--anonymize] [--progress ...]
   sbench import-icf <file.icf> --out <job.json>   (M2; prints sb-validate/1 with W_ICF_UNSUPPORTED warnings)
-  sbench version
+  sbench version [--json]             -> --json: {version, commit, arch, sha256, formats} (PR #10)
+Global option (every command, before or after the command name): --data-dir <path> (uncreatable -> exit 2, E_ARGS).
 
 Every run additionally writes <data_dir>/runs/<run_id>.jsonl (all events) and runs/<run_id>.lock.json
 (while running) so a restarted GUI can re-attach; finished runs are appended to runs/index.jsonl.
-data_dir: $SBENCH_DATA_DIR, else data\ next to sbench (writable), else %ProgramData%\sbench.
+data_dir: --data-dir, else $SBENCH_DATA_DIR, else data\ next to sbench (writable), else %ProgramData%\sbench.
 Exit codes: 0 ok, 1 runtime error, 2 invalid job/args, 3 aborted, 4 missing privileges.
 Mock knobs (env): SBENCH_MOCK_SPEED (time compression), SBENCH_MOCK_HOST (host|vm|vm-san),
 SBENCH_MOCK_ELEVATED=1 (pretend to be elevated), SBENCH_MOCK_ALL_TYPES=1 (simulate non-storage tests; default like
@@ -772,7 +773,31 @@ class Parser(argparse.ArgumentParser):
         self.print_usage(sys.stderr); log(f"sbench: {message}"); sys.exit(EXIT_INVALID)
 
 
+def _take_data_dir(argv):
+    """Global --data-dir <p> / --data-dir=<p> anywhere in argv (cli.md, PR #10). Returns (argv without it, path|None)."""
+    out, dd, i = [], None, 0
+    while i < len(argv):
+        if argv[i] == "--data-dir":
+            if i + 1 >= len(argv):
+                log("sbench: E_ARGS --data-dir ohne Pfad"); sys.exit(EXIT_INVALID)
+            dd = argv[i + 1]; i += 2; continue
+        if argv[i].startswith("--data-dir="):
+            dd = argv[i].split("=", 1)[1]; i += 1; continue
+        out.append(argv[i]); i += 1
+    return out, dd
+
+
 def main():
+    global DATA
+    argv, dd = _take_data_dir(sys.argv[1:])
+    if dd is not None:
+        try:
+            os.makedirs(dd, exist_ok=True)
+            if not os.access(dd, os.W_OK):
+                raise OSError("nicht beschreibbar")
+        except OSError as ex:
+            log(f"sbench: E_ARGS --data-dir {dd}: {ex}"); return EXIT_INVALID
+        DATA = os.path.abspath(dd)
     ap = Parser(prog="sbench")
     sub = ap.add_subparsers(dest="cmd", required=True, parser_class=Parser)
     r = sub.add_parser("run"); r.add_argument("--job", required=True); r.add_argument("--out", required=True)
@@ -785,10 +810,10 @@ def main():
     sub.add_parser("validate").add_argument("--job", required=True)
     e = sub.add_parser("export"); e.add_argument("result"); e.add_argument("--csv", required=True)
     e.add_argument("--style", choices=["flat", "iometer"], default="flat")
-    sub.add_parser("version")
+    sub.add_parser("version").add_argument("--json", action="store_true")
     b = sub.add_parser("bundle"); b.add_argument("--out", required=True); b.add_argument("--results", nargs="+"); b.add_argument("--all", action="store_true")
     b.add_argument("--include", action="append"); b.add_argument("--anonymize", action="store_true"); b.add_argument("--progress")
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
     if a.cmd == "run":
         return run(a)
     if a.cmd == "stop":
@@ -807,6 +832,10 @@ def main():
         return EXIT_INVALID if errs else EXIT_OK
     if a.cmd == "export":
         return export(a)
+    if a.cmd == "version" and a.json:
+        # SBENCH_MOCK_EXE: wrapper script that stands in for sbench.exe (Linux test of the frozen build) -> hash that file
+        sha = hashlib.sha256(open(os.environ.get("SBENCH_MOCK_EXE") or os.path.abspath(__file__), "rb").read()).hexdigest()
+        print(json.dumps({"version": VERSION, "commit": "mock", "arch": "x64", "sha256": sha, "formats": FORMATS})); return EXIT_OK
     if a.cmd == "version":
         print(f"sbench {VERSION}"); print("\n".join(FORMATS)); return EXIT_OK
     if a.cmd == "bundle":

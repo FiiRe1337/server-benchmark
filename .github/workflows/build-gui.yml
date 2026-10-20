@@ -1,0 +1,149 @@
+# Portable GUI EXE (PyInstaller onefile) with the REAL core sbench.exe embedded.
+# Only callable from other workflows (gui-ci.yml, later release), always after build-windows.yml in the SAME run:
+#   gui:
+#     needs: core
+#     uses: ./.github/workflows/build-gui.yml
+#     with: { version: "${{ needs.core.outputs.version }}", core_artifact: "${{ needs.core.outputs.cli_artifact_x64 }}" }
+# Output artifact: sbench-gui-x64 with exactly one file sbench-gui.exe (+ separate sbench-gui-selftest-x64 report).
+name: GUI-Build (sbench-gui.exe)
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "GUI-/Build-Version (normalerweise needs.core.outputs.version)"
+        type: string
+        required: false
+        default: ""
+      core_artifact:
+        description: "Artifact aus demselben Lauf mit genau einer sbench.exe"
+        type: string
+        required: false
+        default: sbench-cli-x64
+    outputs:
+      version:
+        description: "Version der GUI"
+        value: ${{ jobs.gui.outputs.version }}
+      core_sha256:
+        description: "SHA-256 des eingebetteten sbench.exe"
+        value: ${{ jobs.gui.outputs.core_sha256 }}
+      artifact:
+        description: "Artifact-Name der GUI-EXE"
+        value: sbench-gui-x64
+
+permissions:
+  contents: read
+
+# No workflow-level concurrency here: the caller (gui-ci.yml) owns the group. A callee group derived from
+# github.workflow would equal the caller's group (github.workflow = caller name under workflow_call) -> deadlock.
+
+jobs:
+  gui:
+    name: GUI-EXE x64 (PyInstaller, Kern eingebettet)
+    runs-on: windows-2022
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.info.outputs.version }}
+      core_sha256: ${{ steps.info.outputs.core_sha256 }}
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: gui
+    env:
+      PYTHONUTF8: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # git describe fallback in gen_build_info.py
+
+      - name: Kern-Artifact laden (${{ inputs.core_artifact }})
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.core_artifact }}
+          path: gui/core-download
+
+      - name: Kern prüfen (genau eine sbench.exe)
+        run: |
+          $f = @(Get-ChildItem -Recurse -File core-download)
+          $f | ForEach-Object { "{0}  {1:N0} B" -f $_.FullName, $_.Length }
+          if ($f.Count -ne 1 -or $f[0].Name -ne "sbench.exe") { throw "Artifact ${{ inputs.core_artifact }} muss genau sbench.exe enthalten" }
+          & $f[0].FullName version --json
+          if ($LASTEXITCODE -ne 0) { throw "sbench version --json: Exit $LASTEXITCODE" }
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          architecture: x64
+          cache: pip
+          cache-dependency-path: |
+            gui/requirements.txt
+            gui/requirements-ci.txt
+
+      - name: Abhängigkeiten (gepinnt)
+        run: python -m pip install -r requirements.txt -r requirements-ci.txt
+
+      - name: Build-Info erzeugen (Version, Commit, SHA-256 des Kerns)
+        id: info
+        env:
+          IN_VERSION: ${{ inputs.version }}
+        run: |
+          python tools/gen_build_info.py --core core-download\sbench.exe --version "$env:IN_VERSION" --commit "$env:GITHUB_SHA" --run-core
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Get-Content sbgui\_build_info.py
+
+      - name: PyInstaller (onefile, windowed)
+        run: |
+          python -m PyInstaller --noconfirm --clean sbench-gui.spec
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $exe = Get-Item dist\sbench-gui.exe
+          "{0}  {1:N0} B ({2:N1} MiB)" -f $exe.FullName, $exe.Length, ($exe.Length / 1MB)
+          "## sbench-gui.exe`n`nVersion ${{ steps.info.outputs.version }}, Größe $([math]::Round($exe.Length / 1MB, 1)) MiB, Kern-SHA-256 ``${{ steps.info.outputs.core_sha256 }}``" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Self-Test der EXE (ohne Admin, echter Kern)
+        run: |
+          # windowed EXE (console=False): no stdout -> wait for the process and read the --report file.
+          # Copy into a fresh dir so data\ (next to the EXE) is created by the GUI itself and the artifact stays one file.
+          $st = Join-Path $env:RUNNER_TEMP "gui-selftest"
+          New-Item -ItemType Directory -Force $st | Out-Null
+          Copy-Item dist\sbench-gui.exe $st
+          $report = Join-Path $PWD "build\selftest-exe.json"
+          New-Item -ItemType Directory -Force build | Out-Null
+          $p = Start-Process -FilePath (Join-Path $st "sbench-gui.exe") -ArgumentList @("--self-test", "--platforms", "windows,offscreen", "--report", "`"$report`"") -Wait -PassThru -NoNewWindow
+          Write-Host "exit code: $($p.ExitCode)"
+          if (-not (Test-Path $report)) { Write-Host "no report written"; exit 1 }
+          $r = Get-Content $report -Raw | ConvertFrom-Json
+          $r.summary | ForEach-Object { Write-Host $_ }
+          "### Self-Test`n``````text`n$($r.summary -join "`n")`n``````" >> $env:GITHUB_STEP_SUMMARY
+          Get-ChildItem -Recurse (Join-Path $st "data\bin") | ForEach-Object { "{0}  {1}" -f $_.FullName, (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower() }
+          if ($p.ExitCode -ne 0 -or -not $r.ok -or -not $r.frozen -or $r.core.mode -ne "embedded") { Get-Content $report; exit 1 }
+          if ($r.core.expected_sha256 -ne "${{ steps.info.outputs.core_sha256 }}") { throw "eingebetteter SHA-256 weicht vom Build ab" }
+
+      - name: Manipulationstest (falscher Hash -> Start verweigert, Kopie wiederhergestellt)
+        run: |
+          $st = Join-Path $env:RUNNER_TEMP "gui-selftest"
+          $bin = Get-ChildItem (Join-Path $st "data\bin\sbench-*.exe") | Select-Object -First 1
+          [IO.File]::WriteAllBytes($bin.FullName, [Text.Encoding]::ASCII.GetBytes("MZ tampered"))
+          $report = Join-Path $PWD "build\selftest-tampered.json"
+          $p = Start-Process -FilePath (Join-Path $st "sbench-gui.exe") -ArgumentList @("--self-test", "--platforms", "offscreen", "--report", "`"$report`"") -Wait -PassThru -NoNewWindow
+          $r = Get-Content $report -Raw | ConvertFrom-Json
+          $r.summary | ForEach-Object { Write-Host $_ }
+          # startup re-copies a mismatching file before the first launch -> self-test must pass again with the real core
+          $h = (Get-FileHash $bin.FullName -Algorithm SHA256).Hash.ToLower()
+          if ($h -ne "${{ steps.info.outputs.core_sha256 }}") { throw "Kopie nicht wiederhergestellt ($h)" }
+          if ($p.ExitCode -ne 0) { throw "Self-Test nach Wiederherstellung fehlgeschlagen" }
+
+      - name: Upload sbench-gui-x64 (nur sbench-gui.exe)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbench-gui-x64
+          path: gui/dist/sbench-gui.exe
+          if-no-files-found: error
+
+      - name: Upload Self-Test-Berichte
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbench-gui-selftest-x64
+          path: gui/build/selftest-*.json
+          if-no-files-found: ignore

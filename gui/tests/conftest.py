@@ -18,6 +18,15 @@ def qapp():
     return make_app()
 
 
+@pytest.fixture(autouse=True)
+def _fresh_core():
+    """sbgui.core caches the resolved core per process; tests change SBENCH_* env, so resolve again per test."""
+    from sbgui import core
+    core.reset()
+    yield
+    core.reset()
+
+
 @pytest.fixture
 def mock_env(tmp_path, monkeypatch):
     """Isolated data/GUI dirs, mock core forced (no stray sbench.exe / SBENCH_EXE from the runner)."""

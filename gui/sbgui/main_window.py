@@ -13,7 +13,9 @@ from .overlay import ReattachOffer, SupportDialog, Overlay
 from . import theme as T, sbench
 from .sbench import ROOT
 
-GUI_VERSION = "0.1.0"
+from .core import gui_version, build_info, CoreError
+
+GUI_VERSION = gui_version()        # from sbgui/_build_info.py (CI build) or 0.1.0-dev (source)
 NAV = [("dashboard", "Übersicht"), ("profiles", "Testprofile"), ("live", "Live-Lauf"), ("compare", "Vergleich"), ("export", "Export")]
 MIN_W, MIN_H = 1280, 720          # logical px; RDP 1366x768 must fit
 COLLAPSE_BELOW = 1400             # sidebar auto-collapses below this window width
@@ -47,7 +49,8 @@ class Toast(QFrame):
 class MainWindow(QMainWindow):
     def __init__(self, info, kern_version, result_files, demo=False):
         super().__init__()
-        self.setWindowTitle("sbench – Server Benchmark")
+        self.kern_version = kern_version
+        self.setWindowTitle(f"sbench – Server Benchmark · GUI {GUI_VERSION} · Kern {kern_version}")
         self.setMinimumSize(MIN_W, MIN_H)
         self.info = info; self.demo = demo; self.session = None; self.sidebar_pref = None; self.collapsed = None
         m = info["meta"]
@@ -79,6 +82,9 @@ class MainWindow(QMainWindow):
         self.data_label = label(f"Daten: {_short_path(self.data_dir or '?')}", "dim")
         self.data_label.setToolTip(f"meta.data_dir: {self.data_dir}"); sv.addWidget(self.data_label)
         self.ver_label = label(f"GUI {GUI_VERSION} · Kern {kern_version}", "dim"); sv.addWidget(self.ver_label)
+        bi = build_info()
+        self.ver_label.setToolTip(f"GUI {GUI_VERSION} (Commit {bi['commit']})\nKern {kern_version}"
+                                  + (f"\nKern-SHA-256 {bi['core_sha256']}" if bi.get("core_sha256") else ""))
         h.addWidget(sb)
 
         self.stack = QStackedWidget(); h.addWidget(self.stack, 1)
@@ -143,6 +149,8 @@ class MainWindow(QMainWindow):
         job = json.load(open(job_path, encoding="utf-8"))
         rid = sbench.new_run_id()
         out = os.path.join(sbench.gui_dir(), "results", f"{rid}.json")
+        if not self._core_ok():
+            return
         cls = sbench.ElevatedRunSession if opts.get("elevated") else sbench.RunSession
         self.session = cls(job_path, out, rid, tick_ms=tick_ms, allow_destructive=bool(opts.get("allow_destructive")), parent=self)
         self._attach(self.session, job, rid, tick_ms)
@@ -153,6 +161,15 @@ class MainWindow(QMainWindow):
         session.start(); self.run_mini.setText(f"● läuft · {rid}"); self.run_mini.setObjectName("chipAccent")
         self.run_mini.style().polish(self.run_mini)
         self.show_page("live")
+
+    def _core_ok(self):
+        """SHA-256 check of the core before a launch (repeated inside every session start); clear error on mismatch."""
+        try:
+            sbench.core().verify(); return True
+        except CoreError as e:
+            log.error("core refused: %s", e)
+            QMessageBox.critical(self, "sbench – Integritätsprüfung fehlgeschlagen", str(e))
+            return False
 
     def stop_run(self):
         if self.session:
@@ -198,6 +215,8 @@ class MainWindow(QMainWindow):
             out_path, _ = QFileDialog.getSaveFileName(self, "Support-Paket speichern", default, "ZIP-Archiv (*.zip)")
             if not out_path:
                 return
+        if not self._core_ok():
+            return
         gd = sbench.gui_dir()
         inc = ([os.path.join(gd, "logs")] if o.get("logs") else []) + ([os.path.join(gd, "profiles")] if o.get("profiles") else [])
         p = sbench.bundle(out_path, results or None, include=inc, anonymize=o.get("anonymize"), parent=self)

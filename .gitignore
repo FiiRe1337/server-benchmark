@@ -8,3 +8,4 @@ gui/data/
 gui/smoke/
 gui/core-bin/
 *.tmp
+gui/sbgui/_build_info.py
