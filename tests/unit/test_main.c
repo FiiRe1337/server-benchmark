@@ -437,7 +437,7 @@ static void test_cpu_kernels(void) {
 
 static void test_job_m2(void) {
     sb_job j; sb_verrs e = {0};
-    int rc = load("{\"schema\":\"sb-job/1\",\"tests\":["
+    int rc = load("{\"schema\":\"sb-job/1\",\"name\":\"m2\",\"tests\":["
                   "{\"type\":\"cpu\",\"workload\":\"crypto\",\"threads\":2,\"duration_s\":3},"
                   "{\"type\":\"memory\",\"mode\":\"bandwidth\",\"op\":\"copy\",\"buffer_size\":\"1MiB\",\"duration_s\":2,"
                   "\"nontemporal\":true,\"simd\":\"scalar\",\"warmup_s\":0},"
@@ -451,10 +451,10 @@ static void test_job_m2(void) {
         CHECK(j.tests[2].mem_mode == 1 && j.tests[2].mem_op == 0 && j.tests[2].simd == SB_SIMD_AUTO, "latency-Felder");
     }
     sb_job_free(&j); sb_verrs_free(&e);
-    rc = load("{\"schema\":\"sb-job/1\",\"tests\":[{\"type\":\"memory\",\"mode\":\"bandwidth\",\"buffer_size\":4096,\"duration_s\":1}]}", &j, &e);
+    rc = load("{\"schema\":\"sb-job/1\",\"name\":\"m2\",\"tests\":[{\"type\":\"memory\",\"mode\":\"bandwidth\",\"buffer_size\":4096,\"duration_s\":1}]}", &j, &e);
     CHECK(rc != 0 && e.n >= 1 && !strcmp(e.v[0].code, "E_BUFFER_SIZE"), "E_BUFFER_SIZE (%d: %s)", e.n, e.n ? e.v[0].code : "");
     sb_job_free(&j); sb_verrs_free(&e);
-    rc = load("{\"schema\":\"sb-job/1\",\"tests\":[{\"type\":\"cpu\",\"numa_node\":500,\"duration_s\":1}]}", &j, &e);
+    rc = load("{\"schema\":\"sb-job/1\",\"name\":\"m2\",\"tests\":[{\"type\":\"cpu\",\"numa_node\":500,\"duration_s\":1}]}", &j, &e);
     CHECK(rc != 0 && e.n >= 1 && !strcmp(e.v[0].code, "E_NUMA_NODE"), "E_NUMA_NODE (%d: %s)", e.n, e.n ? e.v[0].code : "");
     sb_job_free(&j); sb_verrs_free(&e);
 }

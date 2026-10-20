@@ -97,11 +97,24 @@ zerstören Daten und laufen nur, wenn das Target `allow_destructive: true` hat *
 - **CPU:** Modell aus CPUID (x64) bzw. Registry (ARM64), Sockel/Kerne/Threads aus
   `GetLogicalProcessorInformationEx`.
 - **RAM:** `GetPhysicallyInstalledSystemMemory`, frei aus `GlobalMemoryStatusEx`.
-- **NUMA:** `GetNumaNodeProcessorMaskEx`; `cpus` enthält globale Indizes
-  Prozessorgruppe × 64 + Bitnummer (bei nicht voll belegten Gruppen also mit Lücken), freier Speicher je Knoten aus `GetNumaAvailableMemoryNodeEx`.
-  **Grenze:** Win32 liefert keinen Gesamt-RAM je Knoten. Bei einem Knoten ist
-  `ram_bytes` der installierte RAM, bei mehreren Knoten der installierte RAM geteilt
-  durch die Knotenzahl (Näherung, mindestens der freie Speicher des Knotens).
+- **NUMA:** `GetLogicalProcessorInformationEx(RelationNumaNodeEx)` (Fallback
+  `RelationNumaNode`), auch für Knoten über mehrere Prozessorgruppen; `cpus` enthält
+  globale Indizes Prozessorgruppe × 64 + Bitnummer (bei nicht voll belegten Gruppen also
+  mit Lücken), freier Speicher je Knoten aus `GetNumaAvailableMemoryNodeEx`.
+  **RAM pro Knoten (Issue #8):** Win32 hat keine API für den Gesamt-RAM eines Knotens.
+  `ram_method` nennt die Quelle von `ram_bytes`:
+  - `total` – nur ein Knoten: `ram_bytes` = für Windows nutzbarer physischer RAM
+    (`GlobalMemoryStatusEx.ullTotalPhys`).
+  - `srat` – mehrere Knoten: ACPI-Tabelle SRAT über `GetSystemFirmwareTable('ACPI', 'SRAT')`
+    (keine Adminrechte nötig). Summiert werden die Memory-Affinity-Einträge (Typ 1) je
+    Proximity Domain, die aktiv und weder Hotplug noch nichtflüchtig sind; die Domain wird
+    per `GetNumaProximityNodeEx` dem Knoten zugeordnet. Plausibilitätsprüfung: alle
+    Domains zugeordnet, Summe zwischen der Hälfte des sichtbaren und dem installierten RAM
+    (`GetPhysicallyInstalledSystemMemory`) + 5 %. Die SRAT-Werte enthalten auch vom
+    Firmware/Hypervisor reservierte Bereiche; die Summe kann daher etwas über
+    `meta.ram_bytes` liegen.
+  - `estimate` – SRAT fehlt oder ist unplausibel (z. B. manche VMs, Container): Aufteilung
+    des Gesamt-RAM im Verhältnis des freien Speichers der Knoten (ungenau).
 - **Hypervisor:** Alle verfügbaren Methoden werden ausgewertet und unter
   `partition_info.methods` ausgegeben:
   1. CPUID (nur x64): Hypervisor-Bit, Vendor (Leaf 0x40000000), Privileg
@@ -152,12 +165,89 @@ zerstören Daten und laufen nur, wenn das Target `allow_destructive: true` hat *
 und Binärdateien bleiben unverändert. Die Zuordnung gilt nur innerhalb eines Bundles und
 wird nicht gespeichert.
 
-## Grenzen und bekannte Abweichungen (M1)
+## CPU- und Memory-Engine (Meilenstein 2)
 
-- Nur `storage` ist implementiert. `cpu`, `memory`, `net_client`, `net_server` und
-  `hyperv_info` erzeugen ein `error`-Event `E_NOT_IMPLEMENTED` und werden übersprungen;
-  sie erscheinen nicht in `tests[]` des Ergebnisses.
-- Kein Pinning der Worker auf CPUs oder NUMA-Knoten; Windows verteilt die Threads.
+### Ablauf
+
+1. **Threadauswahl** (`topo.c`): Topologie aus `GetLogicalProcessorInformationEx`
+   (Gruppen, Kerne mit SMT-Geschwistern, NUMA-Knoten). Reihenfolge: erst ein logischer
+   Prozessor je physischem Kern, die Knoten abwechselnd (bzw. nur `numa_node`), dann die
+   SMT-Geschwister; bei mehr Threads als Prozessoren beginnt die Liste von vorn
+   (`W_OVERSUBSCRIBED`). `threads: 0` = alle (des Knotens).
+2. **Binden:** Jeder Thread wird angehalten erzeugt, per `SetThreadGroupAffinity` auf
+   genau einen logischen Prozessor gebunden (funktioniert über Prozessorgruppen hinweg,
+   also auch bei mehr als 64 logischen Prozessoren) und mit
+   `SetThreadIdealProcessorEx` markiert.
+3. **preparing** (memory): Jeder Thread legt seinen Puffer selbst mit
+   `VirtualAllocExNuma` auf `mem_node` bzw. dem eigenen Knoten an und beschreibt ihn
+   vollständig (First Touch), damit die physischen Seiten auf dem Zielknoten liegen.
+   Normale 4-KiB-Seiten (keine Large Pages: dafür wäre `SeLockMemoryPrivilege` nötig).
+4. **warmup** und **measure**: Die Threads arbeiten in Batches, deren Größe sich auf
+   0,5–2 ms einregelt; nach jedem Batch wird ein eigener, cache-zeilen-getrennter Zähler
+   aktualisiert. Der Hauptthread liest die Zähler zu Beginn und Ende der Messphase und pro
+   Tick (QPC-Zeitstempel). Die Messung enthält damit höchstens einen Batch Unschärfe je
+   Thread an den Rändern (≤ 2 ms bei ≥ 1 s Messdauer).
+
+### memory: Bandbreite
+
+| op | Kernel | gezählt |
+|---|---|---|
+| `read` | lädt den ganzen Puffer sequenziell und verknüpft die Werte per XOR/ADD (kein Wegoptimieren) | gelesene Bytes |
+| `write` | schreibt den Puffer sequenziell | geschriebene Bytes |
+| `copy` | kopiert die erste Pufferhälfte in die zweite | gelesene + geschriebene Bytes (STREAM-Zählweise) |
+
+`simd`: `scalar` (64-Bit-Zugriffe, Vektorisierung abgeschaltet), `sse2` (128 Bit),
+`avx2` (256 Bit), `avx512` (512 Bit, nur auf ausdrückliche Anforderung, weil der Takt
+auf manchen CPUs sinkt), `neon` (128 Bit, ARM64). `auto` = `avx2`, sonst `sse2` (x64) bzw.
+`neon` (ARM64). Erkennung per CPUID und XGETBV (das Betriebssystem muss die
+YMM/ZMM-Register sichern). `nontemporal` nutzt `_mm_stream_*` + `sfence` (x64) und
+umgeht die Caches beim Schreiben; das zeigt die echte Schreibbandbreite ohne
+Read-for-Ownership. GB/s = 10^9 Byte/s, Summe aller Threads.
+
+### memory: Latenz
+
+Pointer Chasing: Der Puffer wird in 64-Byte-Zeilen geteilt, die in zufälliger Reihenfolge
+(zufällige Permutation nach Sattolo, fester Seed) zu **einem** Zyklus über alle Zeilen verkettet werden. Jeder
+Zugriff hängt vom vorherigen ab, Hardware-Prefetcher können nicht vorhersagen.
+`latency_ns` = Messzeit ÷ Anzahl Sprünge, immer mit einem Thread. Bei Puffern über dem
+L3-Cache enthält der Wert auch TLB-Fehlzugriffe (4-KiB-Seiten), wie bei Intel MLC ohne
+Large Pages; deshalb liegt er typischerweise etwas über MLC-`--idle_latency`. Puffer im
+L1/L2 (z. B. 16 KiB) zeigen die Cache-Latenz.
+
+### cpu
+
+| workload | 1 Operation |
+|---|---|
+| `int` | eine Runde aus Addition, Multiplikation, Rotation, XOR, Shift und einem Tabellenzugriff auf vier abhängigen 64-Bit-Ketten |
+| `float` | drei Multiplikations-/Additionsketten und eine Division (double) |
+| `crypto` | SHA-256 über einen 64-Byte-Block (portable Implementierung ohne SHA-Befehle) |
+| `mixed` | 16 `int` + 16 `float` + 1 `crypto` |
+
+Die Kernel sind skalar und laufen auf x64 und ARM64 mit identischer Arbeit; sie messen die
+Ganzzahl-/Gleitkomma-Leistung je Kern und die Skalierung über Kerne, nicht SIMD-Durchsatz.
+
+**Score:** `score = ops_per_s / Referenz × 1000`. Referenz = ops/s **eines** Threads auf
+dem GitHub-Runner `windows-2022` (x64). 1000 heißt „ein Thread der Referenzmaschine“,
+ein 16-Kern-System mit gleicher Kernleistung erreicht im Mehrthreadtest etwa 16 000
+(plus SMT-Anteil). Die Referenzen stehen in `sb_cpu_reference()` (`compute.c`).
+
+| workload | Referenz (ops/s, 1 Thread) |
+|---|---|
+| `int` | 4,0 · 10^8 |
+| `float` | 1,5 · 10^8 |
+| `crypto` | 4,0 · 10^6 |
+| `mixed` | 1,0 · 10^6 |
+
+## Grenzen und bekannte Abweichungen
+
+- `net_client`, `net_server` und `hyperv_info` erzeugen ein `error`-Event
+  `E_NOT_IMPLEMENTED` und werden übersprungen; sie erscheinen nicht in `tests[]` des
+  Ergebnisses.
+- Storage-Worker werden nicht gebunden; Windows verteilt die Threads. cpu/memory binden
+  jeden Thread (siehe oben).
+- memory nutzt keine Large Pages; Latenzwerte großer Puffer enthalten TLB-Fehlzugriffe.
+- Die CPU-Kernel sind skalar; Vergleiche mit Cinebench oder 7-Zip zeigen Tendenzen,
+  keine gleichen Zahlen (siehe `docs/abnahme-m2.md`).
 - Selbst angelegte Testdateien werden nach jedem Test gelöscht. Nutzen mehrere Tests
   eines Jobs dieselbe Datei, legt jeder Test sie neu an; zum Wiederverwenden großer Dateien
   `--keep-files` angeben.

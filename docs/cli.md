@@ -8,9 +8,9 @@ in [`schema/`](../schema/) definiert, Beispiele liegen in [`schema/examples/`](.
 
 | Format | Schema | Beispiel |
 |---|---|---|
-| Job-Datei | [`sb-job-1.schema.json`](../schema/sb-job-1.schema.json) | [`job-storage-mix.json`](../schema/examples/job-storage-mix.json), [`job-full.json`](../schema/examples/job-full.json) |
-| Ergebnis | [`sb-result-1.schema.json`](../schema/sb-result-1.schema.json) | [`result-storage.json`](../schema/examples/result-storage.json) |
-| Fortschritt (JSON Lines) | [`sb-progress-1.schema.json`](../schema/sb-progress-1.schema.json) | [`progress-storage.jsonl`](../schema/examples/progress-storage.jsonl) |
+| Job-Datei | [`sb-job-1.schema.json`](../schema/sb-job-1.schema.json) | [`job-storage-mix.json`](../schema/examples/job-storage-mix.json), [`job-full.json`](../schema/examples/job-full.json), [`job-compute.json`](../schema/examples/job-compute.json) |
+| Ergebnis | [`sb-result-1.schema.json`](../schema/sb-result-1.schema.json) | [`result-storage.json`](../schema/examples/result-storage.json), [`result-compute.json`](../schema/examples/result-compute.json) |
+| Fortschritt (JSON Lines) | [`sb-progress-1.schema.json`](../schema/sb-progress-1.schema.json) | [`progress-storage.jsonl`](../schema/examples/progress-storage.jsonl), [`progress-compute.jsonl`](../schema/examples/progress-compute.jsonl) |
 | Systeminfo | [`sb-info-1.schema.json`](../schema/sb-info-1.schema.json) | [`info.json`](../schema/examples/info.json) |
 | Validierung | [`sb-validate-1.schema.json`](../schema/sb-validate-1.schema.json) | [`validate-error.json`](../schema/examples/validate-error.json), [`validate-warnings.json`](../schema/examples/validate-warnings.json) |
 | Laufende Läufe | [`sb-runs-1.schema.json`](../schema/sb-runs-1.schema.json) | [`runs.json`](../schema/examples/runs.json) |
@@ -22,6 +22,13 @@ bleiben daher unverändert. sbench ab Vertrag 1.1 gibt die neuen Felder `run_id`
 `meta.data_dir`, `meta.ram_free_bytes`, `meta.numa_nodes` und `warnings` immer aus.
 `numa_nodes[].cpus` ist eine Liste globaler logischer Prozessor-Indizes
 (Prozessorgruppe × 64 + Bitnummer); `sb-runs/1` nennt je Lauf zusätzlich `job_name`.
+
+**Vertragsstand 1.2 (Meilenstein 2).** Die Testtypen `cpu` und `memory` sind implementiert
+(Abschnitt [Testtypen `cpu` und `memory`](#testtypen-cpu-und-memory-vertrag-12)). Neu sind
+nur optionale Felder: im Job `warmup_s`, `numa_node`, `mem_node`, `nontemporal`, `simd`; im
+Ergebnis weitere `summary`-, `per_worker`- und `timeseries`-Felder sowie
+`meta.numa_nodes[].ram_method` (Issue #8); im Tick `latency_ns`. Die Formatversionen bleiben
+unverändert. `net_client`, `net_server` und `hyperv_info` melden weiterhin `E_NOT_IMPLEMENTED`.
 
 ## Allgemeines
 
@@ -204,6 +211,11 @@ Zusätzlich zu `errors` enthält die Ausgabe `warnings` (gleicher Aufbau). Warnu
 | `W_NEEDS_ADMIN` | Der Job braucht Administratorrechte, die gerade fehlen. Bei Raw-Zugriff (`volume`/`physical`) würde `run` mit Exit-Code **4** enden; bei `SetFileValidData` (Anlegen von Testdateien) gibt es nur einen langsameren Fallback. |
 | `W_DESTRUCTIVE` | Schreibtest auf `volume`/`physical` mit `allow_destructive: true`: die Daten auf dem Ziel werden zerstört; `run` braucht zusätzlich `--allow-destructive`. |
 | `W_LOW_DISK_SPACE` | Wenig freier Platz auf dem Volume einer Testdatei (vor oder nach dem Anlegen). |
+| `W_LOW_MEMORY` | `memory`: Die Puffer aller Threads (`threads` × `buffer_size`) belegen mehr als 50 % des freien Arbeitsspeichers (bzw. des Knotens `mem_node`). |
+| `W_OVERSUBSCRIBED` | `cpu`/`memory`: `threads` ist größer als die Zahl der logischen Prozessoren (bzw. des Knotens `numa_node`); Prozessoren werden mehrfach belegt. |
+| `W_THREADS_IGNORED` | `memory` mit `mode: latency` und `threads` > 1: Latenz wird immer mit einem Thread gemessen. |
+| `W_NONTEMPORAL_IGNORED` | `nontemporal: true` bei `op: read`: wirkt nur bei `write` und `copy`. |
+| `W_NONTEMPORAL_UNSUPPORTED` | `nontemporal: true` auf ARM64: dort gibt es keine umgesetzten Streaming Stores; es werden normale Stores genutzt (`summary.nontemporal: false`). |
 
 Semantische Regeln (über das JSON Schema hinaus):
 
@@ -216,6 +228,10 @@ Semantische Regeln (über das JSON Schema hinaus):
 | `E_TARGET_NOT_FOUND` | Datei-Verzeichnis, Volume oder physische Disk existiert nicht. |
 | `E_TARGET_SIZE` | `file_size` bzw. Zielgröße kleiner als `block_size`. |
 | `E_UDP_RATE` | `udp_rate_mbps` bei `proto: tcp` angegeben bzw. bei UDP-Durchsatztest fehlend. |
+| `E_NUMA_NODE` | `numa_node` nennt keinen Knoten mit logischen Prozessoren bzw. `mem_node` keinen vorhandenen Knoten (`meta.numa_nodes[].id`). |
+| `E_SIMD_UNSUPPORTED` | `simd` wird von CPU oder Betriebssystem nicht unterstützt (z. B. `avx512` ohne AVX-512F, `neon` auf x64, `avx2` auf ARM64). |
+| `E_BUFFER_SIZE` | `buffer_size` kleiner als 8 KiB. |
+| `E_OUT_OF_MEMORY` | `threads` × `buffer_size` ist größer als 90 % des freien Arbeitsspeichers (bzw. des Knotens `mem_node`). Zur Laufzeit derselbe Code, wenn `VirtualAllocExNuma` scheitert. |
 
 ### `sbench export`
 
@@ -224,8 +240,11 @@ sbench export <result.json> --csv <out.csv> [--style iometer|flat]
 ```
 
 - `flat` (Standard): eine Zeile pro Test bzw. pro Worker/Access-Spec mit Spalten
-  `test,type,scope,id,iops,mbps,read_iops,write_iops,read_mbps,write_mbps,lat_mean_us,lat_p99_us,lat_max_us,errors`;
-  Trennzeichen Komma, Dezimalpunkt, UTF-8.
+  `test,type,scope,id,iops,mbps,read_iops,write_iops,read_mbps,write_mbps,lat_mean_us,lat_p99_us,lat_max_us,errors,ops_per_s,gbps,latency_ns,score`;
+  Trennzeichen Komma, Dezimalpunkt, UTF-8. Die Spalten `ops_per_s` (cpu), `gbps` und
+  `latency_ns` (memory) sowie `score` (cpu) sind seit Vertrag 1.2 hinten angehängt; die
+  Positionen der älteren Spalten bleiben gleich. Bei `cpu`/`memory` gibt es Zeilen
+  `scope = total` und `scope = worker` (je Thread).
 - `iometer`: an das Iometer-Ergebnis-CSV angelehnte Spaltennamen
   (`Target Type`, `Target Name`, `Access Specification Name`, `IOps`, `MBps (Decimal)`,
   `Average Response Time`, …) zur Weiterverarbeitung in vorhandenen Auswertungen.
@@ -306,6 +325,62 @@ Git-Commit des Builds (`unknown`, falls beim Bauen nicht bekannt), `arch` `x64` 
 `arm64`, `sha256` der Hash der ausgeführten EXE-Datei. Exit-Code 0; 1, wenn die EXE nicht
 lesbar war (dann `sha256: null`).
 
+## Testtypen `cpu` und `memory` (Vertrag 1.2)
+
+Methodik und Definitionen: [`docs/core.md`](core.md#cpu--und-memory-engine-meilenstein-2).
+Beispiele: [`job-compute.json`](../schema/examples/job-compute.json),
+[`result-compute.json`](../schema/examples/result-compute.json),
+[`progress-compute.jsonl`](../schema/examples/progress-compute.jsonl).
+
+### Job-Felder
+
+| Feld | Typ | Standard | Bedeutung |
+|---|---|---|---|
+| `threads` | Integer ≥ 0 | 0 | Anzahl Threads; 0 = alle logischen Prozessoren (bzw. alle des Knotens `numa_node`). Bei `mode: latency` immer 1. |
+| `workload` (cpu) | `int` \| `float` \| `crypto` \| `mixed` | `mixed` | Rechenlast, siehe `docs/core.md`. |
+| `mode` (memory) | `bandwidth` \| `latency` | – (Pflicht) | Durchsatz oder Latenz abhängiger Ladezugriffe. |
+| `op` (memory) | `read` \| `write` \| `copy` | `read` | Nur bei `bandwidth`. |
+| `buffer_size` (memory) | Größe | – (Pflicht) | Puffer **pro Thread**, mindestens 8 KiB. Für Arbeitsspeicher statt Cache deutlich größer als der L3-Cache wählen (256 MiB bis 1 GiB). |
+| `warmup_s` | Zahl ≥ 0 | 1 | Aufwärmen vor der Messung (Takt, Caches, TLB). |
+| `duration_s` | Zahl > 0 | – (Pflicht) | Messdauer. |
+| `numa_node` | Integer | alle Knoten | Nur Prozessoren dieses Knotens nutzen. |
+| `mem_node` (memory) | Integer | Knoten des Threads | Puffer auf diesem Knoten anlegen; `numa_node` ≠ `mem_node` misst remote. |
+| `nontemporal` (memory) | Boolean | `false` | Streaming Stores für `write`/`copy` (x64). |
+| `simd` (memory) | `auto` \| `scalar` \| `sse2` \| `avx2` \| `avx512` \| `neon` | `auto` | Befehlssatz der Bandbreiten-Kernel; `auto` = AVX2, sonst SSE2 (x64) bzw. NEON (ARM64). AVX-512 nur auf ausdrückliche Anforderung. |
+
+Threads werden fest an logische Prozessoren gebunden, auch über Prozessorgruppen hinweg
+(Systeme mit mehr als 64 logischen Prozessoren). Reihenfolge der Auswahl: zuerst ein
+Thread pro physischem Kern, die NUMA-Knoten abwechselnd, danach die SMT-Geschwister.
+`threads: 1` misst also einen Kern auf Knoten 0, `threads: 2` je einen Kern auf zwei
+Knoten (falls vorhanden).
+
+### Ergebnis
+
+`summary` (cpu): `workload`, `threads`, `ops_per_s`, `score`, `ops`, `cpus` (gebundene
+Prozessoren in Thread-Reihenfolge), `cpu_pct`, optional `numa_node`.
+
+`summary` (memory): `mode`, `op`, `threads`, `buffer_size_bytes` (tatsächliche Größe),
+`gbps` + `simd` + `nontemporal` + `bytes` (bandwidth) bzw. `latency_ns` + `loads`
+(latency), `cpus`, `cpu_pct`, optional `numa_node`, `mem_node`.
+
+`per_worker[]`: `id`, `cpu`, `node`, bei memory `mem_node`, dazu `ops_per_s`, `gbps` oder
+`latency_ns`. `timeseries[]`: `t`, `ops_per_s` | `gbps` | `latency_ns`, `cpu_pct`.
+
+Einheiten: `gbps` = 10^9 Byte/s, Summe aller Threads; bei `copy` zählen gelesene **und**
+geschriebene Bytes (wie STREAM). `latency_ns` = mittlere Zeit eines abhängigen Ladezugriffs.
+`score` = `ops_per_s` ÷ Referenz-Rate eines Threads × 1000 (Referenzen in `docs/core.md`).
+
+### Fortschritt
+
+- `preparing` (nur memory): `progress` mit `unit: "bytes"` beim Anlegen und
+  Beschreiben der Puffer (Summe aller Threads).
+- `warmup`: `progress` mit `unit: "s"`.
+- `measure`: `tick` mit `ops_per_s` (cpu), `gbps` (bandwidth) oder `latency_ns`
+  (latency), dazu `cpu_pct`, `proc_cpu_pct` und – außer bei latency – `workers[]`
+  mit `id` und dem Wert pro Thread.
+- Stop (`sbench stop`, Strg+C) beendet die Messung innerhalb von ≤ 250 ms; das
+  Teilergebnis enthält die bis dahin gemessenen Werte.
+
 ## Exit-Codes
 
 | Code | Bedeutung |
@@ -339,7 +414,8 @@ die Ursache steht in einem `error`-Event (mit `field` als JSON Pointer bei 2).
 
 ## Laufzeit-Fehlercodes (Auswahl)
 
-`E_IO`, `E_ACCESS_DENIED`, `E_NET_CONNECT`, `E_NET_BIND`, `E_TIMEOUT`, `E_PIPE_CONNECT`
+`E_IO`, `E_ACCESS_DENIED`, `E_OUT_OF_MEMORY` (Puffer nicht anforderbar), `E_NUMA_NODE`,
+`E_SIMD_UNSUPPORTED`, `E_NET_CONNECT`, `E_NET_BIND`, `E_TIMEOUT`, `E_PIPE_CONNECT`
 (Named Pipe nach 10 s nicht erreichbar), `E_DESTRUCTIVE_NOT_ALLOWED`, `E_INTERNAL`. Codes folgen dem Muster `E_[A-Z0-9_]+`; neue Codes dürfen ohne
 Versionswechsel ergänzt werden, die GUI muss unbekannte Codes generisch anzeigen.
 
