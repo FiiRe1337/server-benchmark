@@ -1,0 +1,22 @@
+{
+  "schema": "sb-job/1",
+  "name": "Mix 60/40: 4K random read + 64K seq write",
+  "tests": [
+    {
+      "type": "storage",
+      "targets": [
+        {"path": "D:\\sbench\\testfile.dat", "kind": "file", "file_size": "16GiB"},
+        {"path": "\\\\.\\PhysicalDrive2", "kind": "physical"}
+      ],
+      "workers": 4,
+      "queue_depth": 32,
+      "warmup_s": 10,
+      "duration_s": 60,
+      "cache": "unbuffered",
+      "access_specs": [
+        {"weight": 60, "block_size": "4KiB", "read_pct": 100, "random_pct": 100, "align": "4KiB"},
+        {"weight": 40, "block_size": "64KiB", "read_pct": 0, "random_pct": 0, "align": "64KiB"}
+      ]
+    }
+  ]
+}

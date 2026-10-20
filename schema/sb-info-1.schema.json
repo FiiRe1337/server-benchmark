@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/FiiRe1337/server-benchmark/raw/main/schema/sb-info-1.schema.json",
+  "title": "sbench Systeminfo (sb-info/1)",
+  "description": "Ausgabe von 'sbench info --json': Systeminformationen und mögliche Testziele.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "sb-info/1"
+    },
+    "meta": {
+      "$ref": "sb-result-1.schema.json#/$defs/meta"
+    },
+    "targets": {
+      "type": "object",
+      "properties": {
+        "volumes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "pattern": "^\\\\\\\\\\.\\\\[A-Za-z]:$"
+              },
+              "letter": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[A-Z]$",
+                "description": "Laufwerksbuchstabe ohne Doppelpunkt."
+              },
+              "label": {
+                "type": "string"
+              },
+              "fs": {
+                "type": "string",
+                "description": "Dateisystem, z. B. NTFS, ReFS."
+              },
+              "size_bytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "free_bytes": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "path",
+              "letter",
+              "label",
+              "fs",
+              "size_bytes",
+              "free_bytes"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "physical_disks": {
+          "type": "array",
+          "items": {
+            "$ref": "sb-result-1.schema.json#/$defs/physical_disk"
+          }
+        },
+        "nics": {
+          "type": "array",
+          "items": {
+            "$ref": "sb-result-1.schema.json#/$defs/nic"
+          }
+        }
+      },
+      "required": [
+        "volumes",
+        "physical_disks",
+        "nics"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "schema",
+    "meta",
+    "targets"
+  ],
+  "additionalProperties": false
+}
