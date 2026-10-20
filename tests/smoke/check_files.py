@@ -22,6 +22,11 @@ if (out / "runs.json").exists():
     smoke.validate(load(out / "runs.json"), "sb-runs-1.schema.json", "runs.json (list --running --json)")
 smoke.check_result(out / "result.json", "result.json", expect_aborted=False)
 smoke.check_progress(smoke.read_jsonl(out / "progress.jsonl"), "progress.jsonl", expect_aborted=False)
+if (out / "result-m2.json").exists():
+    smoke.check_result(out / "result-m2.json", "result-m2.json (cpu, memory)", expect_aborted=False)
+    smoke.check_progress(smoke.read_jsonl(out / "progress-m2.jsonl"), "progress-m2.jsonl", expect_aborted=False)
+else:
+    smoke.check(False, "result-m2.json fehlt")
 with zipfile.ZipFile(out / "bundle.zip") as z:
     man = json.loads(z.read("manifest.json"))
     smoke.validate(man, "sb-bundle-1.schema.json", "manifest.json")

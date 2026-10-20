@@ -33,6 +33,7 @@ static void sb_cpuid(int leaf, int r[4]) {
 #include <ole2.h>
 #include <wbemidl.h>
 #include "sb/info.h"
+#include "sb/topo.h"
 #include "sb/util.h"
 int sb_is_admin(void);   /* target.c */
 
@@ -161,43 +162,25 @@ static double ram_free_bytes(void) {
     return GlobalMemoryStatusEx(&ms) ? (double)ms.ullAvailPhys : 0;
 }
 
-/* NUMA-Knoten: CPUs als globale Indizes Gruppe * 64 + Bit, freier Speicher per
- * GetNumaAvailableMemoryNodeEx. Win32 liefert keinen Gesamt-RAM pro Knoten: bei einem
- * Knoten = installierter RAM, bei mehreren gleichmäßig aufgeteilt (Näherung, docs/core.md). */
+/* NUMA-Knoten (topo.c): CPUs als globale Indizes Gruppe * 64 + Bit (auch Knoten über
+ * mehrere Prozessorgruppen), freier Speicher per GetNumaAvailableMemoryNodeEx, RAM pro Knoten
+ * aus der ACPI-SRAT (Issue #8); ram_method nennt die Quelle (docs/core.md). */
 static cJSON *numa_nodes(void) {
     cJSON *a = cJSON_CreateArray();
-    ULONG hi = 0;
-    if (!GetNumaHighestNodeNumber(&hi)) hi = 0;
-    int nodes = 0;
-    for (ULONG n = 0; n <= hi && n < 1024; n++) {
-        GROUP_AFFINITY ga;
-        memset(&ga, 0, sizeof ga);
-        if (!GetNumaNodeProcessorMaskEx((USHORT)n, &ga) || !ga.Mask) {
-            ULONGLONG fr0 = 0;
-            if (!GetNumaAvailableMemoryNodeEx((USHORT)n, &fr0) || !fr0) continue;   /* leerer Knoten */
-        }
-        nodes++;
-    }
-    if (!nodes) nodes = 1;
-    double total = ram_bytes();
-    for (ULONG n = 0; n <= hi && n < 1024; n++) {
-        GROUP_AFFINITY ga;
-        memset(&ga, 0, sizeof ga);
-        ULONGLONG fr = 0;
-        BOOL okm = GetNumaNodeProcessorMaskEx((USHORT)n, &ga);
-        BOOL okf = GetNumaAvailableMemoryNodeEx((USHORT)n, &fr);
-        if ((!okm || !ga.Mask) && (!okf || !fr)) continue;
+    sb_topo t;
+    if (sb_topo_get(&t)) return a;
+    for (int k = 0; k < t.nnodes; k++) {
+        const sb_node *n = &t.nodes[k];
         cJSON *o = cJSON_CreateObject();
-        cJSON_AddNumberToObject(o, "id", (double)n);
+        cJSON_AddNumberToObject(o, "id", n->id);
         cJSON *c = cJSON_AddArrayToObject(o, "cpus");
-        for (int b = 0; b < 64; b++)   /* globaler Index = Gruppe * 64 + Bit (Vertrag) */
-            if (okm && ((uint64_t)ga.Mask >> b) & 1) cJSON_AddItemToArray(c, cJSON_CreateNumber((double)ga.Group * 64.0 + b));
-        double rb = nodes == 1 ? total : (double)(uint64_t)(total / nodes);
-        if ((double)fr > rb) rb = (double)fr;
-        cJSON_AddNumberToObject(o, "ram_bytes", rb);
-        cJSON_AddNumberToObject(o, "ram_free_bytes", (double)fr);
+        for (int i = 0; i < n->ncpus; i++) cJSON_AddItemToArray(c, cJSON_CreateNumber(n->cpus[i]));
+        cJSON_AddNumberToObject(o, "ram_bytes", (double)n->ram_bytes);
+        cJSON_AddNumberToObject(o, "ram_free_bytes", (double)n->ram_free_bytes);
+        cJSON_AddStringToObject(o, "ram_method", sb_ram_method_name(n->ram_method));
         cJSON_AddItemToArray(a, o);
     }
+    sb_topo_free(&t);
     return a;
 }
 

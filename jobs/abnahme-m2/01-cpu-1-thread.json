@@ -1,0 +1,38 @@
+{
+  "schema": "sb-job/1",
+  "name": "Abnahme M2 – CPU 1 Thread",
+  "tests": [
+    {
+      "type": "cpu",
+      "name": "CPU int 1 Thread",
+      "workload": "int",
+      "threads": 1,
+      "warmup_s": 5,
+      "duration_s": 30
+    },
+    {
+      "type": "cpu",
+      "name": "CPU float 1 Thread",
+      "workload": "float",
+      "threads": 1,
+      "warmup_s": 5,
+      "duration_s": 30
+    },
+    {
+      "type": "cpu",
+      "name": "CPU crypto 1 Thread",
+      "workload": "crypto",
+      "threads": 1,
+      "warmup_s": 5,
+      "duration_s": 30
+    },
+    {
+      "type": "cpu",
+      "name": "CPU mixed 1 Thread",
+      "workload": "mixed",
+      "threads": 1,
+      "warmup_s": 5,
+      "duration_s": 30
+    }
+  ]
+}

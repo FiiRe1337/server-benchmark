@@ -283,7 +283,7 @@
           "type": "integer",
           "minimum": 0,
           "default": 0,
-          "description": "Anzahl Threads; 0 = alle logischen Prozessoren."
+          "description": "Anzahl Threads; 0 = alle logischen Prozessoren (bzw. alle des Knotens bei numa_node). Jeder Thread wird fest auf einen logischen Prozessor gepinnt, auch über Prozessorgruppen hinweg."
         },
         "workload": {
           "enum": [
@@ -293,12 +293,24 @@
             "mixed"
           ],
           "default": "mixed",
-          "description": "Art der Rechenlast."
+          "description": "Art der Rechenlast: int = Ganzzahl (Multiplikation, Rotation, Tabellenzugriff), float = Gleitkomma doppelter Genauigkeit (4 Ketten mit Division), crypto = SHA-256 (eine Operation = ein 64-Byte-Block), mixed = 16 int + 16 float + 1 crypto pro Operation. Siehe docs/core.md."
+        },
+        "warmup_s": {
+          "type": "number",
+          "minimum": 0,
+          "default": 1,
+          "description": "Aufwärmzeit in Sekunden vor der Messung (Takt hochfahren, Caches/TLB füllen). Seit Vertrag 1.2."
         },
         "duration_s": {
           "type": "number",
           "exclusiveMinimum": 0,
           "description": "Messdauer in Sekunden (ohne Warmup)."
+        },
+        "numa_node": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1023,
+          "description": "Nur logische Prozessoren dieses NUMA-Knotens nutzen (meta.numa_nodes[].id). Fehlt das Feld, werden alle Knoten genutzt (erst ein Thread pro Kern, Knoten reihum, dann SMT-Geschwister). Seit Vertrag 1.2."
         }
       },
       "required": [
@@ -339,16 +351,51 @@
           "type": "integer",
           "minimum": 0,
           "default": 0,
-          "description": "Anzahl Threads; 0 = alle logischen Prozessoren (bei latency immer 1)."
+          "description": "Anzahl Threads; 0 = alle logischen Prozessoren (bzw. alle des Knotens bei numa_node). Bei mode = latency immer 1 (sonst Warnung W_THREADS_IGNORED)."
         },
         "buffer_size": {
           "$ref": "#/$defs/size",
-          "description": "Puffergröße pro Thread."
+          "description": "Puffergröße pro Thread (mindestens 8 KiB). Bei copy wird der Puffer halbiert: erste Hälfte Quelle, zweite Hälfte Ziel. Für RAM- statt Cache-Messung deutlich größer als der L3-Cache wählen (z. B. 256 MiB-1 GiB)."
+        },
+        "warmup_s": {
+          "type": "number",
+          "minimum": 0,
+          "default": 1,
+          "description": "Aufwärmzeit in Sekunden vor der Messung (Takt hochfahren, Caches/TLB füllen). Seit Vertrag 1.2."
         },
         "duration_s": {
           "type": "number",
           "exclusiveMinimum": 0,
           "description": "Messdauer in Sekunden (ohne Warmup)."
+        },
+        "numa_node": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1023,
+          "description": "Nur logische Prozessoren dieses NUMA-Knotens nutzen (meta.numa_nodes[].id). Fehlt das Feld, werden alle Knoten genutzt (erst ein Thread pro Kern, Knoten reihum, dann SMT-Geschwister). Seit Vertrag 1.2."
+        },
+        "mem_node": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1023,
+          "description": "Puffer auf diesem NUMA-Knoten anlegen (VirtualAllocExNuma + First Touch). Fehlt das Feld, liegt der Puffer auf dem Knoten des jeweiligen Threads (lokal). numa_node ≠ mem_node misst Zugriffe über Knotengrenzen (remote). Seit Vertrag 1.2."
+        },
+        "nontemporal": {
+          "type": "boolean",
+          "default": false,
+          "description": "Non-temporal Stores (Streaming Stores an den Caches vorbei) für write und copy. Wirkt nur bei mode = bandwidth und op = write/copy und nur auf x64; sonst Warnung und normale Stores. Seit Vertrag 1.2."
+        },
+        "simd": {
+          "enum": [
+            "auto",
+            "scalar",
+            "sse2",
+            "avx2",
+            "avx512",
+            "neon"
+          ],
+          "default": "auto",
+          "description": "Befehlssatz der Bandbreiten-Kernel. auto = avx2, falls vorhanden, sonst sse2 (x64) bzw. neon (ARM64); avx512 nur auf ausdrückliche Anforderung. Nicht unterstützte Werte ergeben E_SIMD_UNSUPPORTED. Seit Vertrag 1.2."
         }
       },
       "required": [

@@ -45,6 +45,16 @@ typedef struct sb_test {
     double        duration_s;
     sb_cache_mode cache;
     uint64_t      seed;       /* fest: 0x5be7c0de00000000 ^ Testindex (Schema hat kein seed-Feld) */
+    /* cpu / memory (M2) */
+    uint32_t      threads;    /* 0 = alle logischen Prozessoren (bzw. des Knotens numa_node) */
+    int           workload;   /* cpu: sb_cpu_workload */
+    int           mem_mode;   /* 0 = bandwidth, 1 = latency */
+    int           mem_op;     /* 0 = read, 1 = write, 2 = copy */
+    uint64_t      buffer_size;/* pro Thread */
+    int           numa_node;  /* -1 = alle Knoten */
+    int           mem_node;   /* -1 = Knoten des jeweiligen Threads (lokal) */
+    int           nontemporal;
+    int           simd;       /* sb_simd */
 } sb_test;
 
 typedef struct sb_job {

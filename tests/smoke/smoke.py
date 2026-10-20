@@ -9,7 +9,8 @@ Prüft gegen die JSON-Schemas in schema/ (jsonschema):
     -> Exit 0, Ergebnis sb-result/1 + semantische Regeln, Fortschritt sb-progress/1
   * Fortschritt über Named Pipe (GUI-Rolle: Python legt die Pipe als Server an)
   * Stop: Lauf starten, nach 2 s 'sbench stop' -> Exit 3, aborted = true
-  * nicht implementierte Testtypen -> error-Event E_NOT_IMPLEMENTED
+  * nicht implementierte Testtypen (net_*, hyperv_info) -> error-Event E_NOT_IMPLEMENTED
+  * Meilenstein 2 (cpu, memory, NUMA): siehe smoke_m2.py
   * export (flat/iometer), bundle (ZIP, manifest gegen sb-bundle/1, sha256,
     --all/--results/--include/--anonymize)
   * Vertrag 1.1: runs/<id>.jsonl, Lock-Datei, runs/index.jsonl, list --running --json,
@@ -602,20 +603,19 @@ def main() -> int:
 
     print("\n== nicht implementierte Testtypen ==")
     ni = storage_job(work / "job-ni.json", "ni", testfile, 1, warmup=0,
-                     extra_tests=[{"type": "cpu", "duration_s": 1}, {"type": "memory", "mode": "latency", "buffer_size": "64MiB", "duration_s": 1},
-                                  {"type": "net_client", "host": "127.0.0.1", "duration_s": 1}, {"type": "hyperv_info"}])
-    # Storage an Position 1 (cpu davor): echte Ergebnisse haben Lücken in tests[].index
+                     extra_tests=[{"type": "net_client", "host": "127.0.0.1", "duration_s": 1}, {"type": "hyperv_info"}])
+    # Storage an Position 1 (net_client davor): echte Ergebnisse haben Lücken in tests[].index
     nij = json.loads(ni.read_text(encoding="utf-8"))
     nij["tests"].insert(1, nij["tests"].pop(0))
     ni.write_text(json.dumps(nij), encoding="utf-8")
     nprog = work / "progress-ni.jsonl"
     nout = work / "result-ni.json"
     p = run(sbench, "run", "--job", ni, "--out", nout, "--progress", f"file:{nprog}")
-    check(p.returncode == 0, f"Job mit cpu/memory/net/hyperv_info: Exit 0 (ist {p.returncode})")
+    check(p.returncode == 0, f"Job mit net/hyperv_info: Exit 0 (ist {p.returncode})")
     nevs = read_jsonl(nprog)
     check_progress(nevs, "Fortschritt (not implemented)", expect_aborted=False)
     nis = [e for e in nevs if e["ev"] == "error" and e["code"] == "E_NOT_IMPLEMENTED"]
-    check(sorted(e["test"] for e in nis) == [0, 2, 3, 4], "E_NOT_IMPLEMENTED für Tests 0, 2-4")
+    check(sorted(e["test"] for e in nis) == [0, 2], "E_NOT_IMPLEMENTED für Tests 0 und 2 (net_client, hyperv_info)")
     nres = check_result(nout, "Ergebnis (not implemented)", expect_aborted=False, job=ni)
     if nres:
         check([t["index"] for t in nres["tests"]] == [1], "nur der Storage-Test im Ergebnis, index = 1 (Lücke)")
@@ -648,6 +648,9 @@ def main() -> int:
               and any(e.get("ev") == "error" and e.get("code") == "E_ACCESS_DENIED" for e in pev),
               f"run ohne Admin: Exit 4 (ist {rr and rr[0]}), E_ACCESS_DENIED, kein Ergebnis")
         SUMMARY.append(f"#6 Exit 4 ohne Admin: {'ok' if rr and rr[0] == 4 else 'FEHLER'}")
+
+    import smoke_m2  # noqa: E402  (tests/smoke liegt durch den Skriptaufruf im sys.path)
+    m2 = smoke_m2.run_m2(sys.modules[__name__], sbench, work, info, quick)
 
     print("\n== export ==")
     for style in ("flat", "iometer"):
@@ -808,7 +811,8 @@ def main() -> int:
         # feste Namen für das Artefakt sbench-smoke-<runner>-<arch>
         for src, name in [(out, "result.json"), (prog, "progress.jsonl"), (sout, "result-stop.json"), (nout, "result-ni.json"),
                           (zp, "bundle.zip"), (zp3, "bundle-anon.zip"),
-                          (work / "result-vol.json", "result-volume.json")]:
+                          (work / "result-vol.json", "result-volume.json"),
+                          (m2.get("cpu", work / "-"), "result-cpu.json"), (m2.get("memory", work / "-"), "result-memory.json")]:
             if src.exists():
                 shutil.copy2(src, od / name)
         (od / "info.json").write_text(json.dumps(info, indent=2, ensure_ascii=False), encoding="utf-8")

@@ -1,0 +1,28 @@
+{
+  "schema": "sb-job/1",
+  "name": "Abnahme M2 – AVX-512 (nur CPUs mit AVX-512F)",
+  "tests": [
+    {
+      "type": "memory",
+      "name": "RAM read 1 Thread avx512",
+      "mode": "bandwidth",
+      "op": "read",
+      "threads": 1,
+      "buffer_size": "1GiB",
+      "simd": "avx512",
+      "warmup_s": 2,
+      "duration_s": 10
+    },
+    {
+      "type": "memory",
+      "name": "RAM read alle Threads avx512",
+      "mode": "bandwidth",
+      "op": "read",
+      "threads": 0,
+      "buffer_size": "256MiB",
+      "simd": "avx512",
+      "warmup_s": 3,
+      "duration_s": 20
+    }
+  ]
+}

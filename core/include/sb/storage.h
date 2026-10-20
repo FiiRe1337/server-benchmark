@@ -5,6 +5,8 @@
 #include "sb/hist.h"
 #include "sb/util.h"
 
+struct sb_ctick;
+
 typedef struct sb_io_counts {
     uint64_t ops_r, ops_w, bytes_r, bytes_w, errors;
 } sb_io_counts;
@@ -59,6 +61,8 @@ typedef struct sb_storage_cb {
     void (*tick)(void *ctx, int test, const sb_tick_sample *s);
     void (*error)(void *ctx, int test, const char *code, const char *msg);
     void (*log)(void *ctx, const char *level, const char *msg);
+    /* cpu/memory (compute.h): kind = sb_compute_kind, s = const sb_ctick * */
+    void (*ctick)(void *ctx, int test, int kind, const struct sb_ctick *s);
 } sb_storage_cb;
 
 typedef struct sb_storage_opts {

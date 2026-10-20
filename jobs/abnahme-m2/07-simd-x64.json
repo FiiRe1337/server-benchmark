@@ -1,0 +1,28 @@
+{
+  "schema": "sb-job/1",
+  "name": "Abnahme M2 – SIMD-Stufen (nur x64)",
+  "tests": [
+    {
+      "type": "memory",
+      "name": "RAM read 1 Thread sse2",
+      "mode": "bandwidth",
+      "op": "read",
+      "threads": 1,
+      "buffer_size": "1GiB",
+      "simd": "sse2",
+      "warmup_s": 2,
+      "duration_s": 10
+    },
+    {
+      "type": "memory",
+      "name": "RAM read 1 Thread avx2",
+      "mode": "bandwidth",
+      "op": "read",
+      "threads": 1,
+      "buffer_size": "1GiB",
+      "simd": "avx2",
+      "warmup_s": 2,
+      "duration_s": 10
+    }
+  ]
+}

@@ -92,7 +92,8 @@
           63
         ],
         "ram_bytes": 274877906944,
-        "ram_free_bytes": 199715979264
+        "ram_free_bytes": 199715979264,
+        "ram_method": "srat"
       },
       {
         "id": 1,
@@ -163,7 +164,8 @@
           127
         ],
         "ram_bytes": 274877906944,
-        "ram_free_bytes": 201622364160
+        "ram_free_bytes": 201622364160,
+        "ram_method": "srat"
       }
     ],
     "elevated": true,

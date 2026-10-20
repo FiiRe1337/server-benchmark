@@ -14,6 +14,7 @@
 #include "sb/target.h"
 #include "sb/hist.h"
 #include "sb/runs.h"
+#include "sb/compute.h"
 
 #ifndef SB_VERSION_STR
 #define SB_VERSION_STR "0.1.0"
@@ -173,6 +174,78 @@ static cJSON *storage_test_json(int idx, const sb_test *t, const sb_storage_resu
     return o;
 }
 
+/* cpu/memory-Test (M2) */
+static const char *ck_key(sb_compute_kind k) { return k == SB_CK_CPU ? "ops_per_s" : k == SB_CK_MEM_BW ? "gbps" : "latency_ns"; }
+static int ck_digits(sb_compute_kind k) { return k == SB_CK_CPU ? 1 : 3; }
+
+static cJSON *compute_test_json(int idx, const sb_test *t, const sb_compute_result *r) {
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "index", idx);
+    cJSON_AddStringToObject(o, "type", sb_test_type_name(t->type));
+    cJSON_AddItemToObject(o, "config", cJSON_Duplicate(t->raw, 1));
+    cJSON *s = cJSON_AddObjectToObject(o, "summary");
+    const char *key = ck_key(r->kind);
+    int dg = ck_digits(r->kind);
+    if (r->kind == SB_CK_CPU) {
+        cJSON_AddStringToObject(s, "workload", sb_cpu_workload_name((sb_cpu_workload)t->workload));
+        cJSON_AddNumberToObject(s, "threads", r->nthreads > 0 ? r->nthreads : 1);
+        cJSON_AddNumberToObject(s, "ops_per_s", rnd(r->value, 1));
+        cJSON_AddNumberToObject(s, "score", rnd(r->score, 1));
+        cJSON_AddNumberToObject(s, "ops", (double)r->units);
+    } else {
+        cJSON_AddStringToObject(s, "mode", t->mem_mode == 1 ? "latency" : "bandwidth");
+        if (t->mem_mode == 0) {
+            static const char *const OP[] = {"read", "write", "copy"};
+            cJSON_AddStringToObject(s, "op", OP[t->mem_op]);
+        }
+        cJSON_AddNumberToObject(s, "threads", r->nthreads > 0 ? r->nthreads : 1);
+        cJSON_AddNumberToObject(s, "buffer_size_bytes", (double)(r->buffer_bytes ? r->buffer_bytes : t->buffer_size));
+        if (t->mem_mode == 0) {
+            cJSON_AddNumberToObject(s, "gbps", rnd(r->value, 3));
+            cJSON_AddStringToObject(s, "simd", sb_simd_name(r->simd));
+            cJSON_AddBoolToObject(s, "nontemporal", r->nontemporal);
+            cJSON_AddNumberToObject(s, "bytes", (double)r->units);
+        } else {
+            cJSON_AddNumberToObject(s, "latency_ns", rnd(r->value, 2));
+            cJSON_AddNumberToObject(s, "loads", (double)r->units);
+        }
+        if (t->mem_node >= 0) cJSON_AddNumberToObject(s, "mem_node", t->mem_node);
+    }
+    if (t->numa_node >= 0) cJSON_AddNumberToObject(s, "numa_node", t->numa_node);
+    if (r->nthreads > 0) {
+        cJSON *cp = cJSON_AddArrayToObject(s, "cpus");
+        for (int i = 0; i < r->nthreads; i++) cJSON_AddItemToArray(cp, cJSON_CreateNumber(r->cpus[i]));
+    }
+    cJSON_AddNumberToObject(s, "cpu_pct", rnd(r->cpu_pct, 1));
+    cJSON *pw = cJSON_AddArrayToObject(o, "per_worker");
+    for (int i = 0; i < r->nthreads; i++) {
+        cJSON *x = cJSON_CreateObject();
+        cJSON_AddNumberToObject(x, "id", i);
+        cJSON_AddNumberToObject(x, "cpu", r->cpus[i]);
+        cJSON_AddNumberToObject(x, "node", r->nodes[i]);
+        if (r->kind != SB_CK_CPU) cJSON_AddNumberToObject(x, "mem_node", r->mem_nodes[i]);
+        cJSON_AddNumberToObject(x, key, rnd(r->w_value[i], dg));
+        cJSON_AddItemToArray(pw, x);
+    }
+    cJSON *ts = cJSON_AddArrayToObject(o, "timeseries");
+    for (int i = 0; i < r->nticks; i++) {
+        cJSON *x = cJSON_CreateObject();
+        cJSON_AddNumberToObject(x, "t", rnd(r->ticks[i].t, 3));
+        cJSON_AddNumberToObject(x, key, rnd(r->ticks[i].value, dg));
+        cJSON_AddNumberToObject(x, "cpu_pct", rnd(r->ticks[i].cpu_pct, 1));
+        cJSON_AddItemToArray(ts, x);
+    }
+    cJSON *er = cJSON_AddArrayToObject(o, "errors");
+    for (int i = 0; i < r->nerrs; i++) {
+        cJSON *x = cJSON_CreateObject();
+        cJSON_AddStringToObject(x, "code", r->errs[i].code);
+        cJSON_AddStringToObject(x, "msg", r->errs[i].msg);
+        if (r->errs[i].worker >= 0) cJSON_AddNumberToObject(x, "worker", r->errs[i].worker);
+        cJSON_AddItemToArray(er, x);
+    }
+    return o;
+}
+
 /* ---- Lauf-Kontext (Callbacks) --------------------------------------------- */
 
 typedef struct runctx { sb_progress *pr; sb_log *log; } runctx;
@@ -233,6 +306,31 @@ static void ev_tick(void *c, int test, const sb_tick_sample *s) {
             cJSON_AddNumberToObject(wl, "p99", rnd(s->w_lat_p99_us[i], 3));
         }
         cJSON_AddItemToArray(w, x);
+    }
+    sb_progress_emit(r->pr, o);
+    cJSON_Delete(o);
+}
+
+static void ev_ctick(void *c, int test, int kind, const sb_ctick *s) {
+    runctx *r = (runctx *)c;
+    sb_compute_kind k = (sb_compute_kind)kind;
+    const char *key = ck_key(k);
+    int dg = ck_digits(k);
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "ev", "tick");
+    cJSON_AddNumberToObject(o, "test", test);
+    cJSON_AddNumberToObject(o, "t", rnd(s->t, 3));
+    cJSON_AddNumberToObject(o, key, rnd(s->value, dg));
+    cJSON_AddNumberToObject(o, "cpu_pct", rnd(s->cpu_pct, 1));
+    cJSON_AddNumberToObject(o, "proc_cpu_pct", rnd(s->proc_cpu_pct, 2));
+    if (k != SB_CK_MEM_LAT && s->w_value) {
+        cJSON *w = cJSON_AddArrayToObject(o, "workers");
+        for (int i = 0; i < s->nworkers; i++) {
+            cJSON *x = cJSON_CreateObject();
+            cJSON_AddNumberToObject(x, "id", i);
+            cJSON_AddNumberToObject(x, key, rnd(s->w_value[i], dg));
+            cJSON_AddItemToArray(w, x);
+        }
     }
     sb_progress_emit(r->pr, o);
     cJSON_Delete(o);
@@ -557,14 +655,28 @@ int sb_run(const sb_run_options *o) {
     cJSON *meta = sb_info_meta();
     cJSON *tests = cJSON_CreateArray();
     runctx ctx = {&pr, &log};
-    sb_storage_cb cb = {&ctx, ev_phase, ev_progress, ev_tick, ev_error, ev_log};
+    sb_storage_cb cb = {&ctx, ev_phase, ev_progress, ev_tick, ev_error, ev_log, ev_ctick};
     sb_storage_opts so = {o->tick_ms ? o->tick_ms : 1000, g_stop_evt, o->allow_destructive, o->keep_files};
     int aborted = 0, rights = 0;
     for (int i = 0; i < job.ntests && !aborted; i++) {
         const sb_test *t = &job.tests[i];
         if (g_stop_evt && WaitForSingleObject(g_stop_evt, 0) == WAIT_OBJECT_0) { aborted = 1; break; }
+        if (t->type == SB_T_CPU || t->type == SB_T_MEMORY) {
+            sb_log_write(&log, "INFO", "Test %d%s%s%s: %s, threads %u, warmup %.1f s, Dauer %.1f s, numa_node %d, mem_node %d", i,
+                         t->name ? " (" : "", t->name ? t->name : "", t->name ? ")" : "", sb_test_type_name(t->type),
+                         t->threads, t->warmup_s, t->duration_s, t->numa_node, t->mem_node);
+            sb_compute_result cr;
+            int crc = sb_compute_run(i, t, &so, &cb, &cr);
+            if (cr.measured || crc == 3 || crc == 1) cJSON_AddItemToArray(tests, compute_test_json(i, t, &cr));
+            sb_log_write(&log, "INFO", "Test %d beendet (rc=%d): %s = %.3f, %d Thread(s), %.2f s", i, crc, ck_key(cr.kind),
+                         cr.value, cr.nthreads, cr.measured_s);
+            sb_compute_result_free(&cr);
+            if (crc == 3) { aborted = 1; rc = SB_EXIT_ABORTED; }
+            else if (crc == 1) { aborted = 1; rc = SB_EXIT_ERROR; }
+            continue;
+        }
         if (t->type != SB_T_STORAGE) {
-            snprintf(err, sizeof err, "Testtyp '%s' ist in Meilenstein 1 noch nicht implementiert und wird übersprungen.",
+            snprintf(err, sizeof err, "Testtyp '%s' ist noch nicht implementiert und wird übersprungen.",
                      sb_test_type_name(t->type));
             emit_error(&pr, "E_NOT_IMPLEMENTED", err, NULL, i);
             sb_log_write(&log, "WARN", "Test %d: %s", i, err);

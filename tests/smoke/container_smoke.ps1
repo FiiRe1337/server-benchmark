@@ -32,6 +32,23 @@ $r = Get-Content -Raw "$Out\result.json" | ConvertFrom-Json
 $s = $r.tests[0].summary
 Write-Host ("  Container-Ergebnis: IOPS {0:N0}, MB/s {1:N2}, p99 {2:N1} us" -f $s.iops, $s.mbps, $s.lat_us.p99)
 Check ($s.io_count -gt 0) "I/Os gemessen"
+# Meilenstein 2: cpu + memory im Container (Topologie, VirtualAllocExNuma, Pinning)
+$job2 = @{
+  schema = "sb-job/1"; name = "Container-M2"
+  tests = @(@{ type = "cpu"; workload = "mixed"; warmup_s = 0.5; duration_s = 2 },
+            @{ type = "memory"; mode = "bandwidth"; op = "copy"; buffer_size = "64MiB"; warmup_s = 0.5; duration_s = 2 },
+            @{ type = "memory"; mode = "latency"; buffer_size = "256MiB"; warmup_s = 0.5; duration_s = 2 })
+}
+$job2 | ConvertTo-Json -Depth 8 | Out-File -Encoding utf8 C:\sbtest\job-m2.json
+& $sb run --job C:\sbtest\job-m2.json --out "$Out\result-m2.json" --progress "file:$Out\progress-m2.jsonl"
+Check ($LASTEXITCODE -eq 0) "run M2 (cpu, memory) Exit 0 (ist $LASTEXITCODE)"
+if (Test-Path "$Out\result-m2.json") {
+  $r2 = Get-Content -Raw "$Out\result-m2.json" | ConvertFrom-Json
+  Write-Host ("  Container-Ergebnis M2: cpu mixed {0:N0} ops/s (Score {1:N0}, {2} Threads), copy {3:N2} GB/s, Latenz {4:N1} ns" -f `
+    $r2.tests[0].summary.ops_per_s, $r2.tests[0].summary.score, $r2.tests[0].summary.threads, $r2.tests[1].summary.gbps, $r2.tests[2].summary.latency_ns)
+  Check ($r2.tests.Count -eq 3 -and $r2.tests[0].summary.ops_per_s -gt 0 -and $r2.tests[1].summary.gbps -gt 0 -and $r2.tests[2].summary.latency_ns -gt 0) "M2-Messwerte > 0"
+  Write-Host ("  NUMA im Container: " + (($info.meta.numa_nodes | ForEach-Object { "Knoten $($_.id): $($_.cpus.Count) CPUs, ram_method=$($_.ram_method)" }) -join "; "))
+}
 & $sb export "$Out\result.json" --csv "$Out\result.csv" --style iometer; Check ($LASTEXITCODE -eq 0) "export"
 & $sb list --running --json | Out-File -Encoding utf8 "$Out\runs.json"; Check ($LASTEXITCODE -eq 0) "list --running --json"
 & $sb bundle --all --anonymize --out "$Out\bundle.zip"; Check ($LASTEXITCODE -eq 0) "bundle --all --anonymize"

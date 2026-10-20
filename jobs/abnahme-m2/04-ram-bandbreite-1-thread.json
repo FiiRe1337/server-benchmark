@@ -1,0 +1,37 @@
+{
+  "schema": "sb-job/1",
+  "name": "Abnahme M2 – RAM-Bandbreite 1 Thread",
+  "tests": [
+    {
+      "type": "memory",
+      "name": "RAM read 1 Thread scalar",
+      "mode": "bandwidth",
+      "op": "read",
+      "threads": 1,
+      "buffer_size": "1GiB",
+      "simd": "scalar",
+      "warmup_s": 2,
+      "duration_s": 10
+    },
+    {
+      "type": "memory",
+      "name": "RAM read 1 Thread auto",
+      "mode": "bandwidth",
+      "op": "read",
+      "threads": 1,
+      "buffer_size": "1GiB",
+      "warmup_s": 2,
+      "duration_s": 10
+    },
+    {
+      "type": "memory",
+      "name": "RAM copy 1 Thread",
+      "mode": "bandwidth",
+      "op": "copy",
+      "threads": 1,
+      "buffer_size": "1GiB",
+      "warmup_s": 2,
+      "duration_s": 10
+    }
+  ]
+}
