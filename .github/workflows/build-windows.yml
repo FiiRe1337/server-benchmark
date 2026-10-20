@@ -126,9 +126,10 @@ jobs:
           Copy-Item core\include\sb\sb.h "$d\include\sb\"
           Copy-Item third_party\cjson\LICENSE "$d\licenses\cJSON-LICENSE.txt"
           Copy-Item third_party\miniz\LICENSE "$d\licenses\miniz-LICENSE.txt"
-          New-Item -ItemType Directory -Force "$d\docs", "$d\jobs\abnahme-m1" | Out-Null
+          New-Item -ItemType Directory -Force "$d\docs", "$d\jobs\abnahme-m1", "$d\jobs\abnahme-m2" | Out-Null
           Copy-Item docs\*.md "$d\docs\"
           Copy-Item jobs\abnahme-m1\*.json "$d\jobs\abnahme-m1\"
+          Copy-Item jobs\abnahme-m2\*.json "$d\jobs\abnahme-m2\"
           Copy-Item build\Release\sbench.exe dist\cli\
           Copy-Item build\Release\sb_unit_tests.exe dist\tests\
           "${{ steps.ver.outputs.version }}" | Out-File -Encoding ascii "$d\VERSION.txt"

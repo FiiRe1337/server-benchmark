@@ -123,8 +123,11 @@ def run_m2(h, sbench: Path, work: Path, info: dict, quick: bool) -> dict:
         check(set(st["mixed Knoten 0"]["cpus"]) <= k0 and st["mixed Knoten 0"]["threads"] == len(k0),
               f"numa_node {nodes[0]['id']}: nur CPUs des Knotens ({st['mixed Knoten 0']['threads']})")
         if ncpu >= 2:
-            sp = st["mixed alle"]["ops_per_s"] / st["mixed 1T"]["ops_per_s"]
-            check(sp > 1.3, f"mixed: Skalierung alle/1T = {sp:.2f} bei {ncpu} logischen Prozessoren")
+            # int ist latenzgebunden und skaliert auch über SMT-Geschwister (Runner: 1 Kern, 2 Threads)
+            sp = st["int alle"]["ops_per_s"] / st["int 1T"]["ops_per_s"]
+            spm = st["mixed alle"]["ops_per_s"] / st["mixed 1T"]["ops_per_s"]
+            check(sp > 1.3, f"int: Skalierung alle/1T = {sp:.2f} bei {ncpu} logischen Prozessoren (mixed {spm:.2f})")
+            SUMMARY.append(f"SMOKE-ERGEBNIS cpu Skalierung alle/1T: int {sp:.2f}, mixed {spm:.2f} ({ncpu} logische Prozessoren)")
         SUMMARY.append("SMOKE-ERGEBNIS cpu 1 Thread: " + ", ".join(
             f"{w} {st[f'{w} 1T']['ops_per_s']:.4g} ops/s (Score {st[f'{w} 1T']['score']:.0f})" for w in ("int", "float", "crypto", "mixed")))
         SUMMARY.append(f"SMOKE-ERGEBNIS cpu alle {n_all} Threads: int {st['int alle']['ops_per_s']:.4g} ops/s (Score {st['int alle']['score']:.0f}), "

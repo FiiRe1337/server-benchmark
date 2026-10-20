@@ -221,22 +221,24 @@ L1/L2 (z. B. 16 KiB) zeigen die Cache-Latenz.
 | `int` | eine Runde aus Addition, Multiplikation, Rotation, XOR, Shift und einem Tabellenzugriff auf vier abhängigen 64-Bit-Ketten |
 | `float` | drei Multiplikations-/Additionsketten und eine Division (double) |
 | `crypto` | SHA-256 über einen 64-Byte-Block (portable Implementierung ohne SHA-Befehle) |
-| `mixed` | 16 `int` + 16 `float` + 1 `crypto` |
+| `mixed` | 128 `int` + 64 `float` + SHA-256 einer 64-Byte-Nachricht (mit Padding zwei Blöcke); auf dem Referenzsystem je etwa ein Drittel der Zeit |
 
 Die Kernel sind skalar und laufen auf x64 und ARM64 mit identischer Arbeit; sie messen die
 Ganzzahl-/Gleitkomma-Leistung je Kern und die Skalierung über Kerne, nicht SIMD-Durchsatz.
 
 **Score:** `score = ops_per_s / Referenz × 1000`. Referenz = ops/s **eines** Threads auf
-dem GitHub-Runner `windows-2022` (x64). 1000 heißt „ein Thread der Referenzmaschine“,
+dem GitHub-Runner `windows-2022` mit AMD EPYC 9V74 (Smoke-Lauf der M2-Kalibrierung, siehe
+PR #13). Die Werte sind ab Vertrag 1.2 fest; GitHub-Runner wechseln die CPU-Typen, ein
+Score von 1000 auf einem Runner ist deshalb kein Testkriterium. 1000 heißt „ein Thread der Referenzmaschine“,
 ein 16-Kern-System mit gleicher Kernleistung erreicht im Mehrthreadtest etwa 16 000
 (plus SMT-Anteil). Die Referenzen stehen in `sb_cpu_reference()` (`compute.c`).
 
 | workload | Referenz (ops/s, 1 Thread) |
 |---|---|
-| `int` | 4,0 · 10^8 |
-| `float` | 1,5 · 10^8 |
-| `crypto` | 4,0 · 10^6 |
-| `mixed` | 1,0 · 10^6 |
+| `int` | 3,25 · 10^8 |
+| `float` | 1,75 · 10^8 |
+| `crypto` | 4,15 · 10^6 |
+| `mixed` | 8,0 · 10^5 |
 
 ## Grenzen und bekannte Abweichungen
 

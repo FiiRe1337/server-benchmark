@@ -1,0 +1,59 @@
+{
+  "schema": "sb-job/1",
+  "name": "Abnahme M2 – NUMA lokal/remote (nur Systeme mit ≥ 2 Knoten)",
+  "tests": [
+    {
+      "type": "memory",
+      "name": "Latenz Knoten 0 -> RAM 0",
+      "mode": "latency",
+      "buffer_size": "1GiB",
+      "numa_node": 0,
+      "mem_node": 0,
+      "warmup_s": 2,
+      "duration_s": 10
+    },
+    {
+      "type": "memory",
+      "name": "Latenz Knoten 0 -> RAM 1",
+      "mode": "latency",
+      "buffer_size": "1GiB",
+      "numa_node": 0,
+      "mem_node": 1,
+      "warmup_s": 2,
+      "duration_s": 10
+    },
+    {
+      "type": "memory",
+      "name": "read Knoten 0 -> RAM 0",
+      "mode": "bandwidth",
+      "op": "read",
+      "threads": 0,
+      "numa_node": 0,
+      "mem_node": 0,
+      "buffer_size": "256MiB",
+      "warmup_s": 3,
+      "duration_s": 15
+    },
+    {
+      "type": "memory",
+      "name": "read Knoten 0 -> RAM 1",
+      "mode": "bandwidth",
+      "op": "read",
+      "threads": 0,
+      "numa_node": 0,
+      "mem_node": 1,
+      "buffer_size": "256MiB",
+      "warmup_s": 3,
+      "duration_s": 15
+    },
+    {
+      "type": "cpu",
+      "name": "CPU mixed nur Knoten 0",
+      "workload": "mixed",
+      "threads": 0,
+      "numa_node": 0,
+      "warmup_s": 3,
+      "duration_s": 20
+    }
+  ]
+}

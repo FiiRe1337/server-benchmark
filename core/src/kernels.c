@@ -360,8 +360,9 @@ void sb_cpu_kernel(sb_cpu_workload w, uint64_t s[8], uint64_t n) {
     case SB_CPU_FLOAT: k_float(s, n); break;
     case SB_CPU_CRYPTO: k_crypto(s, n); break;
     case SB_CPU_MIXED:
-        /* 1 Operation = 16 int + 16 float + 1 crypto (ähnliche Anteile an der Laufzeit) */
-        for (uint64_t i = 0; i < n; i++) { k_int(s, 16); k_float(s, 16); k_crypto(s, 1); }
+        /* 1 Operation = 128 int + 64 float + 1 crypto-Aufruf (SHA-256 einer 64-Byte-Nachricht,
+         * mit Padding 2 Kompressionen); auf dem Referenzsystem je etwa ein Drittel der Zeit */
+        for (uint64_t i = 0; i < n; i++) { k_int(s, 128); k_float(s, 64); k_crypto(s, 1); }
         break;
     }
 }

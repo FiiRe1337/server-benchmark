@@ -412,9 +412,16 @@ static void test_memkern(void) {
             memset(d, 0, bytes);
             k.copy(d, a, bytes, nt);
             CHECK(!memcmp(a, d, bytes), "copy %s nt=%d", sb_simd_name((sb_simd)isa), nt);
+            memset(d, 0, bytes);
             k.write(d, bytes, nt);
-            int changed = memcmp(a, d, bytes) != 0;
-            CHECK(changed, "write %s nt=%d schreibt", sb_simd_name((sb_simd)isa), nt);
+            size_t zero_lines = 0;
+            for (size_t off = 0; off < bytes; off += 64) {
+                int z = 1;
+                for (int b = 0; b < 64 && z; b++) z = d[off + (size_t)b] == 0;
+                zero_lines += (size_t)z;
+            }
+            CHECK(zero_lines == 0, "write %s nt=%d: %zu von %zu Zeilen nicht beschrieben", sb_simd_name((sb_simd)isa), nt,
+                  zero_lines, bytes / 64);
         }
         (void)k.read(a, bytes);
         g_pass++;

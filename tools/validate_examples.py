@@ -285,6 +285,20 @@ def main() -> int:
         else:
             print(f"[OK]   Beispiel {rel} ({kind})")
 
+    # Abnahme-Jobs (jobs/**/*.json) gegen sb-job/1
+    jv = Draft202012Validator(schemas["sb-job-1.schema.json"], registry=registry, format_checker=FormatChecker())
+    for p in sorted((ROOT / "jobs").rglob("*.json")):
+        doc = load_json(p)
+        errs = [f"/{'/'.join(map(str, e.absolute_path))}: {e.message}" for e in jv.iter_errors(doc)]
+        errs += semantic_checks("sb-job-1.schema.json", doc)
+        if errs:
+            failures += 1
+            print(f"[FAIL] Job      {p.relative_to(ROOT)}")
+            for m in errs[:20]:
+                print(f"         - {m}")
+        else:
+            print(f"[OK]   Job      {p.relative_to(ROOT)}")
+
     st = selftest()
     if st:
         failures += 1
