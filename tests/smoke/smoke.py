@@ -230,7 +230,10 @@ def main() -> int:
     check(str(m.get("data_dir", "")).lower() == str(data_dir).lower(), f"meta.data_dir = <exe>\\data ({m.get('data_dir')})")
     check(isinstance(m.get("elevated"), bool) and isinstance(m.get("ram_free_bytes"), int) and m.get("numa_nodes"),
           f"meta: elevated={m.get('elevated')}, ram_free_bytes, numa_nodes={len(m.get('numa_nodes') or [])}")
-    ncpu = sum(len(n["cpus"]) if isinstance(n["cpus"], list) else n["cpus"] for n in m.get("numa_nodes") or [])
+    allc = [c for n in m.get("numa_nodes") or [] for c in n["cpus"]]
+    check(len(allc) == len(set(allc)) and all(isinstance(c, int) for c in allc),
+          f"numa_nodes[].cpus: eindeutige globale Indizes (Gruppe*64+Bit) {allc[:8]}")
+    ncpu = len(allc)
     check(ncpu == m["cpu"]["threads"], f"NUMA-CPUs ({ncpu}) = logische Prozessoren ({m['cpu']['threads']})")
     hv = info["meta"]["hypervisor"]
     print(f"  OS: {info['meta']['os']}, CPU: {info['meta']['cpu']['model']} ({info['meta']['cpu']['threads']} Threads)")
@@ -327,6 +330,7 @@ def main() -> int:
         s = t["summary"]
         lat = s["lat_us"]
         check(s["io_count"] > 0 and s["errors"] == 0, f"I/Os > 0 ({s['io_count']}), keine Fehler")
+        check(res.get("run_id") == "smoke-run", f"Ergebnis run_id = smoke-run ({res.get('run_id')})")
         check(res["meta"].get("elevated") is not None and str(res["meta"].get("data_dir", "")).lower() == str(data_dir).lower(),
               "Ergebnis meta: elevated, data_dir")
         rf = s["read_iops"] / max(s["iops"], 1e-9)
@@ -406,7 +410,7 @@ def main() -> int:
     lk = runs_dir / "stop-test.lock.json"
     if check(lk.exists(), "Lock-Datei während des Laufs vorhanden"):
         lock = json.loads(lk.read_text(encoding="utf-8"))
-        check(set(lock) == {"run_id", "pid", "started_utc", "job", "out"} and lock["pid"] == proc.pid,
+        check(set(lock) == {"run_id", "job_name", "pid", "started_utc", "job", "out"} and lock["pid"] == proc.pid,
               f"Lock-Datei-Inhalt {lock}")
     p = run(sbench, "list", "--running", "--json")
     lst = json.loads(p.stdout.decode("utf-8")) if p.returncode == 0 else {}
@@ -416,6 +420,7 @@ def main() -> int:
     if ids:
         r0 = lst["runs"][0]
         check(r0["pid"] == proc.pid and Path(r0["progress_file"]).exists(), "list: pid und progress_file stimmen")
+        check(r0.get("job_name") == "lang", f"list: job_name aus job.name ({r0.get('job_name')})")
     check(not stale.exists(), "verwaiste Lock-Datei entfernt")
     ts = time.time()
     p = run(sbench, "stop", "--id", "stop-test")

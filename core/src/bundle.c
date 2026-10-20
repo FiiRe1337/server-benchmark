@@ -91,6 +91,21 @@ static char *full_path(const char *p) {
 
 /* run_id zu einer Ergebnisdatei: über runs\index.jsonl (out), sonst Dateiname ohne Endung */
 static char *run_id_for(const cJSON *index, const char *path) {
+    {
+        char *t = NULL;
+        size_t n = 0;
+        if (sb_read_file(path, &t, &n) == 0 && t) {
+            cJSON *j = cJSON_ParseWithLength(t, n);
+            const cJSON *id = j ? cJSON_GetObjectItemCaseSensitive(j, "run_id") : NULL;
+            char *r = NULL;
+            if (cJSON_IsString(id) && id->valuestring[0] && strlen(id->valuestring) <= 64 &&
+                strspn(id->valuestring, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-") == strlen(id->valuestring))
+                r = sb_strdup(id->valuestring);
+            cJSON_Delete(j);
+            free(t);
+            if (r) return r;
+        }
+    }
     char *fp = full_path(path);
     const cJSON *it;
     cJSON_ArrayForEach(it, index) {

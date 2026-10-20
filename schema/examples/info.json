@@ -2,7 +2,11 @@
   "schema": "sb-info/1",
   "meta": {
     "host": "SRV-HV01",
-    "os": {"name": "Windows Server 2022 Datacenter", "version": "21H2", "build": "20348.2762"},
+    "os": {
+      "name": "Windows Server 2022 Datacenter",
+      "version": "21H2",
+      "build": "20348.2762"
+    },
     "cpu": {
       "model": "Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz",
       "sockets": 2,
@@ -84,11 +88,88 @@
         "ram_bytes": 274877906944,
         "ram_free_bytes": 199715979264
       },
-      {"id": 1, "cpus": 64, "ram_bytes": 274877906944, "ram_free_bytes": 201622364160}
+      {
+        "id": 1,
+        "cpus": [
+          64,
+          65,
+          66,
+          67,
+          68,
+          69,
+          70,
+          71,
+          72,
+          73,
+          74,
+          75,
+          76,
+          77,
+          78,
+          79,
+          80,
+          81,
+          82,
+          83,
+          84,
+          85,
+          86,
+          87,
+          88,
+          89,
+          90,
+          91,
+          92,
+          93,
+          94,
+          95,
+          96,
+          97,
+          98,
+          99,
+          100,
+          101,
+          102,
+          103,
+          104,
+          105,
+          106,
+          107,
+          108,
+          109,
+          110,
+          111,
+          112,
+          113,
+          114,
+          115,
+          116,
+          117,
+          118,
+          119,
+          120,
+          121,
+          122,
+          123,
+          124,
+          125,
+          126,
+          127
+        ],
+        "ram_bytes": 274877906944,
+        "ram_free_bytes": 201622364160
+      }
     ],
     "elevated": true,
     "data_dir": "C:\\Tools\\sbench\\data",
-    "hypervisor": {"present": true, "vendor": "Microsoft Hv", "role": "host", "partition_info": {"is_root": true}},
+    "hypervisor": {
+      "present": true,
+      "vendor": "Microsoft Hv",
+      "role": "host",
+      "partition_info": {
+        "is_root": true
+      }
+    },
     "drives": [
       {
         "path": "\\\\.\\PhysicalDrive0",
@@ -118,11 +199,22 @@
     "nics": [
       {
         "name": "Mellanox ConnectX-5 #1",
-        "ipv4": ["10.0.0.10"],
-        "ipv6": ["fe80::1e34:daff:fe5a:10"],
+        "ipv4": [
+          "10.0.0.10"
+        ],
+        "ipv6": [
+          "fe80::1e34:daff:fe5a:10"
+        ],
         "link_mbps": 25000
       },
-      {"name": "Intel I350 #1", "ipv4": ["192.168.10.21"], "ipv6": [], "link_mbps": 1000}
+      {
+        "name": "Intel I350 #1",
+        "ipv4": [
+          "192.168.10.21"
+        ],
+        "ipv6": [],
+        "link_mbps": 1000
+      }
     ]
   },
   "targets": {
@@ -173,11 +265,22 @@
     "nics": [
       {
         "name": "Mellanox ConnectX-5 #1",
-        "ipv4": ["10.0.0.10"],
-        "ipv6": ["fe80::1e34:daff:fe5a:10"],
+        "ipv4": [
+          "10.0.0.10"
+        ],
+        "ipv6": [
+          "fe80::1e34:daff:fe5a:10"
+        ],
         "link_mbps": 25000
       },
-      {"name": "Intel I350 #1", "ipv4": ["192.168.10.21"], "ipv6": [], "link_mbps": 1000}
+      {
+        "name": "Intel I350 #1",
+        "ipv4": [
+          "192.168.10.21"
+        ],
+        "ipv6": [],
+        "link_mbps": 1000
+      }
     ]
   }
 }

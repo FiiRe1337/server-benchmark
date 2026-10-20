@@ -161,16 +161,13 @@ static double ram_free_bytes(void) {
     return GlobalMemoryStatusEx(&ms) ? (double)ms.ullAvailPhys : 0;
 }
 
-/* NUMA-Knoten: CPUs als globale Indizes (Gruppen hintereinander), freier Speicher per
+/* NUMA-Knoten: CPUs als globale Indizes Gruppe * 64 + Bit, freier Speicher per
  * GetNumaAvailableMemoryNodeEx. Win32 liefert keinen Gesamt-RAM pro Knoten: bei einem
  * Knoten = installierter RAM, bei mehreren gleichmäßig aufgeteilt (Näherung, docs/core.md). */
 static cJSON *numa_nodes(void) {
     cJSON *a = cJSON_CreateArray();
     ULONG hi = 0;
     if (!GetNumaHighestNodeNumber(&hi)) hi = 0;
-    WORD ng = GetActiveProcessorGroupCount();
-    DWORD goff[64] = {0};
-    for (WORD g = 1; g < ng && g < 64; g++) goff[g] = goff[g - 1] + GetActiveProcessorCount((WORD)(g - 1));
     int nodes = 0;
     for (ULONG n = 0; n <= hi && n < 1024; n++) {
         GROUP_AFFINITY ga;
@@ -193,8 +190,8 @@ static cJSON *numa_nodes(void) {
         cJSON *o = cJSON_CreateObject();
         cJSON_AddNumberToObject(o, "id", (double)n);
         cJSON *c = cJSON_AddArrayToObject(o, "cpus");
-        for (int b = 0; b < 64; b++)
-            if (okm && (ga.Mask >> b) & 1) cJSON_AddItemToArray(c, cJSON_CreateNumber((double)(goff[ga.Group < 64 ? ga.Group : 0] + (DWORD)b)));
+        for (int b = 0; b < 64; b++)   /* globaler Index = Gruppe * 64 + Bit (Vertrag) */
+            if (okm && ((uint64_t)ga.Mask >> b) & 1) cJSON_AddItemToArray(c, cJSON_CreateNumber((double)ga.Group * 64.0 + b));
         double rb = nodes == 1 ? total : (double)(uint64_t)(total / nodes);
         if ((double)fr > rb) rb = (double)fr;
         cJSON_AddNumberToObject(o, "ram_bytes", rb);

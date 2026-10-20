@@ -18,8 +18,10 @@ in [`schema/`](../schema/) definiert, Beispiele liegen in [`schema/examples/`](.
 
 **Vertragsstand 1.1.** Gegenüber 1.0 kamen nur optionale Felder, das Event `progress`,
 das Format `sb-runs/1` und neue Befehle hinzu. Die Formatversionen (`sb-job/1` usw.)
-bleiben daher unverändert. sbench ab Vertrag 1.1 gibt die neuen Felder `meta.elevated`,
+bleiben daher unverändert. sbench ab Vertrag 1.1 gibt die neuen Felder `run_id`, `meta.elevated`,
 `meta.data_dir`, `meta.ram_free_bytes`, `meta.numa_nodes` und `warnings` immer aus.
+`numa_nodes[].cpus` ist eine Liste globaler logischer Prozessor-Indizes
+(Prozessorgruppe × 64 + Bitnummer); `sb-runs/1` nennt je Lauf zusätzlich `job_name`.
 
 ## Allgemeines
 
@@ -69,7 +71,7 @@ steht in `meta.data_dir` (in `sb-result` bezogen auf den Zeitpunkt des Laufs, eb
 | Pfad | Inhalt |
 |---|---|
 | `<data_dir>\runs\<run_id>.jsonl` | Alle Fortschritts-Events des Laufs (immer, unabhängig von `--progress`) |
-| `<data_dir>\runs\<run_id>.lock.json` | Lock-Datei `{run_id, pid, started_utc, job, out}` (Schema: `sb-runs-1.schema.json#/$defs/lock_file`); wird beim Ende des Laufs gelöscht |
+| `<data_dir>\runs\<run_id>.lock.json` | Lock-Datei `{run_id, job_name, pid, started_utc, job, out}` (Schema: `sb-runs-1.schema.json#/$defs/lock_file`); wird beim Ende des Laufs gelöscht |
 | `<data_dir>\runs\index.jsonl` | Eine Zeile pro beendetem Lauf `{run_id, started_utc, ended_utc, out, exit_code}`; Grundlage für `bundle --all` |
 | `<data_dir>\logs\<run_id>.log` | Menschenlesbares Log (entspricht der stderr-Ausgabe) |
 
@@ -86,7 +88,7 @@ sbench run --job <job.json> --out <result.json>
 | Option | Bedeutung |
 |---|---|
 | `--job <f>` | Job-Datei (`sb-job/1`). Wird vor dem Start vollständig validiert (wie `sbench validate`). |
-| `--out <f>` | Ergebnisdatei (`sb-result/1`). Wird zunächst als `<f>.tmp` geschrieben und am Ende atomar umbenannt. |
+| `--out <f>` | Ergebnisdatei (`sb-result/1`). Wird zunächst als `<f>.tmp` geschrieben und am Ende atomar umbenannt. Das Feld `run_id` im Ergebnis entspricht dem Log-Namen und dem Eintrag unter `runs\`. |
 | `--progress` | Ziel für Fortschritts-Events (`sb-progress/1`, JSON Lines). Ohne Angabe werden keine Events ausgegeben. |
 | `--tick-ms <ms>` | Intervall der `tick`-Events in Millisekunden. Standard **1000**, Minimum 100. |
 | `--allow-destructive` | Erlaubt Schreibtests (`read_pct` < 100) auf `volume`/`physical`-Targets, die zusätzlich `allow_destructive: true` tragen. Fehlt eines von beiden, endet `run` vor dem Start mit `E_DESTRUCTIVE_NOT_ALLOWED` und Exit-Code **2**. |
@@ -163,7 +165,8 @@ Lauf mit dieser ID existiert.
 ### `sbench list --running --json`
 
 Gibt die laufenden Läufe als `sb-runs/1` auf stdout aus:
-`{"schema": "sb-runs/1", "runs": [{run_id, pid, started_utc, out, progress_file}]}`.
+`{"schema": "sb-runs/1", "runs": [{run_id, job_name, pid, started_utc, out, progress_file}]}`.
+`job_name` ist `name` aus der Job-Datei, sonst deren Dateiname ohne Endung.
 Grundlage sind die Lock-Dateien in `<data_dir>\runs\`. Ein Eintrag gilt nur als
 laufend, wenn der Prozess `pid` existiert und seine Startzeit zu `started_utc` passt
 (Schutz gegen wiederverwendete PIDs). Verwaiste Lock-Dateien werden ignoriert und
@@ -237,7 +240,7 @@ enthält das Bundle je Lauf die Job-Kopie unter `jobs/<run_id>.json`. Optional
 |---|---|
 | `--out <zip>` | Zieldatei. |
 | `--all` | Alle beendeten Läufe aus `<data_dir>\runs\index.jsonl`: Ergebnisdateien (soweit noch vorhanden), Fortschrittsdateien und Logs. |
-| `--results <f> ...` | Nur diese Ergebnisdateien, jeweils mit zugehöriger Fortschrittsdatei und Log (Zuordnung über `run_id`). |
+| `--results <f> ...` | Nur diese Ergebnisdateien, jeweils mit zugehöriger Fortschrittsdatei und Log (Zuordnung über das Feld `run_id` im Ergebnis). |
 | `--include <ordner>` | Mehrfach angebbar. Nimmt einen fremden Ordner rekursiv unter `extra/<ordnername>/` auf, z. B. GUI-Logs und Profile. |
 | `--anonymize` | Ersetzt in **allen JSON- und Log-Dateien** des Bundles (auch unter `extra/`) Hostnamen, Benutzernamen in Pfaden, IPv4-/IPv6-Adressen, MAC-Adressen und Disk-Seriennummern durch Pseudonyme (`host-1`, `user-1`, `10.0.0.x`, `fd00::x`, `02:00:00:00:00:xx`, `serial-1` …). Die Zuordnung ist innerhalb eines Bundles konsistent (gleicher Wert → gleiches Pseudonym) und wird nicht mitgespeichert. Andere Dateitypen werden unverändert übernommen. |
 

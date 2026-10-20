@@ -5,9 +5,27 @@
 
 static char *lock_path(const char *run_id) { return sb_aprintf("%s\\runs\\%s.lock.json", sb_data_dir(), run_id); }
 
-int sb_runs_write_lock(const char *run_id, const char *started_utc, const char *job, const char *out) {
+char *sb_runs_job_name(const char *job_path) {
+    char *t = NULL;
+    size_t n = 0;
+    if (job_path && sb_read_file(job_path, &t, &n) == 0 && t) {
+        cJSON *j = cJSON_ParseWithLength(t, n);
+        const cJSON *nm = j ? cJSON_GetObjectItemCaseSensitive(j, "name") : NULL;
+        char *r = (cJSON_IsString(nm) && nm->valuestring[0]) ? sb_strdup(nm->valuestring) : NULL;
+        cJSON_Delete(j);
+        free(t);
+        if (r) return r;
+    }
+    char *b = sb_strdup(job_path ? sb_basename(job_path) : "job");
+    if (b) { char *d = strrchr(b, '.'); if (d && d != b) *d = 0; }
+    if (b && !b[0]) { free(b); b = sb_strdup("job"); }
+    return b;
+}
+
+int sb_runs_write_lock(const char *run_id, const char *job_name, const char *started_utc, const char *job, const char *out) {
     cJSON *o = cJSON_CreateObject();
     cJSON_AddStringToObject(o, "run_id", run_id);
+    cJSON_AddStringToObject(o, "job_name", job_name && *job_name ? job_name : "job");
     cJSON_AddNumberToObject(o, "pid", (double)GetCurrentProcessId());
     cJSON_AddStringToObject(o, "started_utc", started_utc);
     cJSON_AddStringToObject(o, "job", job);
@@ -151,6 +169,14 @@ cJSON *sb_runs_running(void) {
                 lock_is_alive(o)) {
                 cJSON *x = cJSON_CreateObject();
                 cJSON_AddStringToObject(x, "run_id", id->valuestring);
+                const cJSON *jn = cJSON_GetObjectItemCaseSensitive(o, "job_name");
+                if (cJSON_IsString(jn) && jn->valuestring[0]) cJSON_AddStringToObject(x, "job_name", jn->valuestring);
+                else {
+                    const cJSON *jp = cJSON_GetObjectItemCaseSensitive(o, "job");
+                    char *n2 = sb_runs_job_name(cJSON_IsString(jp) ? jp->valuestring : NULL);
+                    cJSON_AddStringToObject(x, "job_name", n2 ? n2 : "job");
+                    free(n2);
+                }
                 cJSON_AddNumberToObject(x, "pid", pid->valuedouble);
                 cJSON_AddStringToObject(x, "started_utc", st->valuestring);
                 cJSON_AddStringToObject(x, "out", out->valuestring);

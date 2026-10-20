@@ -455,7 +455,8 @@ int sb_run(const sb_run_options *o) {
         if (!runs_file || sb_progress_mirror(&pr, runs_file, merr, sizeof merr))
             sb_log_write(&log, "WARN", "%s", runs_file ? merr : "kein Speicher");
     }
-    int locked = sb_runs_write_lock(run_id, started, job_full ? job_full : o->job_path, out_path ? out_path : "") == 0;
+    char *job_name = sb_runs_job_name(o->job_path);
+    int locked = sb_runs_write_lock(run_id, job_name, started, job_full ? job_full : o->job_path, out_path ? out_path : "") == 0;
     if (!locked) sb_log_winerr(&log, GetLastError(), "Lock-Datei in %s\\runs nicht schreibbar", dd);
 
     sb_job job;
@@ -584,6 +585,7 @@ int sb_run(const sb_run_options *o) {
         cJSON *doc = cJSON_CreateObject();
         cJSON_AddStringToObject(doc, "schema", "sb-result/1");
         cJSON_AddStringToObject(doc, "kern_version", sb_version());
+        cJSON_AddStringToObject(doc, "run_id", run_id);
         cJSON_AddStringToObject(doc, "started_utc", started);
         cJSON_AddStringToObject(doc, "ended_utc", ended);
         cJSON_AddBoolToObject(doc, "aborted", aborted);
@@ -620,7 +622,7 @@ out:
     sb_job_free(&job);
     sb_progress_close(&pr);
     sb_log_close(&log);
-    free(log_path); free(out_path); free(job_full); free(runs_file);
+    free(log_path); free(out_path); free(job_full); free(runs_file); free(job_name);
     return rc;
 }
 

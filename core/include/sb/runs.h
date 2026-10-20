@@ -6,7 +6,9 @@
 #include "cJSON.h"
 
 /* Lock-Datei schreiben (atomar) / löschen */
-int  sb_runs_write_lock(const char *run_id, const char *started_utc, const char *job, const char *out);
+int  sb_runs_write_lock(const char *run_id, const char *job_name, const char *started_utc, const char *job, const char *out);
+/* job.name aus der Job-Datei, sonst Dateiname ohne Endung (malloc) */
+char *sb_runs_job_name(const char *job_path);
 void sb_runs_remove_lock(const char *run_id);
 /* 1 = Lock vorhanden und zugehöriger Prozess läuft noch */
 int  sb_runs_lock_alive(const char *run_id);

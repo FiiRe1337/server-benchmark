@@ -92,8 +92,8 @@ zerstören Daten und laufen nur, wenn das Target `allow_destructive: true` hat *
 - **CPU:** Modell aus CPUID (x64) bzw. Registry (ARM64), Sockel/Kerne/Threads aus
   `GetLogicalProcessorInformationEx`.
 - **RAM:** `GetPhysicallyInstalledSystemMemory`, frei aus `GlobalMemoryStatusEx`.
-- **NUMA:** `GetNumaNodeProcessorMaskEx` (CPU-Indizes über alle Prozessorgruppen
-  fortlaufend), freier Speicher je Knoten aus `GetNumaAvailableMemoryNodeEx`.
+- **NUMA:** `GetNumaNodeProcessorMaskEx`; `cpus` enthält globale Indizes
+  Prozessorgruppe × 64 + Bitnummer (bei nicht voll belegten Gruppen also mit Lücken), freier Speicher je Knoten aus `GetNumaAvailableMemoryNodeEx`.
   **Grenze:** Win32 liefert keinen Gesamt-RAM je Knoten. Bei einem Knoten ist
   `ram_bytes` der installierte RAM, bei mehreren Knoten der installierte RAM geteilt
   durch die Knotenzahl (Näherung, mindestens der freie Speicher des Knotens).
