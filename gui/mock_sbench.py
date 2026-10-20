@@ -13,7 +13,7 @@ CSV partial/stopped_in. Contract 1.2 (core M2, #13) / 1.1 (core M1 5670020) via 
   sbench validate --job <f>           -> sb-validate/1 (errors[] + warnings[]), exit 0/2
   sbench export <result.json> --csv <out.csv> [--style iometer|flat]
   sbench bundle --out <zip> [--results ...] [--all] [--include <dir>]... [--anonymize] [--progress ...]
-  sbench import-icf <file.icf> --out <job.json>   (M2; prints sb-validate/1 with W_ICF_UNSUPPORTED warnings)
+  sbench import-icf <file.icf> --out <job.json>   (M2; prints sb-validate/1 with W_ICF_* warnings, see import_icf)
   sbench version [--json]             -> --json: {version, commit, arch, sha256, formats} (PR #10)
 Global option (every command, before or after the command name): --data-dir <path> (uncreatable -> exit 2, E_ARGS).
 
@@ -26,6 +26,9 @@ SBENCH_MOCK_ELEVATED=1 (pretend to be elevated), SBENCH_MOCK_CONTRACT=1.3|1.2|1.
 implemented, net_*/hyperv_info E_NOT_IMPLEMENTED, no 1.3 fields, 18 CSV columns; 1.1 = core M1: every non-storage test
 E_NOT_IMPLEMENTED + skipped, no ram_method, 14 CSV columns), SBENCH_MOCK_LAG=1 (1.3: storage worker 0 misses the tick
 ack now and then -> 0 in that tick, recounted next), SBENCH_MOCK_STOP_AT=<test>:<phase>[:<n>] (deterministic stop),
+SBENCH_MOCK_FAIL_AT=<test>:<E_CODE>[:<ticks>[:<entries>]] (runtime error after <ticks> measure ticks, 0 = in preparing;
+the test becomes partial, errors[] gets <entries> entries, later tests are absent, exit 1), SBENCH_MOCK_CONTRACT=1.3.1
+(cpus[] per test + errors[].fatal; not schema-valid yet), run --keep-files (storage targets[] deleted=false),
 SBENCH_MOCK_ALL_TYPES=1 (additionally simulate net_*/hyperv_info), SBENCH_DATA_DIR,
 SBENCH_SCHEMA_DIR.
 Stop: real core uses the named event Global\sbench-stop-<id> (fallback Local\); the mock uses a marker file.
@@ -62,10 +65,13 @@ SCHEMA_DIR = sb_contract.base_dir()
 ELEVATED = os.environ.get("SBENCH_MOCK_ELEVATED") == "1"
 ALL_TYPES = os.environ.get("SBENCH_MOCK_ALL_TYPES") == "1"  # simulate cpu/memory/net/hyperv_info regardless of contract
 CONTRACT = os.environ.get("SBENCH_MOCK_CONTRACT", "1.3")
-if CONTRACT not in ("1.1", "1.2", "1.3"):
-    raise SystemExit(f"SBENCH_MOCK_CONTRACT={CONTRACT!r}: 1.1, 1.2 oder 1.3")
-M2 = CONTRACT in ("1.2", "1.3")
-V13 = CONTRACT == "1.3"
+if CONTRACT not in ("1.1", "1.2", "1.3", "1.3.1"):
+    raise SystemExit(f"SBENCH_MOCK_CONTRACT={CONTRACT!r}: 1.1, 1.2, 1.3 oder 1.3.1")
+M2 = CONTRACT in ("1.2", "1.3", "1.3.1")
+V13 = CONTRACT in ("1.3", "1.3.1")
+# 1.3.1 (announced by Devend, not on main yet -> output does NOT validate against the 1.3 schema): cpus[] per cpu/memory
+# test in the result (same objects as phase.cpus) and errors[].fatal
+V131 = CONTRACT == "1.3.1"
 LAG = os.environ.get("SBENCH_MOCK_LAG") == "1"
 IMPLEMENTED = {"storage"} | ({"cpu", "memory"} if M2 else set()) | ({"cpu", "memory", "net_client", "net_server", "hyperv_info"} if ALL_TYPES else set())
 EXIT_OK, EXIT_ERR, EXIT_INVALID, EXIT_ABORTED, EXIT_PRIV = 0, 1, 2, 3, 4
@@ -403,8 +409,51 @@ def _stop_hook(obj):
             _stop = True
 
 
+_FAIL_AT = os.environ.get("SBENCH_MOCK_FAIL_AT", "")  # "<test>:<E_CODE>[:<ticks>[:<entries>]]" -> runtime error
+_fail = {}                                              # set when the error fires: {"test", "code", "entries", "phase"}
+_fail_cnt = [0]
+
+
+def _fail_hook(obj):
+    """Runtime error like the core: the running test ends (partial, stopped_in = current phase), errors[] filled, no
+    further tests, exit 1. ticks 0: fails at the first preparing progress (e.g. E_OUT_OF_MEMORY when allocating)."""
+    global _stop
+    if not _FAIL_AT or _fail or _stop:
+        return
+    parts = _FAIL_AT.split(":"); ti, code = int(parts[0]), parts[1]
+    n = int(parts[2]) if len(parts) > 2 else 3; k = int(parts[3]) if len(parts) > 3 else 1
+    if obj.get("test") != ti:
+        return
+    hit = (n == 0 and obj.get("ev") == "progress" and obj.get("phase") == "preparing")
+    if obj.get("ev") == "tick" and n > 0:
+        _fail_cnt[0] += 1; hit = _fail_cnt[0] >= n
+    if hit:
+        _fail.update(test=ti, code=code, entries=k, t=obj.get("t"), phase="measure" if obj.get("ev") == "tick" else "preparing")
+        _stop = True
+
+
+ERR_MSG = {"E_ACCESS_DENIED": "Zugriff verweigert (Windows-Fehler 5)", "E_OUT_OF_MEMORY": "VirtualAllocExNuma: nicht genug Arbeitsspeicher",
+           "E_IO": "ReadFile: Der Datenträger meldet einen E/A-Fehler (Windows-Fehler 1117)"}
+
+
+def _fail_errors():
+    """errors[] for the failed test: the fatal entry first, then (entries > 1) aggregated follow-up errors."""
+    code = _fail["code"]
+    e0 = {"code": code, "msg": ERR_MSG.get(code, f"Mock-Laufzeitfehler {code}")}
+    if isinstance(_fail.get("t"), (int, float)):
+        e0["t"] = _fail["t"]
+    out = [e0]
+    for j in range(1, _fail["entries"]):
+        out.append({"code": "E_IO" if j % 2 else "E_TIMEOUT", "msg": f"Folgefehler {j}: I/O von Worker {j} nicht abgeschlossen",
+                    "worker": j, "count": 1 + j})
+    if V131:
+        for j, e in enumerate(out):
+            e["fatal"] = True
+    return out
+
+
 def emit(obj):
-    _stop_hook(obj)
+    _stop_hook(obj); _fail_hook(obj)
     line = json.dumps(obj, separators=(",", ":"), ensure_ascii=False)
     if _LOG:
         _LOG.write(f"{dt.datetime.now().isoformat(timespec='milliseconds')} {line}\n"); _LOG.flush()
@@ -594,6 +643,20 @@ def run_storage(ti, t, tick, rng, rid):
         summ["proc_cpu_pct"] = round(sum(s * tk["proc_cpu_pct"] for s, tk in ticks) / secs, 1)
     return _mark({"index": ti, "type": "storage", "config": t, "summary": summ,
                   "per_worker": per_worker, "per_spec": per_spec, "histogram": lognorm_hist(mean, n), "timeseries": ts, "errors": []}, stopped)
+
+
+KEEP_FILES = [False]        # run --keep-files
+EXISTING = set(filter(None, os.environ.get("SBENCH_MOCK_EXISTING", "").split(";")))   # paths that "existed before" (not created)
+
+
+def _targets_state(t):
+    """1.3: targets[] per storage test: created = sbench created the file (kind file, did not exist), deleted = removed
+    after the test (not with --keep-files; volume/physical never created)."""
+    out = []
+    for k, tg in enumerate(t["targets"]):
+        created = tg["kind"] == "file" and tg["path"] not in EXISTING
+        out.append({"index": k, "path": tg["path"], "kind": tg["kind"], "created": created, "deleted": created and not KEEP_FILES[0]})
+    return out
 
 
 CPU_REF = {"int": 2.8e8, "float": 1.5e8, "crypto": 3.4e6, "mixed": 3.8e5}   # docs/core.md, ops/s of 1 reference thread
@@ -819,6 +882,7 @@ def run_simple(ti, t, tick, rng, rid, meta):
 def run(a):
     global _OUT, _LOG, _RUNF, _stop
     signal.signal(signal.SIGTERM, _sig); signal.signal(signal.SIGINT, _sig)
+    KEEP_FILES[0] = bool(getattr(a, "keep_files", False))
     if a.tick_ms < 100:
         log("--tick-ms: Minimum 100"); return EXIT_INVALID
     rid = a.id or dt.datetime.now().strftime("%Y%m%d-%H%M%S-") + f"{random.randrange(16**4):04x}"
@@ -894,18 +958,31 @@ def run(a):
                 r = run_compute(ti, t, tick, rng, rid, meta)
             else:
                 r = run_simple(ti, t, tick, rng, rid, meta)
+            if r and V13 and t["type"] == "storage":
+                r["targets"] = _targets_state(t)
+            if r and V131 and r["type"] in ("cpu", "memory"):
+                cp = (r.get("summary") or {}).get("cpus") or []
+                r["cpus"] = [cpu_entry(meta, i, c) for i, c in enumerate(cp)]
+            if r and _fail and _fail["test"] == ti:
+                r["errors"] = _fail_errors()
+                if r["type"] == "storage" and (r.get("summary") or {}).get("errors") is not None:
+                    r["summary"]["errors"] = sum(e.get("count", 1) for e in r["errors"])
+                if V13:
+                    r["partial"] = True; r["stopped_in"] = r.get("stopped_in") or _fail["phase"]
+                emit({"ev": "error", "code": _fail["code"], "msg": r["errors"][0]["msg"], "test": ti})
             if r:
                 results.append(r)
             if _stop:
                 break
+        user_stop = _stop and not _fail          # runtime error: run ends, but not 'aborted' (that is sbench stop / Ctrl+C)
         res = {"schema": "sb-result/1", "kern_version": VERSION, "run_id": rid, "started_utc": started, "ended_utc": utc_now(),
-               "aborted": _stop, **({"tick_ms": a.tick_ms} if V13 else {}), "meta": meta, "tests": results}
+               "aborted": user_stop, **({"tick_ms": a.tick_ms} if V13 else {}), "meta": meta, "tests": results}
         tmp = a.out + ".tmp"  # write <out>.tmp, then atomic rename
         with open(tmp, "w", encoding="utf-8", newline="\n") as f:
             json.dump(res, f, indent=1, ensure_ascii=False)
         os.replace(tmp, a.out)
-        emit({"ev": "done", "result": os.path.abspath(a.out), "aborted": _stop})
-        rc = EXIT_ABORTED if _stop else EXIT_OK
+        emit({"ev": "done", "result": os.path.abspath(a.out), "aborted": user_stop})
+        rc = EXIT_ERR if _fail else (EXIT_ABORTED if _stop else EXIT_OK)
         return rc
     finally:
         with open(os.path.join(DATA, "runs", "index.jsonl"), "a", encoding="utf-8", newline="\n") as f:
@@ -1113,42 +1190,78 @@ ICF_SPEC = re.compile(r"^\s*(\d+),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+)\s*$"
 
 
 def import_icf(a):
-    """PROVISIONAL (M2): Iometer .icf -> sb-job/1. Maps 'ACCESS SPECIFICATIONS' (size,% of size,% reads,% random,
-    delay,burst,align,reply) and worker/disk sections roughly; prints {"schema":"sb-validate/1",...} with warnings."""
+    """PROVISIONAL (M2, core #15 has the real one): Iometer .icf -> sb-job/1. Maps 'ACCESS SPECIFICATIONS'
+    (size,% of size,% reads,% random,delay,burst,align,reply), Test Description, Run Time, Ramp Up Time and the manager
+    list; prints sb-validate/1 with the W_ICF_* warnings of docs/cli.md that this subset can detect (RUN_TIME, ALIGN, REPLY,
+    SECTOR, ZERO_WEIGHT, NO_TARGET, NO_WORKERS, MANAGERS, UNSUPPORTED). Targets/workers/QD are not read (placeholder)."""
     try:
         txt = open(a.icf, encoding="latin-1").read().splitlines()
     except OSError as e:
         log(f"sbench: {a.icf} nicht lesbar: {e}"); return EXIT_ERR
     warns, groups, cur = [], [], None
-    for ln in txt:
-        if ln.strip().startswith("'Access specification name"):
+    desc, run_s, ramp, managers, section, nxt = None, None, None, [], "", None
+    for no, ln in enumerate(txt, 1):
+        st = ln.strip()
+        if st.startswith("'") and "=====" in st:
+            section = st.strip("'= ").split(" ")[0].upper(); cur = None if section != "ACCESS" else cur; continue
+        if st in ("'Test Description", "'Run Time", "'Ramp Up Time (s)", "'Manager ID, manager name"):
+            nxt = st; continue
+        if st.startswith("'Access specification name"):
+            nxt = "spec"; continue
+        if st.startswith("'") or not st:
             continue
-        if cur is not None and ICF_SPEC.match(ln):
-            cur["lines"].append([int(x) for x in ICF_SPEC.match(ln).groups()]); continue
-        if ln.strip().startswith("'") or not ln.strip():
-            continue
-        if re.match(r"^\s*\S.*,(ALL|NONE|\d+)\s*$", ln) and "=" not in ln:
-            cur = {"name": ln.split(",")[0].strip(), "lines": []}; groups.append(cur)
+        if nxt == "'Test Description":
+            desc = st; nxt = None; continue
+        if nxt == "'Run Time" and re.fullmatch(r"\d+\s+\d+\s+\d+", st):
+            h, m, sec = map(int, st.split()); run_s = (h * 3600 + m * 60 + sec, no); nxt = None; continue
+        if nxt == "'Ramp Up Time (s)" and st.isdigit():
+            ramp = int(st); nxt = None; continue
+        if nxt == "'Manager ID, manager name":
+            if re.match(r"^\d+,", st):
+                managers.append((st, no)); continue
+            nxt = None
+        if section == "ACCESS" and cur is not None and ICF_SPEC.match(ln):
+            cur["lines"].append(([int(x) for x in ICF_SPEC.match(ln).groups()], no)); continue
+        if section == "ACCESS" and nxt == "spec" and re.match(r"^\s*\S.*,(ALL|NONE|\d+)\s*$", ln):
+            cur = {"name": ln.split(",")[0].strip(), "lines": []}; groups.append(cur); nxt = None
     groups = [g for g in groups if g["lines"]]
     if not groups:
         print(json.dumps({"schema": "sb-validate/1", "ok": False, "errors": [{"path": "", "code": "E_ICF_PARSE", "msg": "Keine Access Specification gefunden."}], "warnings": []}, ensure_ascii=False))
         return EXIT_INVALID
+    dur = 60
+    if run_s is None or run_s[0] == 0:
+        warns.append({"path": "", "code": "W_ICF_RUN_TIME", "msg": f"Run Time {'0 (unbegrenzt)' if run_s else 'fehlt'}"
+                      + (f" (Zeile {run_s[1]})" if run_s else "") + " → duration_s = 60."})
+    else:
+        dur = run_s[0]
+    if not managers:
+        warns.append({"path": "", "code": "W_ICF_NO_WORKERS", "msg": "Keine Manager-Liste → 1 Worker je Target, queue_depth 1."})
+    elif len(managers) > 1:
+        warns.append({"path": "", "code": "W_ICF_MANAGERS", "msg": f"{len(managers)} Manager (Zeilen {', '.join(str(n) for _, n in managers)}) → nur der erste wird übernommen."})
     tests = []
     for gi, g in enumerate(groups):
         specs = []
-        for j, (size, pct, rd, rnd, delay, burst, align, reply) in enumerate(g["lines"]):
+        for (size, pct, rd, rnd, delay, burst, align, reply), no in g["lines"]:
+            j = len(specs)
+            if pct == 0:
+                warns.append({"path": f"/tests/{gi}/access_specs", "code": "W_ICF_ZERO_WEIGHT", "msg": f"Zeile {no}: 0 % of size → weggelassen."}); continue
             sp = {"weight": pct, "block_size": f"{size // 1024}KiB" if size % 1024 == 0 else size, "read_pct": rd, "random_pct": rnd}
+            if size % 512 or (align and align % 512):
+                warns.append({"path": f"/tests/{gi}/access_specs/{j}", "code": "W_ICF_SECTOR", "msg": f"Zeile {no}: size {size}/align {align} kein Vielfaches von 512."})
             if align:
                 sp["align"] = f"{align // 1024}KiB" if align % 1024 == 0 else align
+            else:
+                warns.append({"path": f"/tests/{gi}/access_specs/{j}", "code": "W_ICF_ALIGN", "msg": f"Zeile {no}: align 0 (Sektorgrenzen) → ohne align, Ausrichtung an block_size."})
             if delay:
                 sp["delay_ms"] = delay; sp["burst_len"] = max(1, burst)
             if reply:
-                warns.append({"path": f"/tests/{gi}/access_specs/{j}", "code": "W_ICF_UNSUPPORTED", "msg": f"Reply size {reply} hat keine Entsprechung und wird ignoriert."})
+                warns.append({"path": f"/tests/{gi}/access_specs/{j}", "code": "W_ICF_REPLY", "msg": f"Zeile {no}: reply {reply} (nur Netzwerk) wird ignoriert."})
             specs.append(sp)
         tests.append({"type": "storage", "name": g["name"][:80], "targets": [{"path": "D:\\sbtest.dat", "kind": "file", "file_size": "8GiB"}],
-                      "workers": 1, "queue_depth": 1, "duration_s": 60, "access_specs": specs})
-        warns.append({"path": f"/tests/{gi}/targets", "code": "W_ICF_UNSUPPORTED", "msg": "Mock: Targets/Worker/Queue Depth aus dem ICF werden nicht gelesen (Kern M2); Platzhalter D:\\sbtest.dat, bitte prüfen."})
-    job = {"schema": "sb-job/1", "name": os.path.splitext(os.path.basename(a.icf))[0], "tests": tests}
+                      "workers": 1, "queue_depth": 1, "duration_s": dur, **({"warmup_s": ramp} if ramp else {}), "access_specs": specs})
+    warns.append({"path": "/tests/0/targets", "code": "W_ICF_NO_TARGET", "msg": "Kein Disk-Worker mit Target (Mock liest Targets nicht) → Platzhalter D:\\sbtest.dat (8 GiB)."})
+    warns.append({"path": "", "code": "W_ICF_UNSUPPORTED", "msg": "Mock: Worker/Queue Depth aus dem ICF werden nicht gelesen (Kern #15 kann das), bitte prüfen."})
+    job = {"schema": "sb-job/1", "name": (desc or os.path.splitext(os.path.basename(a.icf))[0])[:80], "tests": tests}
     errs, _ = validate(job)
     if not errs:
         with open(a.out, "w", encoding="utf-8") as f:
@@ -1192,6 +1305,7 @@ def main():
     r = sub.add_parser("run"); r.add_argument("--job", required=True); r.add_argument("--out", required=True)
     r.add_argument("--progress"); r.add_argument("--tick-ms", type=int, default=1000); r.add_argument("--id")
     r.add_argument("--allow-destructive", action="store_true")
+    r.add_argument("--keep-files", action="store_true")
     ls_ = sub.add_parser("list"); ls_.add_argument("--running", action="store_true", required=True); ls_.add_argument("--json", action="store_true", required=True)
     ic = sub.add_parser("import-icf"); ic.add_argument("icf"); ic.add_argument("--out", required=True)
     sub.add_parser("stop").add_argument("--id", required=True)

@@ -3,7 +3,8 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QWidget, QFrame, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit, QCheckBox, QRadioButton
 from .widgets import label, chip, short_target
-from .model import spec_label
+from .model import spec_label, WARN_TXT
+from html import escape as _esc
 from . import theme as T
 
 
@@ -158,8 +159,13 @@ class IcfImportResult(Overlay):
             self.add(label(" · ".join(f"{t.get('name', t['type'])} ({len(t.get('access_specs', []))} Specs)" for t in job["tests"]), "muted", wrap=True))
         for w in (res or {}).get("warnings", []) + (res or {}).get("errors", []):
             r = QHBoxLayout(); r.setSpacing(8)
-            r.addWidget(chip(w["code"], "chipErr" if w["code"].startswith("E_") else "chipWarn"), 0, Qt.AlignTop)
-            r.addWidget(label(f"{w['path'] or '/'} · {w['msg']}", "muted", wrap=True), 1); self.add(r)
+            c = chip(w["code"], "chipErr" if w["code"].startswith("E_") else "chipWarn"); c.setMinimumWidth(176)   # aligned text column
+            c.setAlignment(Qt.AlignCenter); r.addWidget(c, 0, Qt.AlignTop)
+            # W_ICF_* (#15): German short text from model.WARN_TXT, then the core's msg (ICF line numbers) and the JSON pointer
+            t = WARN_TXT.get(w["code"])
+            lb = label((f"<b>{_esc(t)}</b> · " if t else "") + f"{_esc(w['msg'])} <span style='color:{T.DIM}'>({_esc(w['path'] or '/')})</span>",
+                       "muted", wrap=True)
+            lb.setToolTip(w["code"]); r.addWidget(lb, 1); self.add(r)
         self.button("Verwerfen")
         b = self.button("Als Profil übernehmen", "primary", lambda: self.close_accept(job)); b.setEnabled(bool(ok))
 

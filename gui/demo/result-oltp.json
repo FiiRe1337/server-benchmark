@@ -2,8 +2,8 @@
  "schema": "sb-result/1",
  "kern_version": "0.1.0-mock",
  "run_id": "20261020-091500-demo",
- "started_utc": "2026-10-20T16:44:48.512Z",
- "ended_utc": "2026-10-20T16:44:48.754Z",
+ "started_utc": "2026-10-20T17:06:36.218Z",
+ "ended_utc": "2026-10-20T17:06:36.461Z",
  "aborted": false,
  "tick_ms": 250,
  "meta": {
@@ -4914,7 +4914,30 @@
      "proc_cpu_pct": 12.7
     }
    ],
-   "errors": []
+   "errors": [],
+   "targets": [
+    {
+     "index": 0,
+     "path": "D:\\sbench\\testfile.dat",
+     "kind": "file",
+     "created": true,
+     "deleted": true
+    },
+    {
+     "index": 1,
+     "path": "E:\\sbench\\testfile.dat",
+     "kind": "file",
+     "created": true,
+     "deleted": true
+    },
+    {
+     "index": 2,
+     "path": "\\\\.\\PhysicalDrive2",
+     "kind": "physical",
+     "created": false,
+     "deleted": false
+    }
+   ]
   }
  ]
 }

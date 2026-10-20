@@ -479,9 +479,188 @@ def test_live_storage_worker_lag(qapp):
                     "workers": [w(0, 0), w(1, 1000)]})
     live.refresh(); live.timer.stop()
     assert live.lagging == {0} and "↻" in live.wtable.item(0, 0).text() and "250 ms" in live.wtable.item(0, 0).toolTip()
-    assert live.wtable.item(0, 2).text() == "500" and live.wtable.item(0, 4).text() == "100"   # smoothed, last latency kept
+    assert live.wtable.item(0, 2).text() == "500"                                                # smoothed IOPS
+    assert live.wtable.item(0, 4).text() == "–" and live.wtable.item(0, 5).text() == "–"       # no lat_us in this interval: "–", not the last value
     src.event.emit({"ev": "tick", "test": 0, "t": 3.0, "metric": "iops", "iops": 3000, "mbps": 12, "lat_us": lat, "cpu_pct": 5,
                     "workers": [w(0, 2000), w(1, 1000)]})
     live.refresh()
     assert live.lagging == set() and "↻" not in live.wtable.item(0, 0).text()
     live.close()
+
+
+# ------------------------------------------------------------------ Devend's answers (1.3 follow-up, 1.3.1 preview)
+def test_future_metrics_known():
+    assert model.tick_metric({"metric": "mbps", "mbps": 900.0}) == "mbps"            # M3 network
+    assert model.tick_metric({"metric": "latency_us", "latency_us": 48.0}) == "latency_us"   # M3 ping
+    assert model.tick_metric({"metric": "jitter_ms", "jitter_ms": 0.1}) == "jitter_ms"     # unknown but present field
+    assert model.METRIC_TXT["latency_us"][1] == "µs" and model.fmt_metric("latency_us", 48.25) == "48,25"
+
+
+def test_live_future_metric_no_crash(qapp):
+    from sbgui.pages.live import LiveView
+    from PySide6.QtCore import QObject, Signal
+
+    class Src(QObject):
+        event = Signal(dict); finished = Signal(int, str)
+    live = LiveView(); live.show(); src = Src()
+    live.attach(src, {"schema": "sb-job/1", "name": "n", "tests": [{"type": "net_client", "server": "h", "duration_s": 3}]}, tick_ms=1000)
+    src.event.emit({"ev": "phase", "test": 0, "name": "measure", "duration_s": 3})
+    src.event.emit({"ev": "tick", "test": 0, "t": 2.0, "metric": "mbps", "mbps": 940.0, "cpu_pct": 3})
+    src.event.emit({"ev": "tick", "test": 0, "t": 2.0, "metric": "latency_us", "latency_us": 48.0, "cpu_pct": 3})
+    live.refresh(); live.timer.stop()
+    assert live.mode in (None, "storage") and live.buf.n == 0 and "mbps=940.0" in live.log.toPlainText()   # log only
+    live.close()
+
+
+def test_worker_score_exact():
+    meta = {"cpu_score": {"points": 1000, "ref_ops_per_s": {"int": 2.8e8, "mixed": 3.8e5}}}
+    assert model.worker_score(2.8e8, "int", meta) == pytest.approx(1000.0)
+    assert model.worker_score(1.9e5, "mixed", meta) == pytest.approx(500.0)
+    assert model.worker_score(1.9e5, "mixed", None, {"score_reference": 3.8e5}) == pytest.approx(500.0)
+    assert model.worker_score(2.8e8, "int") is None                                  # no core reference: no per-thread estimate
+
+
+def test_live_per_thread_score(qapp):
+    from sbgui.pages.live import LiveView
+    info = json.load(open(demo("info.json"), encoding="utf-8"))
+    live = LiveView(); live.resize(1300, 700); live.show(); live.cpu_score = info["meta"]["cpu_score"]
+    _replay(live, lambda e: e.get("ev") == "tick" and e["test"] == 0 and e["t"] >= 4)
+    assert live.ttable.horizontalHeaderItem(3).text() == "Score"
+    ops = live.last_workers[0]["ops_per_s"]; ref = info["meta"]["cpu_score"]["ref_ops_per_s"]["mixed"]
+    assert live.ttable.item(0, 3).text() == model.fmt_metric("score", ops / ref * 1000)
+    _replay(live, lambda e: e.get("ev") == "tick" and e["test"] == 2 and e["t"] >= 3)      # memory: share again
+    assert live.ttable.horizontalHeaderItem(3).text() == "Anteil" and live.ttable.item(0, 3).text().endswith("%")
+    live.cpu_score = None
+    _replay(live, lambda e: e.get("ev") == "tick" and e["test"] == 0 and e["t"] >= 4)      # no core reference: no score column
+    assert live.ttable.horizontalHeaderItem(3).text() == "Anteil"
+    live.close()
+
+
+def test_live_latency_gap_nan(qapp):
+    """Tick without lat_us (interval without completed I/O): NaN in the buffer, the line breaks (connect finite), no 0."""
+    from sbgui.pages.live import LiveView, COL
+    from PySide6.QtCore import QObject, Signal
+    import numpy as np
+
+    class Src(QObject):
+        event = Signal(dict); finished = Signal(int, str)
+    live = LiveView(); live.resize(1300, 700); live.show(); src = Src()
+    live.attach(src, {"schema": "sb-job/1", "name": "s", "tests": [{"type": "storage", "targets": [{"kind": "file", "path": "D:\\t.dat"}],
+                                                                     "access_specs": [], "workers": 1, "duration_s": 4}]}, tick_ms=1000)
+    src.event.emit({"ev": "phase", "test": 0, "name": "measure", "duration_s": 4})
+    lat = {"mean": 100, "p50": 90, "p99": 300, "max": 900}
+    for t, l in ((1.0, lat), (2.0, None), (3.0, lat)):
+        ev = {"ev": "tick", "test": 0, "t": t, "metric": "iops", "iops": 1000 if l else 0, "mbps": 4 if l else 0, "cpu_pct": 5,
+              "workers": [{"id": 0, "iops": 1000 if l else 0, "mbps": 4 if l else 0, **({"lat_us": {"mean": 100, "p99": 300}} if l else {})}]}
+        if l:
+            ev["lat_us"] = l
+        src.event.emit(ev)
+    live.refresh(); live.timer.stop()
+    a = live.buf.array()
+    assert np.isnan(a[1, COL["lat_mean"]]) and a[0, COL["lat_mean"]] == 100
+    _, y = live.cur_mean.getData()
+    assert np.isnan(y[1]) and live.cur_mean.opts["connect"] == "finite"
+    assert live.k_lat.value.text() == "100"
+    live.close()
+
+
+def test_results_runtime_error_and_targets(qapp):
+    from sbgui.pages.results import ResultsPage
+    f = demo("result-storage-error.json")
+    rp = ResultsPage([f, demo("result-quad-host.json")]); rp.resize(1300, 700); rp.show()
+    assert rp.select_file(f)
+    assert rp.state.text().startswith("Laufzeitfehler") and rp.err_box.isVisible()
+    head = rp.err_box.findChildren(type(rp.partial_note), "errHead")[0]
+    assert "E_IO: ReadFile" in head.text() and "t = 3 s" in head.text()
+    btn, rest = rp.err_more[0]
+    assert "2 weitere Fehler" in btn.text() and not rest.isVisible()
+    btn.setChecked(True); assert rest.isVisible() and "E_TIMEOUT" in rest.text() and btn.text().startswith("▾")
+    assert rp.tgt_warn.isVisible() and "D:\\sbench\\testfile.dat" in rp.tgt_warn.text() and "keep-files" in rp.tgt_warn.text()
+    assert "angelegt · nicht gelöscht" in rp.tgt_info.text()
+    rp.select_file(demo("result-quad-host.json"))
+    assert not rp.err_box.isVisible() and not rp.tgt_warn.isVisible()
+    assert "angelegt · gelöscht" in rp.tgt_info.text()
+    rp.close()
+
+
+def test_error_texts_and_fatal():
+    assert model.error_text({"code": "E_ACCESS_DENIED", "msg": "x"}) == "Adminrechte nötig (E_ACCESS_DENIED)"
+    assert model.error_text({"code": "E_OUT_OF_MEMORY", "msg": "x"}).startswith("Nicht genug Arbeitsspeicher")
+    assert model.error_text({"code": "E_NET_CONNECT", "msg": "Host nicht erreichbar", "worker": 2, "count": 4}) == \
+        "E_NET_CONNECT: Host nicht erreichbar · Worker 2 · 4×"
+    t = {"errors": [{"code": "E_IO", "msg": "a", "fatal": False}, {"code": "E_TIMEOUT", "msg": "b", "fatal": True}]}
+    assert [e["code"] for e in model.fatal_errors(t)] == ["E_TIMEOUT"]                # 1.3.1: fatal flag filters
+    assert len(model.fatal_errors({"errors": [{"code": "E_IO", "msg": "a"}, {"code": "E_IO", "msg": "b"}]})) == 2   # 1.3: all
+
+
+def test_mock_runtime_error_oom(mock_env):
+    jp = write_job(mock_env, [{"type": "cpu", "threads": 2, "workload": "int", "warmup_s": 0, "duration_s": 1},
+                              {"type": "memory", "mode": "bandwidth", "op": "read", "threads": 4, "buffer_size": "256MiB", "warmup_s": 0, "duration_s": 2},
+                              {"type": "cpu", "threads": 1, "workload": "float", "warmup_s": 0, "duration_s": 1}])
+    out = mock_env / "r.json"
+    p = mock("run", "--job", jp, "--out", str(out), env={"SBENCH_MOCK_FAIL_AT": "1:E_OUT_OF_MEMORY:0"})
+    assert p.returncode == 1, p.stderr
+    res = json.loads(out.read_text(encoding="utf-8"))
+    assert not _doc_errs(res), _doc_errs(res)
+    assert res["aborted"] is False and [t["type"] for t in res["tests"]] == ["cpu", "memory"]
+    m = res["tests"][1]
+    assert m["partial"] and m["stopped_in"] == "preparing" and m["summary"]["gbps"] is None
+    assert [e["code"] for e in model.fatal_errors(m)] == ["E_OUT_OF_MEMORY"]
+
+
+def test_mock_keep_files_and_131(mock_env):
+    st = [{"type": "storage", "targets": [{"kind": "file", "path": str(mock_env / "t.dat"), "file_size": "64MiB"}],
+           "access_specs": [{"block_size": "4KiB", "read_pct": 100, "random_pct": 100, "weight": 100}], "workers": 2, "warmup_s": 0, "duration_s": 1},
+          {"type": "cpu", "threads": 4, "workload": "int", "warmup_s": 0, "duration_s": 1}]
+    jp = write_job(mock_env, st)
+    for keep, contract in ((True, "1.3"), (False, "1.3.1")):
+        out = mock_env / f"r{keep}.json"
+        p = mock("run", "--job", jp, "--out", str(out), *(["--keep-files"] if keep else []), env={"SBENCH_MOCK_CONTRACT": contract})
+        assert p.returncode == 0, p.stderr
+        res = json.loads(out.read_text(encoding="utf-8"))
+        tg = res["tests"][0]["targets"][0]
+        assert tg["created"] is True and tg["deleted"] is (not keep)
+        assert bool(model.leftover_targets(res["tests"][0])) is keep
+        cpus = model.test_cpus(res["tests"][1])
+        if contract == "1.3":
+            assert not _doc_errs(res) and cpus == {}
+        else:                                          # 1.3.1 preview: cpus[] per test, mapped by worker id
+            assert sorted(cpus) == [0, 1, 2, 3] and cpus[1]["cpu"] == res["tests"][1]["per_worker"][1]["cpu"]
+
+
+def test_results_smt_from_test_cpus(qapp):
+    from sbgui.pages.results import ResultsPage
+    f131 = os.path.join(GUI, "demo", "contract-1.3.1", "result-m2-smt.json")
+    rp = ResultsPage([demo("result-m2-host.json")]); rp.resize(1300, 700); rp.show()
+    rp.select_file(demo("result-m2-host.json"))
+    assert rp.thr_smt == set() and "SMT nur live" in rp.th_info.text()               # 1.3: no cpus[] per test
+    assert rp.thr_scores and "Score je Thread" in rp.th_info.text()                     # per-thread score from meta.cpu_score
+    r = rp.current(); t0 = r["tests"][0]; w0 = t0["per_worker"][0]
+    assert rp.thr_scores[w0["id"]] == pytest.approx(w0["ops_per_s"] / t0["summary"]["score_reference"] * 1000)
+    assert rp.add_result(f131) and rp.select_file(f131)
+    assert len(rp.thr_smt) == 64 and "64 SMT-Geschwister" in rp.th_info.text()
+    rp.close()
+
+
+def test_icf_warnings_german(qapp, mock_env):
+    from sbgui import sbench
+    from sbgui.overlay import IcfImportResult
+    from PySide6.QtWidgets import QWidget, QLabel
+    code, res = sbench.import_icf(os.path.join(GUI, "demo", "iometer-example.icf"), str(mock_env / "icf.json"))
+    assert code == 0 and res["ok"]
+    codes = {w["code"] for w in res["warnings"]}
+    assert {"W_ICF_ALIGN", "W_ICF_REPLY", "W_ICF_NO_TARGET"} <= codes and codes <= set(model.WARN_TXT)
+    assert len([c for c in model.WARN_TXT if c.startswith("W_ICF_")]) >= 17
+    host = QWidget(); host.resize(1200, 800)
+    dlg = IcfImportResult(host, "iometer-example.icf", res, json.load(open(mock_env / "icf.json", encoding="utf-8")))
+    txt = " ".join(lb.text() for lb in dlg.findChildren(QLabel))
+    assert model.WARN_TXT["W_ICF_REPLY"] in txt and "Zeile 16" in txt
+    assert model.warning_text({"code": "W_ICF_ZERO_WEIGHT", "msg": "Zeile 3"}) == "Zeile mit 0 % weggelassen – Zeile 3"
+    assert model.warning_text({"code": "W_NEW", "msg": "neu"}) == "neu"
+
+
+def test_check_mock_storage_histogram_required():
+    r = json.load(open(os.path.join(EX, "result-storage.json"), encoding="utf-8"))
+    assert not _doc_errs(r)
+    del r["tests"][0]["histogram"]
+    assert any("histogram" in e for e in _doc_errs(r))

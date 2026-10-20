@@ -79,7 +79,7 @@ def list_running():
 
 
 def import_icf(icf_path, out_path):
-    """M2: `sbench import-icf <f> --out <job>` -> (exit code, sb-validate/1 with W_ICF_UNSUPPORTED warnings or None)."""
+    """M2: `sbench import-icf <f> --out <job>` -> (exit code, sb-validate/1 with W_ICF_* warnings or None)."""
     code, out = run_sync(["import-icf", icf_path, "--out", out_path], 20000)
     try:
         res = json.loads(out); res.setdefault("warnings", [])

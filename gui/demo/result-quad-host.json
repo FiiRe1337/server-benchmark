@@ -2,8 +2,8 @@
  "schema": "sb-result/1",
  "kern_version": "0.1.0-mock",
  "run_id": "20261020-101200-a1b2",
- "started_utc": "2026-10-20T16:44:48.881Z",
- "ended_utc": "2026-10-20T16:44:49.141Z",
+ "started_utc": "2026-10-20T17:06:36.565Z",
+ "ended_utc": "2026-10-20T17:06:36.825Z",
  "aborted": false,
  "tick_ms": 1000,
  "meta": {
@@ -1997,7 +1997,16 @@
      "proc_cpu_pct": 34.3
     }
    ],
-   "errors": []
+   "errors": [],
+   "targets": [
+    {
+     "index": 0,
+     "path": "D:\\sbench\\testfile.dat",
+     "kind": "file",
+     "created": true,
+     "deleted": true
+    }
+   ]
   },
   {
    "index": 1,
@@ -3678,7 +3687,16 @@
      "proc_cpu_pct": 9.7
     }
    ],
-   "errors": []
+   "errors": [],
+   "targets": [
+    {
+     "index": 0,
+     "path": "D:\\sbench\\testfile.dat",
+     "kind": "file",
+     "created": true,
+     "deleted": true
+    }
+   ]
   },
   {
    "index": 2,
@@ -5419,7 +5437,16 @@
      "proc_cpu_pct": 25.7
     }
    ],
-   "errors": []
+   "errors": [],
+   "targets": [
+    {
+     "index": 0,
+     "path": "D:\\sbench\\testfile.dat",
+     "kind": "file",
+     "created": true,
+     "deleted": true
+    }
+   ]
   },
   {
    "index": 3,
@@ -6996,7 +7023,16 @@
      "proc_cpu_pct": 5.3
     }
    ],
-   "errors": []
+   "errors": [],
+   "targets": [
+    {
+     "index": 0,
+     "path": "D:\\sbench\\testfile.dat",
+     "kind": "file",
+     "created": true,
+     "deleted": true
+    }
+   ]
   },
   {
    "index": 4,
@@ -8329,7 +8365,16 @@
      "proc_cpu_pct": 1.7
     }
    ],
-   "errors": []
+   "errors": [],
+   "targets": [
+    {
+     "index": 0,
+     "path": "D:\\sbench\\testfile.dat",
+     "kind": "file",
+     "created": true,
+     "deleted": true
+    }
+   ]
   }
  ]
 }

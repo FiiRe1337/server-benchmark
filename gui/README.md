@@ -51,4 +51,14 @@ Mock: `SBENCH_MOCK_ELEVATED=1` simuliert Administratorrechte, `SBENCH_MOCK_SPEED
 - Storage-Worker ohne Ack (0 in einem Tick) werden geglättet (Ø zweier Ticks) und mit ↻ markiert, nicht als Fehler.
 - Score und Referenz vom Kern (`tick.score`, `summary.score_reference`, `meta.cpu_score`); Zeitreihen je Tick (`tick_ms`); Export-Hinweis: das Iometer-CSV enthält keine CPU/RAM-Tests.
 
+**Vertrag 1.3 – Antworten von Devend / Vorschau 1.3.1:**
+- SMT in den Ergebnissen aus `cpus[]` je Test (1.3.1, Zuordnung über Worker-`id`); ohne `cpus[]` nur live markiert.
+- Laufzeitfehler: alle `fatal`-Einträge in `errors[]` (ohne `fatal`-Feld alle Einträge), der erste hervorgehoben, weitere aufklappbar; feste Texte nur für `E_ACCESS_DENIED` („Adminrechte nötig“) und `E_OUT_OF_MEMORY` („Nicht genug Arbeitsspeicher“), sonst Code + Meldung.
+- Storage-Worker ohne `lat_us` im Intervall: „–“; fehlt `lat_us` im Tick, bricht die Latenzlinie dort ab (NaN-Lücke, keine Interpolation).
+- Score je Thread = ops/s ÷ Referenz × 1000 mit Referenz aus `meta.cpu_score` (live in der Thread-Tabelle, in den Ergebnissen als Balken).
+- `targets[]` mit `created`/`deleted`: Hinweis in den Ergebnissen, Warnung mit Pfad bei `created: true, deleted: false` (z. B. `--keep-files`).
+- `metric` `mbps` (Netz) und `latency_us` (Ping, M3) sind bekannt; live noch ohne eigene Ansicht (nur Ereignisprotokoll).
+- Import-ICF (#15): deutsche Kurztexte für alle `W_ICF_*` (`model.WARN_TXT`), der Mock meldet RUN_TIME, ALIGN, REPLY, SECTOR, ZERO_WEIGHT, NO_TARGET, NO_WORKERS, MANAGERS, UNSUPPORTED.
+- Mock: `SBENCH_MOCK_FAIL_AT=<test>:<E_CODE>[:<ticks>[:<einträge>]]` (Laufzeitfehler, Exit 1), `run --keep-files`, `SBENCH_MOCK_CONTRACT=1.3.1` (Vorschau, nicht schemagültig; Demo unter `demo/contract-1.3.1/`).
+
 Windows-only und noch nicht auf echtem Windows getestet: `sbgui/pipe_win.py` (Named Pipe mit DACL, runas).

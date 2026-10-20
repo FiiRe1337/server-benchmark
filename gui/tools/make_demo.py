@@ -63,6 +63,20 @@ def main():
     cp = mock(["run", "--job", jp, "--out", o, "--id", "20261020-143000-m2p1"], dict(base, SBENCH_MOCK_STOP_AT="3:preparing:2"))
     assert cp.returncode == 3, (cp.returncode, cp.stderr)
     fix(o, tmp)
+    # contract 1.3: runtime error in a storage test (E_IO + 2 follow-up errors -> partial, later tests absent, exit 1) with
+    # --keep-files (targets[] created: true, deleted: false -> "Testdatei nicht gelöscht" in the results view)
+    o = os.path.join(DEMO, "result-storage-error.json")
+    cp = mock(["run", "--job", os.path.join(ROOT, "profiles", "four-corners.json"), "--out", o, "--id", "20261020-150000-err1",
+               "--keep-files"], dict(base, SBENCH_MOCK_FAIL_AT="1:E_IO:3:3"))
+    assert cp.returncode == 1, (cp.returncode, cp.stderr)
+    fix(o, tmp)
+    # contract 1.3.1 (announced, not on main): cpus[] per test in the result -> SMT in the results view. Own folder: the
+    # file does not validate against the 1.3 schema (CI checks demo/*.json)
+    d131 = os.path.join(DEMO, "contract-1.3.1"); os.makedirs(d131, exist_ok=True)
+    o = os.path.join(d131, "result-m2-smt.json")
+    cp = mock(["run", "--job", jp, "--out", o, "--id", "20261020-153000-smt1"], dict(base, SBENCH_MOCK_CONTRACT="1.3.1"))
+    assert cp.returncode == 0, cp.stderr
+    fix(o, tmp)
     shutil.rmtree(tmp)
     print("demo/ regenerated")
 

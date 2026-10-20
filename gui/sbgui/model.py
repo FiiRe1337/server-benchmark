@@ -131,7 +131,11 @@ def storage_tests(res):
 # ------------------------------------------------------------------ contract 1.2: cpu / memory (M2)
 COMPUTE_TYPES = ("cpu", "memory")
 METRICS = ("ops_per_s", "gbps", "latency_ns")          # tick / timeseries / per_worker value keys
-METRIC_TXT = {"ops_per_s": ("Operationen", "ops/s"), "gbps": ("Bandbreite", "GB/s"), "latency_ns": ("Latenz", "ns")}
+METRIC_TXT = {"ops_per_s": ("Operationen", "ops/s"), "gbps": ("Bandbreite", "GB/s"), "latency_ns": ("Latenz", "ns"),
+              "mbps": ("Durchsatz", "MB/s"), "latency_us": ("Latenz", "µs")}
+# tick.metric values announced for M3 (network: mbps, ping: latency_us). Known, so tick_metric returns them; the live view
+# has no dedicated mode yet and shows them in the event log only (no crash, no wrong chart)
+FUTURE_METRICS = ("mbps", "latency_us")
 WORKLOADS = ("int", "float", "crypto", "mixed")
 MEM_OPS = ("read", "write", "copy")
 SIMD = ("auto", "scalar", "sse2", "avx2", "avx512", "neon")
@@ -160,8 +164,11 @@ def expected_metric(cfg):
 def tick_metric(ev, cfg=None):
     """Which value a tick carries. Contract 1.3: tick.metric (always emitted). Fallback for older cores: storage ticks
     always have iops; otherwise the first present of ops_per_s/gbps/latency_ns; then the job config of that test."""
-    if ev.get("metric") in ("iops", "mbps") + METRICS:
-        return ev["metric"]
+    m = ev.get("metric")
+    if m in ("iops",) + METRICS + FUTURE_METRICS:
+        return m
+    if isinstance(m, str) and isinstance(ev.get(m), (int, float)):
+        return m                      # unknown future metric that names a numeric field of the tick: trust it
     if "iops" in ev:
         return "iops"
     for k in METRICS:
@@ -217,6 +224,85 @@ def score_reference(workload, meta=None, summary=None):
     if ref:
         return ref, True
     return CPU_REFERENCE.get(workload), False
+
+
+def worker_score(ops_per_s, workload, meta=None, summary=None):
+    """Per-thread CPU score, exactly like the core: ops_per_s / ref × points (points 1000) with ref from the core
+    (meta.cpu_score.ref_ops_per_s / summary.score_reference). None without a core reference (no estimate per thread)."""
+    ref, from_core = score_reference(workload, meta, summary)
+    if not from_core or not ref or not isinstance(ops_per_s, (int, float)):
+        return None
+    return ops_per_s / ref * (sval(meta, "cpu_score", "points") or 1000)
+
+
+# Runtime errors (errors[] of a test, error events). Fixed German texts only where agreed with the core; all other codes
+# are shown generically as code + msg (docs/cli.md: new codes may appear without a contract change)
+ERROR_TXT = {"E_ACCESS_DENIED": "Adminrechte nötig", "E_OUT_OF_MEMORY": "Nicht genug Arbeitsspeicher"}
+
+
+def fatal_errors(t):
+    """errors[] entries that ended the test. 1.3.1 marks them with fatal: true; without the flag every entry counts."""
+    errs = [e for e in (t.get("errors") or []) if isinstance(e, dict)]
+    if any("fatal" in e for e in errs):
+        return [e for e in errs if e.get("fatal")]
+    return errs
+
+
+def error_text(e):
+    """'Adminrechte nötig (E_ACCESS_DENIED)' for agreed codes, else 'E_IO: <msg>'; × count when aggregated."""
+    code, msg = e.get("code", "E_?"), (e.get("msg") or "").strip()
+    txt = f"{ERROR_TXT[code]} ({code})" if code in ERROR_TXT else (f"{code}: {msg}" if msg else code)
+    extra = [f"Worker {e['worker']}" if e.get("worker") is not None else "", f"Ziel {e['target']}" if e.get("target") is not None else "",
+             f"t = {e['t']:g} s".replace(".", ",") if isinstance(e.get("t"), (int, float)) else "",
+             f"{e['count']}×" if (e.get("count") or 1) > 1 else ""]
+    extra = [x for x in extra if x]
+    return txt + (f" · {' · '.join(extra)}" if extra else "")
+
+
+def test_cpus(t):
+    """Contract 1.3.1: cpus[] per test in the result ({id, cpu, group, number, numa_node, core, smt_sibling_of}) -> dict by
+    worker id. 1.3 results have none (summary.cpus is a plain list of logical processors without SMT information)."""
+    out = {}
+    for i, c in enumerate(t.get("cpus") or []):
+        if isinstance(c, dict):
+            out[c.get("id", i)] = c
+    return out
+
+
+def leftover_targets(t):
+    """Storage targets[] that sbench created but did not delete (e.g. --keep-files or delete failed)."""
+    return [g for g in (t.get("targets") or []) if g.get("created") and not g.get("deleted")]
+
+
+# W_* texts. Import-icf (#15, docs/cli.md 'sbench import-icf'): German short texts; msg (with ICF line numbers) follows
+WARN_TXT = {
+    "W_ICF_RUN_TIME": "Laufzeit 0/fehlend → 60 s",
+    "W_ICF_DISK_SIZE": "Dateigröße 0 → Testdatei 8 GiB",
+    "W_ICF_ALIGN": "Ausrichtung 0 → an der Blockgröße",
+    "W_ICF_REPLY": "Reply-Größe (nur Netzwerk) ignoriert",
+    "W_ICF_CYCLING": "Cycling-Testtyp → ein Durchgang",
+    "W_ICF_QD_MIXED": "unterschiedliche Queue Depth → Wert des ersten Workers",
+    "W_ICF_SPEC_MIXED": "unterschiedliche Access Specs → Specs des ersten Workers",
+    "W_ICF_WORKER_SPLIT": "Worker mit mehreren Zielen → ein Worker je Ziel",
+    "W_ICF_TARGET_LAYOUT": "ungleiche Worker je Ziel → reihum verteilt",
+    "W_ICF_MANAGERS": "mehrere Manager → nur der erste",
+    "W_ICF_NETWORK_WORKER": "Netzwerk-Worker ignoriert",
+    "W_ICF_DATA_PATTERN": "Datenmuster → sbench schreibt Zufallsdaten",
+    "W_ICF_SECTOR": "Größe/Ausrichtung kein Vielfaches von 512",
+    "W_ICF_ZERO_WEIGHT": "Zeile mit 0 % weggelassen",
+    "W_ICF_NO_TARGET": "kein Ziel → Platzhalter D:\\sbtest.dat (8 GiB)",
+    "W_ICF_NO_WORKERS": "keine Manager-Liste → 1 Worker je Ziel, QD 1",
+    "W_ICF_NO_ASSIGNMENT": "Specs ohne Zuweisung → alle Specs",
+    "W_ICF_UNSUPPORTED": "Einstellung ohne Entsprechung",
+    "W_ICF_VALIDATE": "Job-Prüfung: vor dem Lauf anpassen",
+}
+
+
+def warning_text(w):
+    """'<German short text> – <msg>' for known W_* codes, else the core's msg."""
+    t = WARN_TXT.get(w.get("code"))
+    msg = (w.get("msg") or "").strip()
+    return f"{t} – {msg}" if t and msg else (t or msg or w.get("code", ""))
 
 
 def summary_metric(t):

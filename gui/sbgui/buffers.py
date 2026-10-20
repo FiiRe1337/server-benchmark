@@ -37,7 +37,9 @@ def minmax_downsample(x, y, max_points=1500):
     xs, ys = [], []
     for a, b in zip(edges[:-1], edges[1:]):
         seg = y[a:b]
-        i, j = a + int(np.argmin(seg)), a + int(np.argmax(seg))
+        if not np.isfinite(seg).any():        # all NaN (gap): keep one NaN point so the line stays broken
+            xs.append(x[a]); ys.append(np.nan); continue
+        i, j = a + int(np.nanargmin(seg)), a + int(np.nanargmax(seg))
         for k in sorted((i, j)):
             xs.append(x[k]); ys.append(y[k])
     return np.asarray(xs), np.asarray(ys)

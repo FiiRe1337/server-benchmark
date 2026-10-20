@@ -163,7 +163,7 @@ class ProfileEditor(QWidget):
             self.import_icf(p)
 
     def import_icf(self, icf_path):
-        """M2: `sbench import-icf <f> --out <job>`; shows W_ICF_UNSUPPORTED warnings, user decides to keep it."""
+        """M2: `sbench import-icf <f> --out <job>`; shows W_ICF_* warnings (German texts: model.WARN_TXT), user decides to keep it."""
         out = os.path.join(tempfile.gettempdir(), "sbench-gui-import.json")
         code, res = sbench.import_icf(icf_path, out)
         job = json.load(open(out, encoding="utf-8")) if code == 0 and os.path.exists(out) else None

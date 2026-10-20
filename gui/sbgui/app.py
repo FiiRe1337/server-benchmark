@@ -167,10 +167,26 @@ def _m2_shots(win, live, shot):
         rep.feed_until(pred); live.refresh(); live.timer.stop(); shot(name)
     rp = win.pages["results"]
     for name, stem in (("09_results_cpu_ram", "result-m2-host"), ("09b_results_numa", "result-m2-numa"),
-                       ("09c_results_partial", "result-m2-partial")):
+                       ("09c_results_partial", "result-m2-partial"), ("09d_results_storage_error", "result-storage-error")):
         f = next((x for x, _ in rp.results if stem in x), None)
         if f:
             rp.select_file(f); win.show_page("results"); shot(name)
+            if rp.err_more:                     # runtime error: also with the follow-up errors expanded
+                rp.err_more[0][0].setChecked(True); shot(name + "_expanded"); rp.err_more[0][0].setChecked(False)
+    smt = os.path.join(DEMO, "contract-1.3.1", "result-m2-smt.json")    # 1.3.1 (announced): SMT from cpus[] per test
+    if os.path.exists(smt) and rp.add_result(smt):
+        rp.select_file(smt); win.show_page("results")
+        sa = rp.parent()
+        while sa is not None and not hasattr(sa, "verticalScrollBar"):
+            sa = sa.parent()
+        if sa is not None:                      # scroll to the per-thread card (after layout)
+            from PySide6.QtCore import QPoint
+            from PySide6.QtWidgets import QApplication
+            QApplication.processEvents()
+            sa.verticalScrollBar().setValue(rp.th_card.mapTo(rp, QPoint(0, 0)).y() - 10); QApplication.processEvents()
+        shot("09e_results_smt_131")
+        if sa is not None:
+            sa.verticalScrollBar().setValue(0)
     cp = win.pages["compare"]
     for i in range(cp.list.count()):
         it = cp.list.item(i); f = cp.results[it.data(Qt.UserRole)][0]

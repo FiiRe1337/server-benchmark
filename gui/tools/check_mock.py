@@ -35,6 +35,14 @@ def _doc_errs(d):
         errs += sem
     if not errs and k == "sb-validate/1" and "warnings" not in d:
         errs.append("warnings missing (contract 1.1: always emitted)")
+    if not errs and k == "sb-result/1" and "tick_ms" in d:
+        # contract 1.3 (Devend): storage histogram always present ([] when empty); targets[] created/deleted consistent
+        for t in d["tests"]:
+            if t["type"] == "storage" and not isinstance(t.get("histogram"), list):
+                errs.append(f"/tests/{t['index']}: storage histogram missing (1.3: always present, [] when empty)")
+            for g in t.get("targets") or []:
+                if g["deleted"] and not g["created"]:
+                    errs.append(f"/tests/{t['index']}/targets/{g['index']}: deleted without created")
     if not errs and k in ("sb-result/1", "sb-info/1"):
         miss = [f for f in ("elevated", "data_dir", "ram_free_bytes", "numa_nodes") if f not in d["meta"]]
         if miss:

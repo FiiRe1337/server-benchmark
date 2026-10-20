@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QP
 from ..widgets import Card, Kpi, label, chip, table, add_row, plot, fmt_num, short_target, Responsive
 from ..buffers import RingBuffer, minmax_downsample
 from ..model import (test_label, human_bytes, short_size, size_bytes, tick_metric, expected_metric, fmt_metric, estimated_score,
-                     METRIC_TXT, score_reference)
+                     METRIC_TXT, score_reference, worker_score, FUTURE_METRICS, ERROR_TXT)
 from .. import theme as T
 
 FIELDS = ("t", "iops", "mbps", "lat_mean", "lat_p50", "lat_p99", "lat_max", "cpu", "r_iops", "w_iops", "r_mbps", "w_mbps", "proc_cpu",
@@ -310,12 +310,15 @@ class LiveView(QWidget):
                 self.test_offset[ev["test"]] = self.offset
             self.cur_test = ev["test"]; self.last_raw = t
             mk = tick_metric(ev, self._cfg(ev["test"]))
+            if mk in FUTURE_METRICS or (mk not in ("iops", None) and mk not in METRIC_TXT):
+                return                       # M3 network (mbps) / ping (latency_us): no live mode yet -> event log only
             self._apply_mode("storage" if mk in ("iops", None) else mk)
             if self.waiting:
                 self.waiting = False; self.prep_bar.hide()
             l = ev.get("lat_us") or {}
-            self.buf.append([self.offset + t, ev.get("iops", 0), ev.get("mbps", 0), l.get("mean", 0), l.get("p50", 0),
-                             l.get("p99", 0), l.get("max", 0), ev.get("cpu_pct", 0),
+            # latency missing in an interval (no completed I/O) -> NaN: the line breaks there instead of dropping to 0
+            self.buf.append([self.offset + t, ev.get("iops", 0), ev.get("mbps", 0), l.get("mean", NAN), l.get("p50", NAN),
+                             l.get("p99", NAN), l.get("max", NAN), ev.get("cpu_pct", 0),
                              ev.get("read_iops", NAN), ev.get("write_iops", NAN), ev.get("read_mbps", NAN), ev.get("write_mbps", NAN),
                              ev.get("proc_cpu_pct", NAN), ev["test"], ev.get("ops_per_s", NAN), ev.get("gbps", NAN), ev.get("latency_ns", NAN),
                              ev.get("score", NAN)])
@@ -338,7 +341,8 @@ class LiveView(QWidget):
             self.run_chip.setText(f"{len(self.skipped)} Test(s) übersprungen (nicht implementiert)"); self.run_chip.setObjectName("chipWarn")
             self.run_chip.style().polish(self.run_chip)
         elif e == "error":
-            self.run_chip.setText(f"Fehler {ev.get('code')}"); self.run_chip.setObjectName("chipErr"); self.run_chip.style().polish(self.run_chip)
+            self.run_chip.setText(f"Fehler: {ERROR_TXT[ev['code']]}" if ev.get("code") in ERROR_TXT else f"Fehler {ev.get('code')}")
+            self.run_chip.setToolTip(f"{ev.get('code')}: {ev.get('msg', '')}"); self.run_chip.setObjectName("chipErr"); self.run_chip.style().polish(self.run_chip)
         elif e == "done":
             self._set_phase("done")
             self.result_ready.emit(ev["result"])
@@ -362,8 +366,10 @@ class LiveView(QWidget):
             return self._refresh_compute(a)
         x = a[:, 0]; self.hint.setText("")
         split = self.rw.isChecked() and self.has_rw
-        for cur, col in ((self.cur_iops, 8 if split else 1), (self.cur_mb, 10 if split else 2), (self.cur_mean, 3), (self.cur_p50, 4), (self.cur_p99, 5)):
+        for cur, col in ((self.cur_iops, 8 if split else 1), (self.cur_mb, 10 if split else 2)):
             cur.setData(*minmax_downsample(x, np.nan_to_num(a[:, col])))
+        for cur, col in ((self.cur_mean, 3), (self.cur_p50, 4), (self.cur_p99, 5)):
+            cur.setData(*minmax_downsample(x, a[:, col]), connect="finite")      # NaN = gap, no interpolation
         for cur, col in ((self.cur_w_iops, 9), (self.cur_w_mb, 11)):
             if split:
                 cur.setData(*minmax_downsample(x, np.nan_to_num(a[:, col])))
@@ -371,7 +377,8 @@ class LiveView(QWidget):
                 cur.setData([], [])
         for p in (self.p_iops, self.p_mb, self.p_lat):
             p.setXRange(0, max(self.total, x[-1]) * 1.0, padding=0.01)
-        self.p_lat.setYRange(0, np.percentile(a[:, 5], 98) * 1.15, padding=0)
+        p99 = a[:, 5][np.isfinite(a[:, 5])]
+        self.p_lat.setYRange(0, (np.percentile(p99, 98) if len(p99) else 1) * 1.15 or 1, padding=0)
         self.p_iops.setYRange(0, a[:, 1].max() * 1.12, padding=0); self.p_mb.setYRange(0, a[:, 2].max() * 1.12, padding=0)
         last = a[-1]; win = a[-4:]
         meas = a
@@ -380,8 +387,8 @@ class LiveView(QWidget):
         else:
             self.k_iops.set(fmt_num(win[:, 1].mean()), f"Ø Lauf {fmt_num(meas[:, 1].mean())}  ·  max {fmt_num(meas[:, 1].max())}")
         self.k_mbps.set(f"{win[:, 2].mean():,.0f}".replace(",", " "), f"Ø Lauf {meas[:, 2].mean():,.0f} MB/s (dezimal)".replace(",", " "))
-        self.k_lat.set(f"{win[:, 3].mean():.0f}", f"min {meas[:, 3].min():.0f}  ·  max {meas[:, 3].max():.0f} µs")
-        self.k_p99.set(f"{win[:, 5].mean():,.0f}".replace(",", " "), f"max {last[6]:,.0f} µs".replace(",", " "))
+        self.k_lat.set(_nf(win[:, 3]), f"min {_nf(meas[:, 3], np.nanmin)}  ·  max {_nf(meas[:, 3], np.nanmax)} µs")
+        self.k_p99.set(_nf(win[:, 5]), f"max {_nf(a[:, 6], np.nanmax)} µs")
         pc = last[12]
         self.k_cpu.set(f"{last[7]:.0f}", (f"sbench-Prozess {pc:.0f} %  ·  " if pc == pc else "") + f"Ø System {meas[:, 7].mean():.0f} %")
         if self.phase == "measure":
@@ -395,7 +402,7 @@ class LiveView(QWidget):
         sm = getattr(self, "smoothed", None) or self.last_workers
         for i, w in enumerate(sm):
             tgt = short_target(self.targets[w["id"] % len(self.targets)]["path"]) if self.targets else "–"  # worker i -> target i mod n
-            wl = w.get("lat_us") or {}  # optional per worker; 1.3: absent in intervals without completed I/O
+            wl = w.get("lat_us") or {}  # optional per worker; 1.3: absent in intervals without completed I/O -> "–"
             lag = w["id"] in self.lagging
             for c, val in ((0, f"{w['id']}{' ↻' if lag else ''}"), (1, tgt), (2, fmt_num(w.get("iops"))),
                            (3, f"{w.get('mbps', 0):,.0f}".replace(",", " ")),
@@ -416,8 +423,7 @@ class LiveView(QWidget):
         for k in ("iops", "mbps"):
             if isinstance(w.get(k), (int, float)) and isinstance(p.get(k), (int, float)):
                 out[k] = (w[k] + p[k]) / 2
-        if "lat_us" not in w and p.get("lat_us"):
-            out["lat_us"] = p["lat_us"]        # interval without completed I/O: keep the last latency
+        # lat_us absent (no completed I/O in this interval) stays absent -> table shows "–" (Devend: no last value)
         return out
 
     def _cpu_summary(self, test):
@@ -512,9 +518,19 @@ class LiveView(QWidget):
                             f"logischer Prozessor {c['cpu']} (Gruppe {c['group']}, Nr. {c['number']}) · NUMA-Knoten {c['numa_node']} · Kern {c['core']}"
                             + (f" · SMT-Geschwister von CPU {c['smt_sibling_of']}" if c.get("smt_sibling_of") is not None else ""))
             tot = sum(vals)
+            # cpu: per-thread score = ops_per_s / ref × 1000 with ref from the core (meta.cpu_score), else share of the sum
+            meta = {"cpu_score": self.cpu_score} if self.cpu_score else None
+            wl = (cfg or {}).get("workload", "mixed")
+            per_score = key == "ops_per_s" and worker_score(1.0, wl, meta) is not None
+            hdr = "Score" if per_score else "Anteil"
+            if self.ttable.horizontalHeaderItem(3).text() != hdr:
+                self.ttable.horizontalHeaderItem(3).setText(hdr)
+                self.ttable.horizontalHeaderItem(3).setToolTip("ops/s des Threads ÷ Referenz × 1000 (Referenz vom Kern, meta.cpu_score)"
+                                                               if per_score else "Anteil an der Summe aller Threads")
             for r, v in enumerate(vals):
                 self.ttable.item(r, 2).setText(fmt_metric(key, v))
-                self.ttable.item(r, 3).setText(f"{v / tot * 100:.1f} %".replace(".", ",") if tot else "–")
+                self.ttable.item(r, 3).setText(fmt_metric("score", worker_score(v, wl, meta)) if per_score else
+                                               (f"{v / tot * 100:.1f} %".replace(".", ",") if tot else "–"))
                 d = (v - m) / m * 100 if m else 0
                 self.ttable.item(r, 4).setText(f"{d:+.1f} %".replace(".", ","))
                 self.ttable.item(r, 4).setForeground(QColor(T.AMBER if v < 0.9 * med else T.MUTED))
@@ -524,6 +540,12 @@ class LiveView(QWidget):
             self.bar_hint.setText("Latenz: immer 1 Thread –\nkeine Werte pro Thread" if key == "latency_ns" else "keine workers[] im Tick")
             if self.ttable.rowCount():
                 self.ttable.setRowCount(0)
+
+
+def _nf(col, fn=np.nanmean):
+    """Latency KPI from a column that may contain NaN (intervals without latency): '–' when all are missing."""
+    v = col[np.isfinite(col)]
+    return f"{fn(v):,.0f}".replace(",", " ") if len(v) else "–"
 
 
 def _cpu_txt(c):

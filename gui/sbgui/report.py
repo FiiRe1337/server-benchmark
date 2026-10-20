@@ -1,7 +1,7 @@
 """HTML/PDF report from sb-result/1 (GUI-side; CSV comes from `sbench export`)."""
 import html
 from .model import (test_label, host_label, human_bytes, storage_tests, compute_tests, fmt_metric, numa_placement, short_size,
-                    RAM_METHOD_TXT, sval, partial_text)
+                    RAM_METHOD_TXT, sval, partial_text, fatal_errors, error_text, leftover_targets)
 
 
 def _n(v, spec=",.0f"):
@@ -36,6 +36,13 @@ td{border-bottom:1px solid #e3e8ee;padding:3px 6px;font-size:8.5pt} td.n{text-al
                                      + ([] if compact else [_n(sval(t, "summary", "lat_us", "p99_9")), _n(sval(t, "summary", "errors"), "d")])
                                      for t in storage_tests(r)]))
         out += _compute_html(r, compact)
+        for t in r["tests"]:          # runtime errors (first fatal entry, + n more) and test files left behind
+            fe = fatal_errors(t) if t.get("partial") or (r["tests"] and t is r["tests"][-1]) else []
+            if fe:
+                out.append(f"<div class='m' style='color:#b42318'>Test {t['index'] + 1} „{html.escape(test_label(t['config']))}“: "
+                           f"{html.escape(error_text(fe[0]))}{f' (+{len(fe) - 1} weitere)' if len(fe) > 1 else ''}</div>")
+            for g in leftover_targets(t):
+                out.append(f"<div class='m' style='color:#b54708'>Testdatei nicht gelöscht: {html.escape(g['path'])}</div>")
         if compact:
             continue
     out.append("</body></html>")

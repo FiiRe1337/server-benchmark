@@ -2,15 +2,17 @@
 (read/write/copy, NT) + instruction set, latency in ns, NUMA placement (numa_node -> mem_node) and RAM per node with
 its source (meta.numa_nodes[].ram_method). Storage tests as a compact summary table.
 Contract 1.3: partial/stopped_in per test (null summary values when stopped before measure), core score reference
-(meta.cpu_score, summary.score_reference), time series at tick_ms."""
+(meta.cpu_score, summary.score_reference), time series at tick_ms; fatal errors[] of a test (first one prominent, the
+rest expandable), storage targets[] created/deleted (warning for files left behind), per-thread score and (1.3.1) SMT
+from the test's cpus[]."""
 import json, os
 import numpy as np, pyqtgraph as pg
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QComboBox
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QFrame, QToolButton
 from ..widgets import Card, label, chip, table, add_row, plot, fmt_num, Responsive, WrapLabel
 from ..model import (check_schema, host_label, human_bytes, numa_cpus, storage_tests, test_label, summary_metric, fmt_metric,
                      compute_details, numa_placement, RAM_METHOD_TXT, METRIC_TXT, short_size, sval, is_partial, partial_text,
-                     has_values, TYPE_TXT)
+                     has_values, TYPE_TXT, fatal_errors, error_text, test_cpus, leftover_targets, worker_score)
 from .. import theme as T
 
 
@@ -44,6 +46,12 @@ class ResultsPage(QWidget):
         self.partial_note = WrapLabel("", "muted"); self.partial_note.setObjectName("partialNote")
         self.partial_note.setStyleSheet(f"QLabel#partialNote {{ color: {T.AMBER}; border: 1px solid {T.AMBER}; border-radius: 8px; padding: 8px 12px; }}")
         v.addWidget(self.partial_note)
+        # runtime errors that ended a test: first one prominent, further ones behind "▸ n weitere"
+        self.err_box = QFrame(); self.err_box.setObjectName("errBox")
+        self.err_box.setStyleSheet(f"QFrame#errBox {{ border: 1px solid {T.RED}; border-radius: 8px; }}")
+        self.err_lay = QVBoxLayout(self.err_box); self.err_lay.setContentsMargins(12, 8, 12, 8); self.err_lay.setSpacing(4)
+        self.err_box.hide(); v.addWidget(self.err_box)
+        self.err_more = []          # (toggle button, details label) per test, for tests
 
         # system / NUMA
         self.sys_card = Card("System", "meta · RAM pro NUMA-Knoten (Quelle: ram_method)", margins=14)
@@ -74,6 +82,9 @@ class ResultsPage(QWidget):
         self.st_card = Card("Storage", "Zusammenfassung je Test", margins=14)
         self.st_tab = table(["Test", "IOPS", "MB/s", "Ø µs", "p99 µs", "Fehler"], stretch_col=0, mono_cols=(1, 2, 3, 4, 5))
         self.st_tab.setMinimumHeight(32 * 2 + 36); self.st_card.add(self.st_tab)
+        # targets[] (created/deleted): small info line + warning when sbench left a test file behind (--keep-files)
+        self.tgt_info = WrapLabel("", "dim"); self.st_card.add(self.tgt_info)
+        self.tgt_warn = WrapLabel("", "muted"); self.tgt_warn.setStyleSheet(f"color: {T.AMBER};"); self.st_card.add(self.tgt_warn)
         self.empty = label("Keine Ergebnisse vorhanden. Nach einem Lauf erscheint das Ergebnis hier.", "muted")
         for w in (self.sys_card, self.cpu_card, self.mem_card, self.th_card, self.st_card, self.empty):
             v.addWidget(w)
@@ -83,6 +94,16 @@ class ResultsPage(QWidget):
         self.show_index(0)
 
     # ------------------------------------------------------------------
+    def add_result(self, path):
+        """Append one more sb-result/1 file (e.g. a 1.3.1 demo outside the result folder); returns False if unreadable."""
+        try:
+            r = check_schema(json.load(open(path, encoding="utf-8")), "sb-result/1")
+        except (OSError, ValueError):
+            return False
+        self.results.append((path, r))
+        self.box.addItem(f"{host_label(r['meta'])} · {_local(r['started_utc'])} · {os.path.basename(path)}", path)
+        return True
+
     def select_file(self, path):
         for i in range(self.box.count()):
             if os.path.normcase(os.path.abspath(self.box.itemData(i))) == os.path.normcase(os.path.abspath(path)):
@@ -97,25 +118,26 @@ class ResultsPage(QWidget):
         r = self.results[i][1] if 0 <= i < len(self.results) else None
         for w in (self.sys_card, self.cpu_card, self.mem_card, self.th_card, self.st_card):
             w.setVisible(r is not None)
-        self.empty.setVisible(r is None); self.partial_note.setVisible(False)
+        self.empty.setVisible(r is None); self.partial_note.setVisible(False); self._errors([])
         if r is None:
             self.state.setText("kein Ergebnis"); return
         m = r["meta"]
         self.sub.setText(f"{host_label(m)} · Kern {r['kern_version']} · Lauf {r.get('run_id', '–')} · {_local(r['started_utc'])}")
         aborted = r.get("aborted")
         parts = [t for t in r["tests"] if is_partial(t, r)]
-        failed = [t for t in parts if t.get("errors")]
-        self.state.setText("abgebrochen · Teilergebnis" if aborted else ("Laufzeitfehler · Teilergebnis" if failed else "vollständig"))
+        failed = [t for t in parts if fatal_errors(t)]
+        self.state.setText("Laufzeitfehler · Teilergebnis" if failed else ("abgebrochen · Teilergebnis" if aborted else "vollständig"))
         self.state.setObjectName("chipWarn" if aborted or parts else "chipOk")
         if parts:
             lines = []
             for t in parts:
-                err = "; ".join(e.get("code", "") for e in t.get("errors") or [] if isinstance(e, dict))
                 lines.append(f"Test {t['index'] + 1} ({TYPE_TXT.get(t['type'], 'Storage')}) „{test_label(t['config'])}“: {partial_text(t, r)}"
-                             + (f" · Fehler {err}" if err else ""))
-            if aborted:
+                             + (" · Laufzeitfehler (siehe unten)" if fatal_errors(t) else ""))
+            if aborted or failed:
                 lines.append("Nachfolgende Tests des Jobs wurden nicht gestartet und fehlen im Ergebnis.")
             self.partial_note.setText("\n".join(lines)); self.partial_note.setVisible(True)
+        self._errors(failed)
+        self.state.setObjectName("chipErr" if failed else self.state.objectName())
         self.state.style().unpolish(self.state); self.state.style().polish(self.state)
         cpu = m["cpu"]
         self.sys_line.setText(f"{cpu['model']} · {cpu['sockets']} Sockel · {cpu['cores']}C/{cpu['threads']}T · {human_bytes(m['ram_bytes'])} RAM"
@@ -177,6 +199,52 @@ class ResultsPage(QWidget):
                                        "–" if s.get("errors") is None else s["errors"]], {0: T.AMBER if is_partial(t, r) else None})
             self._tip(self.st_tab, r_, t, r)
         self._fit(self.st_tab)
+        self._targets(st)
+
+    def _errors(self, tests):
+        """Fatal errors[] per test: first entry prominent (red), the rest expandable. ERROR_TXT for agreed codes, else code + msg."""
+        while self.err_lay.count():
+            it = self.err_lay.takeAt(0)
+            w = it.widget()
+            if w is not None:
+                w.deleteLater()
+            elif it.layout() is not None:
+                lay = it.layout()
+                while lay.count():
+                    x = lay.takeAt(0).widget()
+                    if x is not None:
+                        x.deleteLater()
+        self.err_more = []
+        for t in tests:
+            errs = fatal_errors(t)
+            head = WrapLabel(f"Test {t['index'] + 1} „{test_label(t['config'])}“ – {error_text(errs[0])}", "errHead")
+            head.setStyleSheet(f"color: {T.RED}; font-weight: 600;"); head.setToolTip(f"{errs[0].get('code')}: {errs[0].get('msg', '')}")
+            self.err_lay.addWidget(head)
+            if len(errs) > 1:
+                rest = WrapLabel("\n".join(error_text(e) for e in errs[1:]), "muted"); rest.hide()
+                btn = QToolButton(); btn.setCheckable(True); btn.setAutoRaise(True)
+                n = len(errs) - 1
+                btn.setText(f"▸ {n} weitere{'r' if n == 1 else ''} Fehler")
+                btn.toggled.connect(lambda on, b=btn, l=rest, n=n: (l.setVisible(on), b.setText(f"{'▾' if on else '▸'} {n} weitere{'r' if n == 1 else ''} Fehler")))
+                self.err_lay.addWidget(btn, 0, Qt.AlignLeft); self.err_lay.addWidget(rest)
+                self.err_more.append((btn, rest))
+        self.err_box.setVisible(bool(tests))
+
+    def _targets(self, st):
+        """targets[] per storage test: 'angelegt · gelöscht' etc.; warning with path when a created file was not deleted."""
+        info, left = [], []
+        for t in st:
+            for g in t.get("targets") or []:
+                state = ("angelegt · gelöscht" if g.get("deleted") else "angelegt · nicht gelöscht") if g.get("created") else "vorhanden (nicht angelegt)"
+                info.append(f"{g.get('path')} ({state})")
+            left += [g["path"] for g in leftover_targets(t)]
+        uniq = list(dict.fromkeys(info))
+        self.tgt_info.setText(("Ziele: " + " · ".join(uniq[:4]) + (f" · … (+{len(uniq) - 4})" if len(uniq) > 4 else "")) if uniq else "")
+        self.tgt_info.setVisible(bool(uniq))
+        left = list(dict.fromkeys(left))
+        self.tgt_warn.setText(("⚠ Testdatei nicht gelöscht (z. B. --keep-files oder Löschen fehlgeschlagen) – belegt weiter Speicherplatz: "
+                               + ", ".join(left)) if left else "")
+        self.tgt_warn.setVisible(bool(left))
 
     @staticmethod
     def _name(t, res):
@@ -206,21 +274,33 @@ class ResultsPage(QWidget):
 
     def _show_thread(self, _i=0):
         r = self.current()
-        self.p_thr.clear(); self.p_ts.clear()
+        self.p_thr.clear(); self.p_ts.clear(); self.thr_scores = {}; self.thr_smt = set()
         if r is None or self.tsel.currentIndex() < 0:
             self.th_info.setText(""); return
         idx = self.tsel.currentData()
         t = next(x for x in r["tests"] if x["index"] == idx)
         key, total = summary_metric(t)
         name, unit = METRIC_TXT[key]
-        pw = [w for w in t.get("per_worker", []) if key in w]
+        pw = [w for w in t.get("per_worker", []) if isinstance(w.get(key), (int, float))]
         if pw:
             vals = [w[key] for w in pw]; med = float(np.median(vals))
+            # cpu: bars = per-thread score (ops/s ÷ core reference × 1000), when the core gave a reference
+            s = t.get("summary") or {}; wl = s.get("workload") or t["config"].get("workload")
+            scores = [worker_score(v, wl, r.get("meta"), s) for v in vals] if key == "ops_per_s" else []
+            use_score = bool(scores) and all(x is not None for x in scores)
+            bars = scores if use_score else vals
             lowb = (lambda v: v > 1.1 * med) if key == "latency_ns" else (lambda v: v < 0.9 * med)
-            self.p_thr.addItem(pg.BarGraphItem(x=[w["id"] for w in pw], height=vals, width=0.8 if len(pw) < 48 else 1.0,
-                                               brushes=[pg.mkBrush(T.AMBER if lowb(v) else T.ACCENT) for v in vals], pen=pg.mkPen(None)))
-            self.p_thr.setXRange(-0.7, len(pw) - 0.3, padding=0); self.p_thr.setYRange(0, max(vals) * 1.15 or 1, padding=0)
-            self.p_thr.getPlotItem().setTitle(f"<span style='color:{T.MUTED};font-size:9pt'>{unit} je Thread</span>")
+            tcpus = test_cpus(t)           # 1.3.1: cpus[] per test -> SMT siblings (mapped via worker id); 1.3: none
+            smt = {w["id"] for w in pw if (tcpus.get(w["id"]) or {}).get("smt_sibling_of") is not None}
+            self.p_thr.addItem(pg.BarGraphItem(x=[w["id"] for w in pw], height=bars, width=0.8 if len(pw) < 48 else 1.0,
+                                               brushes=[pg.mkBrush(T.AMBER if lowb(v) else (T.VIOLET if w["id"] in smt else T.ACCENT))
+                                                        for w, v in zip(pw, vals)], pen=pg.mkPen(None)))
+            self.p_thr.setXRange(-0.7, len(pw) - 0.3, padding=0); self.p_thr.setYRange(0, max(bars) * 1.15 or 1, padding=0)
+            ttl = "Score je Thread (ops/s ÷ Referenz × 1000)" if use_score else f"{unit} je Thread"
+            self.p_thr.getPlotItem().setTitle(f"<span style='color:{T.MUTED};font-size:9pt'>{ttl}"
+                                              + (" · violett = SMT-Geschwister" if smt else "") + "</span>")
+            self.thr_scores = dict(zip([w["id"] for w in pw], scores)) if use_score else {}
+            self.thr_smt = smt
             nodes = sorted({w.get("node") for w in pw if w.get("node") is not None})
             mems = sorted({w.get("mem_node") for w in pw if w.get("mem_node") is not None})
             remote = sum(1 for w in pw if w.get("mem_node") is not None and w.get("node") is not None and w["mem_node"] != w["node"])
@@ -232,6 +312,12 @@ class ResultsPage(QWidget):
                 facts.append(f"Knoten {', '.join(map(str, nodes))}" + (f" · RAM-Knoten {', '.join(map(str, mems))}" if mems else ""))
             if remote:
                 facts.append(f"{remote} Thread(s) remote")
+            if use_score:
+                facts.append(f"Score je Thread {fmt_metric('score', min(scores))} – {fmt_metric('score', max(scores))}")
+            if smt:
+                facts.append(f"{len(smt)} SMT-Geschwister")
+            elif not tcpus and key != "latency_ns":
+                facts.append("SMT nur live (Kern < 1.3.1)")
             facts += compute_details(t)[:1]
             self.th_info.setText("  ·  ".join(facts))
         elif not has_values(t):

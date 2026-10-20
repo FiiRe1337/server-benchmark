@@ -4,6 +4,8 @@
  3. live run via QProcess/stdout, R/W split + worker latency, stop -> exit 3, result read only after done
  3b. contract 1.2/1.3: cpu + memory run, live metric/thread bars, stop during memory measure -> exit 3, partial result
      1.3: tick.metric on every tick, phase.threads/cpus -> thread KPI, memory test partial with stopped_in=measure, tick_ms
+ 3c. runtime error (mock SBENCH_MOCK_FAIL_AT, --keep-files semantics via targets[]) -> exit 1, partial test with errors[],
+     results page shows the error box and the leftover-file hint
  4. re-attach: run started outside the GUI -> sbench list --running -> TailSession follows runs/<id>.jsonl to done
  5. support bundle with --include (GUI logs + profiles) and --anonymize -> manifest/sha256 validated
 Writes $SBENCH_SHOT_DIR (default build/)/03c_live_qprocess.png. Uses temp SBENCH_DATA_DIR / SBENCH_GUI_DIR."""
@@ -89,6 +91,24 @@ if res:
     chk = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "check_mock.py"), res[0]], capture_output=True, text=True)
     report["m2_result_valid"] = chk.returncode == 0
 
+# 3c) runtime error: E_IO after 2 ticks of the storage test -> exit 1, partial, 2 errors[]; results page error box
+fj = os.path.join(os.environ["SBENCH_GUI_DIR"], "job-fail-e2e.json")
+json.dump({"schema": "sb-job/1", "name": "Fehler E2E", "tests": [
+    {"type": "storage", "name": "4K Fehler", "targets": [{"kind": "file", "path": os.path.join(os.environ["SBENCH_GUI_DIR"], "f.dat"), "file_size": "64MiB"}],
+     "access_specs": [{"block_size": "4KiB", "read_pct": 70, "random_pct": 100, "weight": 100}], "workers": 2, "warmup_s": 0, "duration_s": 20},
+    {"type": "cpu", "threads": 1, "workload": "int", "warmup_s": 0, "duration_s": 1}]}, open(fj, "w", encoding="utf-8"))
+os.environ["SBENCH_MOCK_FAIL_AT"] = "0:E_IO:2:2"
+c, res, evs = run(fj, {})
+del os.environ["SBENCH_MOCK_FAIL_AT"]
+report["fail_exit"] = c; report["fail_error_event"] = [e.get("code") for e in evs if e.get("ev") == "error"][:1]
+if res:
+    r = json.load(open(res[0], encoding="utf-8"))
+    report["fail_result"] = {"tests": len(r["tests"]), "partial": r["tests"][0]["partial"], "errors": len(r["tests"][0]["errors"]),
+                             "aborted": r["aborted"]}
+    rp = win.pages["results"]
+    if rp.add_result(res[0]) and rp.select_file(res[0]):
+        report["fail_results_page"] = rp.err_box.isVisibleTo(rp) and bool(rp.err_more) and rp.state.text().startswith("Laufzeitfehler")
+
 # 4) re-attach
 env = dict(os.environ, SBENCH_MOCK_SPEED="4")
 rid = "reattach-1"
@@ -125,5 +145,7 @@ ok = (report["privilege_exit"] == [4] and report["destructive_exit"] == [2] and 
       and report["m2_stop_exit"] == [3] and report.get("m2_result_valid")
       and (report.get("m2_result") or {}).get("tests") == ["cpu", "memory"] and report["m2_result"]["aborted"] is True
       and report["m2_result"]["partial"] == [(False, None), (True, "measure")] and report["m2_result"]["tick_ms"] == 250
+      and report["fail_exit"] == [1] and report["fail_error_event"] == ["E_IO"] and report.get("fail_results_page")
+      and report.get("fail_result") == {"tests": 1, "partial": True, "errors": 2, "aborted": False}
       and report["m2_metric_on_ticks"] and report["m2_cpu_tick_score"] and report["m2_phase_threads"] == {0: 4, 1: 4})
 sys.exit(0 if ok else 1)
