@@ -27,6 +27,8 @@ def parse(argv):
     ap.add_argument("--self-test-child", metavar="PLATFORM")
     ap.add_argument("--platforms", default="windows,offscreen" if os.name == "nt" else "offscreen")
     ap.add_argument("--report", metavar="FILE", help="also write the JSON report to FILE (needed for windowed EXE: no stdout)")
+    ap.add_argument("--guide", metavar="DIR", help="README guide screenshots with the REAL core (see sbgui/guide.py)")
+    ap.add_argument("--guide-target", metavar="FILE", help="test file for --guide (default: %%TEMP%%\\sbench-anleitung.dat)")
     ap.add_argument("--no-core", action="store_true", help="self-test: skip the core checks (GUI only)")
     ap.add_argument("--extra-results", metavar="DIR", action="append", default=[], help=argparse.SUPPRESS)
     ap.add_argument("--expect-result", metavar="FILE", help=argparse.SUPPRESS)
@@ -34,6 +36,9 @@ def parse(argv):
 
 
 def result_files(d, extra_dirs=()):
+    """d = demo/--results dir (+ schema example); None = only real results from extra_dirs (normal GUI start)."""
+    if d is None:
+        return [f for e in extra_dirs for f in sorted(glob.glob(os.path.join(e, "*.json")), reverse=True)]
     files = sorted(glob.glob(os.path.join(d, "result*.json")))
     for e in extra_dirs:
         files += sorted(glob.glob(os.path.join(e, "*.json")), reverse=True)
@@ -71,7 +76,9 @@ def build_window(a, deterministic, extra_results=()):
     else:
         info = sbench.info(); kv = sbench.kern_version()
     check_schema(info, "sb-info/1")
-    return MainWindow(info, kv, result_files(a.results, list(extra_results) + list(getattr(a, "extra_results", []) or [])))
+    # real start: never mix the mock demo results / schema example into the user's results (only --demo or explicit --results)
+    d = a.results if (deterministic or a.demo or os.path.abspath(a.results) != os.path.abspath(DEMO)) else None
+    return MainWindow(info, kv, result_files(d, list(extra_results) + list(getattr(a, "extra_results", []) or [])))
 
 
 def screenshots(a):
@@ -413,6 +420,9 @@ def main(argv=None):
         return self_test(a)
     if a.screenshot:
         return screenshots(a)
+    if a.guide:
+        from . import guide
+        return guide.run(a)
     if a.demo:
         return demo(a)
     from . import sbench, core

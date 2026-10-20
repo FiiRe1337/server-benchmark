@@ -1,112 +1,129 @@
-# DRAFT: README screenshots + GUI self-test on Windows. Only manual / tag triggered.
-# Data: core smoke artifact `sbench-smoke-<runner>-<arch>` (docs/cli.md 1.1: result.json, progress.jsonl, info.json);
-# without a run id the mock data from gui/demo/ is used and the images stay labelled "Mockup mit Beispieldaten".
-name: GUI screenshots & self-test
+# README-Anleitung: ECHTE Screenshots der aktuellen GUI mit dem ECHTEN Kern auf windows-2022.
+# core (build-windows.yml) -> gui (build-gui.yml, sbench-gui.exe mit eingebettetem Kern) -> guide:
+#   sbench-gui.exe --guide (sbgui/guide.py) startet die portable EXE aus C:\Tools\sbench, Plattform-Plugin `windows`,
+#   Fenster 1440x900, 100 % Skalierung: echte info, echte Storage-Läufe auf einer Testdatei (ohne Admin-Zwang),
+#   Live-Ansicht während der Messung, Stopp, Vergleich zweier echter Läufe, Support-Paket (--all, anonymisiert).
+#   Dazu Explorer-Ordner nach dem ersten Start und ein Konsolenfenster mit echten CLI-Aufrufen (tools/capture_window.py).
+# Ergebnis: Artifact `guide-screenshots` (PNG + report.json). Übernahme nach docs/img/guide/ per Commit (siehe docs/entwicklung.md).
+name: GUI screenshots (README-Anleitung)
 
 on:
   workflow_dispatch:
-    inputs:
-      core_run_id:
-        description: "Run-ID of the core smoke workflow (artifact sbench-smoke-windows-2022-x64); empty = mock data"
-        required: false
-      artifact:
-        description: "Smoke artifact name"
-        required: false
-        default: sbench-smoke-windows-2022-x64
-  push:
-    tags: ["m[0-9]*", "v*"]
+  pull_request:
+    paths:
+      - "gui/**"
+      - ".github/workflows/screenshots.yml"
 
 permissions:
-  contents: write
-  pull-requests: write
-  actions: read
+  contents: read
 
-defaults:
-  run:
-    working-directory: gui          # schemas are read from ../schema (sb_contract.base_dir)
+# Caller group; the called build-windows.yml uses build-windows-<this workflow name>-<ref> -> no deadlock/cancel with GUI CI.
+concurrency:
+  group: screenshots-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  screenshots:
+  core:
+    uses: ./.github/workflows/build-windows.yml
+    permissions:
+      contents: read
+
+  gui:
+    needs: core
+    uses: ./.github/workflows/build-gui.yml
+    permissions:
+      contents: read
+    with:
+      version: ${{ needs.core.outputs.version }}
+      core_artifact: ${{ needs.core.outputs.cli_artifact_x64 }}
+
+  guide:
+    name: Screenshots (windows-2022, echter Kern)
+    needs: [core, gui]
     runs-on: windows-2022
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PYTHONUTF8: "1"
+      APP: C:\Tools\sbench
+      SHOTS: ${{ github.workspace }}\guide-out
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.13", cache: pip, cache-dependency-path: gui/requirements.txt }
-      - run: pip install -r requirements.txt
-      - name: Core smoke artifact (optional)
-        if: inputs.core_run_id != ''
+
+      - name: GUI-EXE laden (sbench-gui-x64) nach C:\Tools\sbench
         uses: actions/download-artifact@v4
         with:
-          name: ${{ inputs.artifact || 'sbench-smoke-windows-2022-x64' }}
-          path: gui/smoke
-          run-id: ${{ inputs.core_run_id }}
-          github-token: ${{ github.token }}
-      - name: Select data + validate against schemas
-        shell: bash
-        run: |
-          if [ -f smoke/progress.jsonl ] && [ -f smoke/result.json ] && [ -f smoke/info.json ]; then
-            mkdir -p smoke/results && cp smoke/result.json smoke/results/
-            echo "SB_ARGS=--replay smoke/progress.jsonl --info smoke/info.json --results smoke/results" >> "$GITHUB_ENV"
-            echo "SB_SRC=Core-Smoke-Artefakt ${{ inputs.artifact }} (Run ${{ inputs.core_run_id }})" >> "$GITHUB_ENV"
-            python tools/check_mock.py smoke/progress.jsonl smoke/result.json smoke/info.json
-          else
-            echo "SB_ARGS=" >> "$GITHUB_ENV"; echo "SB_SRC=Mock (Mockup mit Beispieldaten)" >> "$GITHUB_ENV"
-            python tools/check_mock.py demo/*.json demo/progress.jsonl
-          fi
-      - name: Render 100 %, 150 % and 1366x768 (RDP)
-        env: { QT_QPA_PLATFORM: offscreen }
-        shell: bash
-        run: |
-          python -m sbgui --screenshot ../docs/img          --scale 1   $SB_ARGS --report ../docs/img/report.json
-          python -m sbgui --screenshot ../docs/img/scale150 --scale 1.5 $SB_ARGS --report ../docs/img/scale150/report.json
-          python -m sbgui --screenshot ../docs/img/rdp1366  --size 1366x768 $SB_ARGS --report ../docs/img/rdp1366/report.json
-          python -c "import json,sys; r=json.load(open('../docs/img/rdp1366/report.json')); bad=[k for k,v in r['layout'].items() if v['h_scroll']]; print('h-scroll:', bad); sys.exit(1 if bad else 0)"
-      - uses: actions/upload-artifact@v4
-        with: { name: screenshots, path: docs/img }
-      - name: PR with updated screenshots
-        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
-        uses: peter-evans/create-pull-request@v7
-        with:
-          branch: docs/screenshots-${{ github.ref_name }}
-          title: "docs: GUI-Screenshots für ${{ github.ref_name }}"
-          commit-message: "docs: update GUI screenshots (${{ github.ref_name }})"
-          add-paths: |
-            docs/img/**
-          body: |
-            Automatisch gerendert mit `sbench-gui --screenshot`. Daten: ${{ env.SB_SRC }}.
+          name: sbench-gui-x64
+          path: C:\Tools\sbench
 
-  selftest:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-2022, windows-2025, windows-11-arm]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.13" }
-      - run: pip install -r requirements.txt
-      - name: Mock E2E (QProcess, offscreen)
-        env: { QT_QPA_PLATFORM: offscreen }
-        run: python tools/live_qprocess_check.py
-      # The one-file EXE needs the real core embedded (sbench-gui.spec requires core-bin/ + build info) and is built
-      # by build-gui.yml (called from gui-ci.yml after build-windows.yml). Here: self-test from source against the mock.
-      - name: Self-test from source (windows + offscreen platform plugin, mock core)
-        run: python -m sbgui --self-test --platforms windows,offscreen --report selftest-${{ matrix.os }}.json
-      - name: DLL dependencies of Qt (dumpbin)
-        if: matrix.os != 'windows-11-arm'
-        shell: pwsh
-        run: |
-          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
-          $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC" -Recurse -Filter dumpbin.exe | Where-Object FullName -like '*Hostx64\x64*' | Select-Object -First 1
-          $qt = python -c "import PySide6, os; print(os.path.dirname(PySide6.__file__))"
-          foreach ($f in @("Qt6Gui.dll", "Qt6Widgets.dll", "plugins\platforms\qwindows.dll")) {
-            "== $f"; & $dumpbin.FullName /nologo /dependents (Join-Path $qt $f) | Select-String "\.dll"
-          } | Tee-Object deps-${{ matrix.os }}.txt
-      - uses: actions/upload-artifact@v4
-        if: always()
+      - name: Kern-CLI laden (sbench-cli-x64)
+        uses: actions/download-artifact@v4
         with:
-          name: selftest-${{ matrix.os }}
-          path: |
-            gui/selftest-*.json
-            gui/deps-*.txt
+          name: ${{ needs.core.outputs.cli_artifact_x64 }}
+          path: ${{ runner.temp }}\cli
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          architecture: x64
+          cache: pip
+          cache-dependency-path: gui/requirements-ci.txt
+
+      - name: PySide6 für das Fenster-Capture-Tool
+        run: python -m pip install --disable-pip-version-check "PySide6-Essentials==6.12.0"
+
+      - name: Bildschirmauflösung 1920x1080 (Fenster 1440x900 muss ganz sichtbar sein)
+        continue-on-error: true
+        run: |
+          Set-DisplayResolution -Width 1920 -Height 1080 -Force
+          Start-Sleep 2
+          Add-Type -AssemblyName System.Windows.Forms
+          [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+
+      - name: Anleitung aufnehmen (sbench-gui.exe --guide)
+        run: |
+          New-Item -ItemType Directory -Force $env:SHOTS, D:\sbench | Out-Null
+          Get-ChildItem $env:APP
+          $p = Start-Process -FilePath "$env:APP\sbench-gui.exe" -WorkingDirectory $env:APP -Wait -PassThru `
+               -ArgumentList @("--guide", "`"$env:SHOTS`"", "--size", "1440x900", "--guide-target", "D:\sbench\testdatei.dat")
+          Write-Host "exit code: $($p.ExitCode)"
+          if (Test-Path "$env:SHOTS\report.json") { Get-Content "$env:SHOTS\report.json" } else { throw "kein report.json" }
+          if ($p.ExitCode -ne 0) { exit 1 }
+
+      - name: Explorer-Ordner nach dem ersten Start (01_download)
+        run: |
+          Start-Process explorer.exe $env:APP
+          python gui/tools/capture_window.py --title "sbench" --class CabinetWClass --size 960x520 --out "$env:SHOTS\01_download.png"
+          Get-Process explorer -ErrorAction SilentlyContinue | Where-Object MainWindowTitle -like "*sbench*" | ForEach-Object { $_.CloseMainWindow() | Out-Null }
+
+      - name: CLI im Konsolenfenster (07_cli)
+        run: |
+          Copy-Item "${{ runner.temp }}\cli\sbench.exe" $env:APP
+          $job = @{ schema = "sb-job/1"; name = "cli-beispiel"; tests = @(@{ type = "storage"; name = "4K random lesen";
+                    targets = @(@{ path = "D:\sbench\cli.dat"; kind = "file"; file_size = "256MiB" }); workers = 1; queue_depth = 8;
+                    warmup_s = 1; duration_s = 5; cache = "unbuffered";
+                    access_specs = @(@{ weight = 100; block_size = "4KiB"; read_pct = 100; random_pct = 100; align = "4KiB" }) }) }
+          $job | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8NoBOM D:\sbench\job.json
+          @(
+            '@prompt $P$G',
+            '@cd /d C:\Tools\sbench',
+            'sbench version',
+            'sbench --data-dir C:\Tools\sbench\data run --job D:\sbench\job.json --out D:\sbench\ergebnis.json',
+            '@echo Exit-Code %ERRORLEVEL%',
+            'sbench --data-dir C:\Tools\sbench\data bundle --out D:\sbench\support.zip --all --anonymize',
+            '@echo Exit-Code %ERRORLEVEL%',
+            '@type nul > D:\sbench\cli-done.txt'
+          ) | Set-Content -Encoding ascii D:\sbench\cli-demo.cmd
+          Start-Process cmd.exe -ArgumentList '/k', 'title sbench CLI & mode con cols=118 lines=22 & D:\sbench\cli-demo.cmd'
+          python gui/tools/capture_window.py --title "sbench CLI" --wait-file D:\sbench\cli-done.txt --timeout 60 --out "$env:SHOTS\07_cli.png"
+          Get-Content D:\sbench\ergebnis.json -TotalCount 5
+
+      - name: Upload guide-screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: guide-screenshots
+          path: guide-out
+          if-no-files-found: error

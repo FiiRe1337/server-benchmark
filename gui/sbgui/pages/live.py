@@ -213,6 +213,9 @@ class LiveView(QWidget):
 
     def on_finished(self, code, text):
         self.refresh(); self.timer.stop()
+        a = self.buf.array()
+        el = _mmss(a[-1, 0]) if len(a) else "00:00"
+        self.time_lbl.setText({0: f"Fertig · {el} gemessen", 3: f"Gestoppt · {el} gemessen"}.get(code, f"Beendet (Exit {code})"))
         skip = f" · {len(self.skipped)} übersprungen" if self.skipped else ""
         self.run_chip.setText(f"beendet · {text} ({code}){skip}"); self.run_chip.setObjectName("chipOk" if code == 0 and not skip else "chipWarn")
         self.run_chip.style().unpolish(self.run_chip); self.run_chip.style().polish(self.run_chip)

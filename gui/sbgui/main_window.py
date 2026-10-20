@@ -81,7 +81,7 @@ class MainWindow(QMainWindow):
         self.sup.clicked.connect(lambda: self.support_bundle([])); sv.addWidget(self.sup); sv.addSpacing(10)
         self.data_label = label(f"Daten: {_short_path(self.data_dir or '?')}", "dim")
         self.data_label.setToolTip(f"meta.data_dir: {self.data_dir}"); sv.addWidget(self.data_label)
-        self.ver_label = label(f"GUI {GUI_VERSION} · Kern {kern_version}", "dim"); sv.addWidget(self.ver_label)
+        self.ver_label = label(f"GUI {GUI_VERSION}\nKern {kern_version}", "dim"); sv.addWidget(self.ver_label)  # zweizeilig: CI-Versionen sind lang
         bi = build_info()
         self.ver_label.setToolTip(f"GUI {GUI_VERSION} (Commit {bi['commit']})\nKern {kern_version}"
                                   + (f"\nKern-SHA-256 {bi['core_sha256']}" if bi.get("core_sha256") else ""))
@@ -103,11 +103,34 @@ class MainWindow(QMainWindow):
         self.toast = Toast(root)
         self._set_collapsed(False)
 
+        self.result_files = list(result_files)
         self.pages["profiles"].run_requested.connect(self.start_run)
         self.pages["live"].stop_requested.connect(self.stop_run)
         self.pages["live"].elevate_requested.connect(self.offer_elevation)
+        self._connect_result_pages()
+
+    def _connect_result_pages(self):
         self.pages["compare"].export_selected.connect(self.support_bundle)
         self.pages["export"].support_requested.connect(self.support_bundle)
+
+    def reload_results(self):
+        """After a run: new result files from gui_dir()/results (newest first) appear in Vergleich and Export."""
+        import glob
+        new = sorted(glob.glob(os.path.join(sbench.gui_dir(), "results", "*.json")), key=os.path.getmtime, reverse=True)
+        self.result_files = [f for f in new if f not in self.result_files] + self.result_files
+        files = []
+        for f in self.result_files:      # skip unreadable / incomplete files instead of breaking the page
+            try:
+                if json.load(open(f, encoding="utf-8")).get("schema") == "sb-result/1":
+                    files.append(f)
+            except (OSError, ValueError):
+                pass
+        keys = [k for k, _ in NAV]
+        for key, page in (("compare", lambda: Compare(files)), ("export", lambda: ExportPage(files, os.path.join(sbench.gui_dir(), "export")))):
+            i = keys.index(key); old = self.stack.widget(i); cur = self.stack.currentIndex()
+            self.pages[key] = page(); self.stack.removeWidget(old); self.stack.insertWidget(i, scroll(self.pages[key])); old.deleteLater()
+            self.stack.setCurrentIndex(cur)
+        self._connect_result_pages()
 
     # --------------------------------------------------------------- layout
     def _nav_icons(self):
@@ -158,6 +181,7 @@ class MainWindow(QMainWindow):
     def _attach(self, session, job, rid, tick_ms=250, reattached=False):
         self.pages["live"].attach(session, job, tick_ms=tick_ms, reattached=reattached)
         session.finished.connect(lambda c, t: self.run_mini.setText(f"letzter Lauf: {t}"))
+        session.finished.connect(lambda c, t: c in (0, 3) and self.reload_results())
         session.start(); self.run_mini.setText(f"● läuft · {rid}"); self.run_mini.setObjectName("chipAccent")
         self.run_mini.style().polish(self.run_mini)
         self.show_page("live")

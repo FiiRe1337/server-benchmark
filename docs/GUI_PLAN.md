@@ -3,7 +3,7 @@
 Portable Windows-GUI für den Messkern `sbench.exe` (Devend). Python 3.13 + PySide6 6.12 + pyqtgraph, ausgeliefert als **eine** EXE.
 Schnittstelle ist ausschließlich der CLI-Vertrag in diesem Repo (**Vertrag 1.1**, `main` @ 5670020 = PR #1 + PR #3 + Kern M1 PR #2: `docs/cli.md`, `docs/core.md`, `schema/*.schema.json`). **Kein ctypes/DLL-Binding an den Messkern** (ctypes nur für Win32-Pipe/UAC in `sbgui/pipe_win.py`). Einzige Schema-Quelle ist `schema/` auf `main` (inkl. `sb-bundle/1`); die frühere GUI-Kopie unter `gui/contract/` ist entfernt.
 
-Code: `gui/` · Mockups (**Mockup mit Beispieldaten**, Mock-Kern): `docs/img/` (1440×900) und `docs/img/rdp1366/` (1366×768); 150 % wird lokal/in der CI nach `docs/img/scale150/` gerendert (nicht eingecheckt).
+Code: `gui/` · Echte Screenshots (GUI + echter Kern, windows-2022): `docs/img/guide/`, erzeugt von `.github/workflows/screenshots.yml` ([entwicklung.md](entwicklung.md#screenshots-der-readme-anleitung-aktualisieren)). Mockups (`--screenshot`, Mock-Kern) werden nicht mehr eingecheckt.
 
 ## 1. Architektur
 
@@ -27,22 +27,24 @@ Code: `gui/` · Mockups (**Mockup mit Beispieldaten**, Mock-Kern): `docs/img/` (
 - **Datenordner:** wird **nicht** in der GUI berechnet. Kern-Regel (cli.md 1.1): `SBENCH_DATA_DIR` → `data\` neben `sbench.exe` (wenn beschreibbar) → `%ProgramData%\sbench`. Die GUI zeigt und nutzt ausschließlich `meta.data_dir` aus `sbench info --json`. Eigene Dateien der GUI liegen in `%LOCALAPPDATA%\sbench-gui\` (`logs/gui-*.log`, `profiles/`, `results/<run_id>.json` als `--out`) bzw. `SBENCH_GUI_DIR`; sie kommen per `bundle --include` ins Support-ZIP.
 - **Toleranz:** die 1.1-Felder (`meta.elevated/data_dir/ram_free_bytes/numa_nodes`, `warnings[]`, `progress`, R/W-Split, Worker-`lat_us`, `proc_cpu_pct`, `name`) sind im Schema optional, werden vom Kern immer ausgegeben; die GUI kommt ohne sie aus („Rechte unbekannt“, abgeleitete Labels, kombinierte Kurven, Spalten „–“).
 
-## 2. Screens (Mockups)
+## 2. Screens
 
-| Screen | Datei | Inhalt |
+Spalte „Echter Screenshot“: Aufnahme in `docs/img/guide/` (screenshots.yml, windows-2022, echter Kern); „–“ = Screen existiert, wird aber nicht für die Anleitung aufgenommen.
+
+| Screen | Echter Screenshot | Inhalt |
 |---|---|---|
-| Übersicht | `01_dashboard.png` | Karten CPU/RAM/Hypervisor/Netz aus `sbench info --json` (sb-info/1), Volumes, physische Disks, NICs, Schnellstart-Kacheln |
-| Testprofil | `02_profile_editor.png` | Profilliste, Ziele (file/volume/physical, Worker→Ziel-Zuordnung i mod n), **gewichtete Access Specs** (Gewicht, Block, % Lesen, % Random, Align, Burst, Delay) mit Mix-Balken, Worker/QD/Cache/Warmup/Dauer/Tick, Live-JSON-Vorschau |
-| Validierung | `02b_profile_validation.png` | `sbench validate` → sb-validate/1; `errors[]` und `warnings[]` (W_NEEDS_ADMIN, W_DESTRUCTIVE, W_LOW_DISK_SPACE) in der Karte „Prüfung“, Pfade markieren Zelle/Feld/Ziel |
-| Destruktiv | `02c_destructive_confirm.png` | Rot gestalteter Dialog: je Volume/Disk-Ziel mit Schreibanteil muss der Zielname eingetippt werden; erst dann `allow_destructive: true` im Job **und** `--allow-destructive` beim Start |
-| Rechte | `02d_elevation_offer.png` | bei W_NEEDS_ADMIN: „Als Administrator starten“ (runas) oder „Ohne Rechte starten“ (nur ohne Raw-Ziele) |
-| ICF-Import | `02e_icf_import.png` | Menü „Import ▾ → Iometer-Profil importieren (.icf)“ → `sbench import-icf` → Warnungen (W_ICF_UNSUPPORTED) vor Übernahme |
-| Live-Lauf | `03_live_run.png` (Replay), `03b_live_preparing.png`, `03c_live_qprocess.png` (QProcess gegen Mock) | Phasen-Chips, Fortschrittsbalken auch in preparing (Bytes) / warmup (s) aus `progress` + `phase.duration_s`, KPI IOPS/MB/s/Ø/p99, CPU System + sbench-Prozess, Schalter „Lesen/Schreiben getrennt“, Worker-Tabelle mit Ø µs/p99 µs, Event-Log, Stop |
-| Re-Attach | `03d_reattach_offer.png` | beim GUI-Start gefundener Lauf (sb-runs/1) |
-| Vergleich | `04_compare.png` | 2–3 Läufe (z. B. Host vs. VM vs. VM-SAN), gruppierte Balken je Test (Metrik wählbar), Perzentil-Kurve p50…p99.99 (log), Delta-Tabelle mit Ampel |
-| Export | `05_export.png` | Auswahl, Formate, Optionen, HTML-Vorschau, **„Ergebnisse für Support exportieren“** |
-| Support-Dialog | `06_support_dialog.png` | Umfang alle/ausgewählte, GUI-Logs, Profile, **Anonymisieren** |
-| Support-Toast | `07_support_export_done.png` | Erfolgsmeldung mit Anzahl Dateien, „Ordner öffnen“ |
+| Übersicht | [02_start](img/guide/02_start.png) | Karten CPU/RAM/Hypervisor/Netz aus `sbench info --json` (sb-info/1), Volumes, physische Disks, NICs, Schnellstart-Kacheln |
+| Testprofil | [03_testprofil](img/guide/03_testprofil.png) | Profilliste, Ziele (file/volume/physical, Worker→Ziel-Zuordnung i mod n), **gewichtete Access Specs** (Gewicht, Block, % Lesen, % Random, Align, Burst, Delay) mit Mix-Balken, Worker/QD/Cache/Warmup/Dauer/Tick, Live-JSON-Vorschau |
+| Validierung | [03_testprofil](img/guide/03_testprofil.png) (Karte „Prüfung“) | `sbench validate` → sb-validate/1; `errors[]` und `warnings[]` (W_NEEDS_ADMIN, W_DESTRUCTIVE, W_LOW_DISK_SPACE) in der Karte „Prüfung“, Pfade markieren Zelle/Feld/Ziel |
+| Destruktiv | – | Rot gestalteter Dialog: je Volume/Disk-Ziel mit Schreibanteil muss der Zielname eingetippt werden; erst dann `allow_destructive: true` im Job **und** `--allow-destructive` beim Start |
+| Rechte | – (`03b_ohne_rechte.png` nur ohne Adminrechte) | bei W_NEEDS_ADMIN: „Als Administrator starten“ (runas) oder „Ohne Rechte starten“ (nur ohne Raw-Ziele) |
+| ICF-Import | – | Menü „Import ▾ → Iometer-Profil importieren (.icf)“ → `sbench import-icf` → Warnungen (W_ICF_UNSUPPORTED) vor Übernahme |
+| Live-Lauf | [04_live](img/guide/04_live.png), [04b_gestoppt](img/guide/04b_gestoppt.png) | Phasen-Chips, Fortschrittsbalken auch in preparing (Bytes) / warmup (s) aus `progress` + `phase.duration_s`, KPI IOPS/MB/s/Ø/p99, CPU System + sbench-Prozess, Schalter „Lesen/Schreiben getrennt“, Worker-Tabelle mit Ø µs/p99 µs, Event-Log, Stop |
+| Re-Attach | – | beim GUI-Start gefundener Lauf (sb-runs/1) |
+| Vergleich | [05_vergleich](img/guide/05_vergleich.png) | 2–3 Läufe (z. B. Host vs. VM vs. VM-SAN), gruppierte Balken je Test (Metrik wählbar), Perzentil-Kurve p50…p99.99 (log), Delta-Tabelle mit Ampel |
+| Export | [06_export](img/guide/06_export.png) | Auswahl, Formate, Optionen, HTML-Vorschau, **„Ergebnisse für Support exportieren“** |
+| Support-Dialog | [06b_support_dialog](img/guide/06b_support_dialog.png) | Umfang alle/ausgewählte, GUI-Logs, Profile, **Anonymisieren** |
+| Support-Toast | [06c_support_fertig](img/guide/06c_support_fertig.png) | Erfolgsmeldung mit Anzahl Dateien, „Ordner öffnen“ |
 
 **Kleine Bildschirme / RDP:** Mindestgröße 1280×720. Unter 1400 px Breite klappt die Sidebar auf Icons (64 px) zusammen (Umschalter ☰). Seiten liegen in ScrollAreas; Seitenspalten (`Responsive`-Container) stapeln sich unterhalb der Summe ihrer Mindestbreiten bzw. eines Breakpoints. Geprüft per Screenshot-Bericht (`content_min`, `h_scroll`, `v_scroll`): bei 1440×900, 1366×768 und 1280×720 kein horizontales Scrollen; nur der Profileditor scrollt vertikal (Prüfungs-Karte + JSON).
 
@@ -88,7 +90,7 @@ Details mit Quellen: **`docs/kompatibilitaet.md`** (Matrix OS × CLI/GUI × phys
 2. **Server Core:** App-Compat-FOD (`Add-WindowsCapability -Online -Name ServerCore.AppCompatibility~~~~0.0.1.0`, ab Server 2019) bringt u. a. explorer.exe, mmc, perfmon; für 2016 nicht verfügbar. Ob `qwindows.dll` (dwmapi, uxtheme, …) auf Core ohne/mit FOD lädt: **ungetestet – michi muss es auf einer echten Server-Core-VM prüfen** (`sbench-gui.exe --self-test --report st.json`, `QT_DEBUG_PLUGINS=1`). GUI erkennt Core (`HKLM\…\CurrentVersion\InstallationType = "Server Core"`) und nutzt dann Qt-eigene Dateidialoge (`DontUseNativeDialog`) und mitgelieferte Fonts. Empfehlung: GUI auf Core nur mit FOD als „best effort“; Standard = CLI auf dem Core-Host, Auswertung (Result-JSON/Support-ZIP) in der GUI auf einem anderen Rechner; später ggf. Remote-Modus (sbench via PowerShell-Remoting/OpenSSH starten, Progress per `file:` auf Share). TUI nur, falls Nachfrage.
 3. **DPI:** Qt 6 ist standardmäßig Per-Monitor-DPI-aware V2, Rundungs-Policy `PassThrough` (Default, zusätzlich explizit gesetzt) → 125/150/175 % exakt. Layouts nur in geräteunabhängigen Pixeln; pyqtgraph-Linienbreiten/Fonts skalieren mit (geprüft: 150 %-Render 2160×1350, lokal; CI: `docs/img/scale150/`). Test in CI bei 100 % und 150 % (`QT_SCALE_FACTOR`), manuell zusätzlich 125 %/200 % und Monitorwechsel.
 4. **Ohne GPU / RDP / VM:** `pg.setConfigOptions(useOpenGL=False)` (ist auch pyqtgraph-Default), nur Qt Widgets mit Raster-Paint-Engine, kein QtQuick/QOpenGLWidget → `opengl32sw.dll` und `QT_OPENGL=software` werden nicht benötigt und nicht gebündelt. Kurven per Min/Max-Downsampling auf ≤ 1 500 Punkte, Redraw 10 Hz, Antialiasing per Option abschaltbar für langsame RDP-Sitzungen.
-5. **README-Screenshots in Windows-CI:** `sbench-gui --screenshot <dir> [--scale 1.5] [--size 1366x768] [--replay progress.jsonl] [--info info.json] [--results dir] [--report f.json]` rendert deterministisch per `QWidget.grab()` 13 Screens (Overlays sind Kind-Widgets und damit im Grab). Live-View per **Replay** ohne Timer. Datenquelle: Smoke-Artefakt **`sbench-smoke-windows-2022-x64`** (`result.json`, `progress.jsonl`, `info.json`, cli.md 1.1), bis dahin `gui/demo/` (Mock). Workflow-Entwurf `.github/workflows/screenshots.yml` (nur `workflow_dispatch` + Tags) rendert 100 %, 150 % und 1366×768 nach `docs/img/` und öffnet einen PR. Zusätzlich Job `selftest` (windows-2022, windows-2025, windows-11-arm): EXE bauen, `--self-test --platforms windows,offscreen`, `dumpbin /dependents` für Qt6Gui/Qt6Widgets/qwindows, und Versuch im Container `servercore:ltsc2022` (continue-on-error; Container haben by design keine GUI, FOD dort vermutlich nicht installierbar – *unverifiziert*). windows-2019 ist abgekündigt.
+5. **README-Screenshots in Windows-CI:** `sbench-gui --screenshot <dir> [--scale 1.5] [--size 1366x768] [--replay progress.jsonl] [--info info.json] [--results dir] [--report f.json]` rendert deterministisch per `QWidget.grab()` 13 Screens (Overlays sind Kind-Widgets und damit im Grab). Live-View per **Replay** ohne Timer. Datenquelle: Smoke-Artefakt **`sbench-smoke-windows-2022-x64`** (`result.json`, `progress.jsonl`, `info.json`, cli.md 1.1), bis dahin `gui/demo/` (Mock). *Ersetzt:* `.github/workflows/screenshots.yml` nimmt jetzt echte Screenshots mit dem echten Kern auf (`--guide`, siehe [entwicklung.md](entwicklung.md#screenshots-der-readme-anleitung-aktualisieren)). Self-Tests der EXE laufen in `gui-ci.yml`/`build-gui.yml`. windows-2019 ist abgekündigt.
 6. **`--self-test`** (implementiert): startet je Plattform-Plugin (`windows`, `offscreen`) einen Kindprozess (fehlendes Plugin bricht sonst den Prozess ab), baut das Hauptfenster, grabbt einen Frame, meldet Qt-/PySide-Version, DPR, Fonts und unter Windows die geladenen DLLs; Exit 0/1 + JSON (`sbench-gui-selftest/1`).
 
 ## 8. Meilensteine

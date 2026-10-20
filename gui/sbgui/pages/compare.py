@@ -11,8 +11,23 @@ PCT_TXT = ["p50", "p90", "p95", "p99", "p99.9", "p99.99"]
 
 
 
-def run_label(res):
-    return host_label(res["meta"])
+def run_label(res, others=()):
+    """Host label; if several selected runs come from the same host, add the start time to tell them apart."""
+    lab = host_label(res["meta"])
+    same = [o for o in others if o is not res and host_label(o["meta"]) == lab]
+    if same:
+        cfg = _load_cfg(res)
+        lab += f" · {cfg}" if cfg and all(_load_cfg(o) != cfg for o in same) else f" · {_local(res['started_utc'])}"
+    return lab
+
+
+def _load_cfg(res):
+    """'2 W × QD 8' from the first storage test (distinguishes runs of the same host with different load)."""
+    st = storage_tests(res)
+    if not st:
+        return ""
+    c = st[0]["config"]
+    return f"{c.get('workers', 1)} W × QD {c.get('queue_depth', 1)}"
 
 
 def by_name(res):
@@ -51,7 +66,7 @@ class Compare(QWidget):
         self.list = listw(); left.add(self.list, 1)
         for i, (f, r) in enumerate(self.results):
             it = QListWidgetItem(f"{run_label(r)}{'  · Beispiel' if r.get('_example') else ''}\n"
-                                 f"{len(storage_tests(r))} Tests · {_local(r['started_utc'])}")
+                                 f"{len(storage_tests(r))} Tests · {_load_cfg(r) + ' · ' if _load_cfg(r) else ''}{_local(r['started_utc'])}")
             it.setFlags(it.flags() | Qt.ItemIsUserCheckable); it.setCheckState(Qt.Checked if i < 3 else Qt.Unchecked)
             it.setData(Qt.UserRole, i); self.list.addItem(it)
         self.list.itemChanged.connect(self.update)
@@ -101,7 +116,7 @@ class Compare(QWidget):
             ys = [self._val(tests[nm]) if nm in tests else 0 for nm in names]
             xs = np.arange(len(names)) - 0.4 + w * (k + 0.5)
             self.p_bar.addItem(pg.BarGraphItem(x=xs, height=ys, width=w * 0.86, brush=pg.mkBrush(col), pen=pg.mkPen(None)))
-            l = label(f"■  {run_label(r)}"); l.setStyleSheet(f"color:{col}; font-size:11px;"); self.legend.addWidget(l)
+            l = label(f"■  {run_label(r, [x for _, x in sel])}"); l.setStyleSheet(f"color:{col}; font-size:11px;"); self.legend.addWidget(l)
             if k == 0:  # focus test of the first run; the other runs show the same test (by name) if present
                 fkey, focus = focus_test(tests)
                 self.lc.title_label.setText(f"Latenz-Perzentile · {fkey}")
@@ -134,7 +149,7 @@ class Compare(QWidget):
         from PySide6.QtWidgets import QHeaderView
         hh = self.delta.horizontalHeader(); hh.setSectionResizeMode(QHeaderView.Stretch)
         hh.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.dc.title_label.setText("Delta-Tabelle  ·  " + "   ".join(f"{letters[k]} = {run_label(r)}" for k, r in enumerate(runs)))
+        self.dc.title_label.setText("Delta-Tabelle  ·  " + "   ".join(f"{letters[k]} = {run_label(r, runs)}" for k, r in enumerate(runs)))
         for nm in names:
             row, colors = [nm], {}
             for getter, lower_better in ((lambda s: s["iops"], False), (lambda s: s["lat_us"]["p99"], True)):
@@ -146,7 +161,7 @@ class Compare(QWidget):
                     row.append(fmt_num(val))
                     if k:
                         d = (val - vals[0]) / vals[0] * 100 if val and vals[0] else 0
-                        row.append(f"{d:+.0f} %")
+                        row.append("±0 %" if abs(d) < 0.5 else f"{d:+.0f} %")
                         good = (d < 0) if lower_better else (d > 0)
                         colors[len(row) - 1] = T.GREEN if good or abs(d) < 2 else (T.AMBER if abs(d) < 25 else T.RED)
             add_row(self.delta, row, colors)
