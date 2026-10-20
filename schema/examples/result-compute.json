@@ -192,9 +192,9 @@
       "summary": {
         "workload": "int",
         "threads": 1,
-        "ops_per_s": 331245678.9,
-        "score": 1019.2,
-        "ops": 1656228394,
+        "ops_per_s": 284123456.7,
+        "score": 1014.7,
+        "ops": 1420617283,
         "cpus": [
           0
         ],
@@ -205,33 +205,33 @@
           "id": 0,
           "cpu": 0,
           "node": 0,
-          "ops_per_s": 331245678.9
+          "ops_per_s": 284123456.7
         }
       ],
       "timeseries": [
         {
           "t": 1.0,
-          "ops_per_s": 330078586.2,
+          "ops_per_s": 283122391.8,
           "cpu_pct": 0.9
         },
         {
           "t": 2.0,
-          "ops_per_s": 328932584.9,
+          "ops_per_s": 282139417.9,
           "cpu_pct": 0.9
         },
         {
           "t": 3.0,
-          "ops_per_s": 332245606.7,
+          "ops_per_s": 284981137.2,
           "cpu_pct": 0.9
         },
         {
           "t": 4.0,
-          "ops_per_s": 328413106.3,
+          "ops_per_s": 281693839.1,
           "cpu_pct": 0.9
         },
         {
           "t": 5.0,
-          "ops_per_s": 331483394.1,
+          "ops_per_s": 284327355.1,
           "cpu_pct": 0.9
         }
       ],
@@ -251,9 +251,9 @@
       "summary": {
         "workload": "mixed",
         "threads": 8,
-        "ops_per_s": 6414790.2,
-        "score": 8018.5,
-        "ops": 32073951,
+        "ops_per_s": 3049005.2,
+        "score": 8023.7,
+        "ops": 15245026,
         "numa_node": 1,
         "cpus": [
           64,
@@ -272,75 +272,75 @@
           "id": 0,
           "cpu": 64,
           "node": 1,
-          "ops_per_s": 805648.3
+          "ops_per_s": 382931.6
         },
         {
           "id": 1,
           "cpu": 66,
           "node": 1,
-          "ops_per_s": 795679.2
+          "ops_per_s": 378193.2
         },
         {
           "id": 2,
           "cpu": 68,
           "node": 1,
-          "ops_per_s": 810240.9
+          "ops_per_s": 385114.5
         },
         {
           "id": 3,
           "cpu": 70,
           "node": 1,
-          "ops_per_s": 795014.9
+          "ops_per_s": 377877.4
         },
         {
           "id": 4,
           "cpu": 72,
           "node": 1,
-          "ops_per_s": 807850.1
+          "ops_per_s": 383978.1
         },
         {
           "id": 5,
           "cpu": 74,
           "node": 1,
-          "ops_per_s": 796063.3
+          "ops_per_s": 378375.8
         },
         {
           "id": 6,
           "cpu": 76,
           "node": 1,
-          "ops_per_s": 796739.1
+          "ops_per_s": 378697.0
         },
         {
           "id": 7,
           "cpu": 78,
           "node": 1,
-          "ops_per_s": 807554.4
+          "ops_per_s": 383837.6
         }
       ],
       "timeseries": [
         {
           "t": 1.0,
-          "ops_per_s": 6456724.0,
+          "ops_per_s": 3068936.7,
           "cpu_pct": 6.4
         },
         {
           "t": 2.0,
-          "ops_per_s": 6366525.6,
+          "ops_per_s": 3026064.6,
           "cpu_pct": 6.4
         },
         {
           "t": 3.0,
-          "ops_per_s": 6379282.9,
+          "ops_per_s": 3032128.3,
           "cpu_pct": 6.4
         },
         {
           "t": 4.0,
-          "ops_per_s": 6431139.3,
+          "ops_per_s": 3056776.1,
           "cpu_pct": 6.4
         },
         {
           "t": 5.0,
-          "ops_per_s": 6472229.4,
+          "ops_per_s": 3076306.5,
           "cpu_pct": 6.4
         }
       ],

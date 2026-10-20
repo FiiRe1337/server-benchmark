@@ -221,24 +221,24 @@ L1/L2 (z. B. 16 KiB) zeigen die Cache-Latenz.
 | `int` | eine Runde aus Addition, Multiplikation, Rotation, XOR, Shift und einem Tabellenzugriff auf vier abhängigen 64-Bit-Ketten |
 | `float` | drei Multiplikations-/Additionsketten und eine Division (double) |
 | `crypto` | SHA-256 über einen 64-Byte-Block (portable Implementierung ohne SHA-Befehle) |
-| `mixed` | 128 `int` + 64 `float` + SHA-256 einer 64-Byte-Nachricht (mit Padding zwei Blöcke); auf dem Referenzsystem je etwa ein Drittel der Zeit |
+| `mixed` | 256 `int` + 128 `float` + SHA-256 einer 64-Byte-Nachricht (inkl. Padding und Abschluss); auf dem Referenzsystem je etwa ein Drittel der Zeit |
 
 Die Kernel sind skalar und laufen auf x64 und ARM64 mit identischer Arbeit; sie messen die
 Ganzzahl-/Gleitkomma-Leistung je Kern und die Skalierung über Kerne, nicht SIMD-Durchsatz.
 
 **Score:** `score = ops_per_s / Referenz × 1000`. Referenz = ops/s **eines** Threads auf
-dem GitHub-Runner `windows-2022` mit AMD EPYC 9V74 (Smoke-Lauf der M2-Kalibrierung, siehe
-PR #13). Die Werte sind ab Vertrag 1.2 fest; GitHub-Runner wechseln die CPU-Typen, ein
+dem GitHub-Runner `windows-2022`/`windows-2025` mit AMD EPYC 7763 (Mittel der Smoke-Läufe
+der M2-Kalibrierung, siehe PR #13). Die Werte sind ab Vertrag 1.2 fest; GitHub-Runner wechseln die CPU-Typen, ein
 Score von 1000 auf einem Runner ist deshalb kein Testkriterium. 1000 heißt „ein Thread der Referenzmaschine“,
 ein 16-Kern-System mit gleicher Kernleistung erreicht im Mehrthreadtest etwa 16 000
 (plus SMT-Anteil). Die Referenzen stehen in `sb_cpu_reference()` (`compute.c`).
 
 | workload | Referenz (ops/s, 1 Thread) |
 |---|---|
-| `int` | 3,25 · 10^8 |
-| `float` | 1,75 · 10^8 |
-| `crypto` | 4,15 · 10^6 |
-| `mixed` | 8,0 · 10^5 |
+| `int` | 2,8 · 10^8 |
+| `float` | 1,5 · 10^8 |
+| `crypto` | 3,4 · 10^6 |
+| `mixed` | 3,8 · 10^5 |
 
 ## Grenzen und bekannte Abweichungen
 
@@ -248,6 +248,10 @@ ein 16-Kern-System mit gleicher Kernleistung erreicht im Mehrthreadtest etwa 16 
 - Storage-Worker werden nicht gebunden; Windows verteilt die Threads. cpu/memory binden
   jeden Thread (siehe oben).
 - memory nutzt keine Large Pages; Latenzwerte großer Puffer enthalten TLB-Fehlzugriffe.
+- ARM64 (CI-Runner mit Microsoft Cobalt 100): `write` liefert deutlich mehr als `read`
+  (ca. 120 vs. 40 GB/s mit 2 Threads). Der Unit-Test bestätigt, dass jede Zeile beschrieben
+  wird; vermutlich schreibt die CPU ganze Zeilen ohne vorheriges Lesen (Write Streaming).
+  Mit einem Vergleichswerkzeug auf ARM64 noch nicht gegengeprüft.
 - Die CPU-Kernel sind skalar; Vergleiche mit Cinebench oder 7-Zip zeigen Tendenzen,
   keine gleichen Zahlen (siehe `docs/abnahme-m2.md`).
 - Selbst angelegte Testdateien werden nach jedem Test gelöscht. Nutzen mehrere Tests

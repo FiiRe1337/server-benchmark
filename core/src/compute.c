@@ -15,14 +15,14 @@
 #define BLK 4096u
 
 /* Referenz für den CPU-Score: ops/s eines Threads auf dem Referenzsystem (GitHub-Runner
- * windows-2022 mit AMD EPYC 9V74, Smoke-Lauf der M2-Kalibrierung; docs/core.md).
+ * windows-2022/-2025 mit AMD EPYC 7763, Mittel der M2-Smoke-Läufe; docs/core.md).
  * score = ops_per_s / ref * 1000. Werte gelten ab Vertrag 1.2 unverändert. */
 double sb_cpu_reference(sb_cpu_workload w) {
     switch (w) {
-    case SB_CPU_INT: return 3.25e8;
-    case SB_CPU_FLOAT: return 1.75e8;
-    case SB_CPU_CRYPTO: return 4.15e6;
-    default: return 8.0e5;
+    case SB_CPU_INT: return 2.8e8;
+    case SB_CPU_FLOAT: return 1.5e8;
+    case SB_CPU_CRYPTO: return 3.4e6;
+    default: return 3.8e5;
     }
 }
 
