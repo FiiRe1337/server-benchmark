@@ -302,16 +302,74 @@ Exit-Codes: 0 ok, 1 Laufzeitfehler, 2 ungültige Argumente.
 ### `sbench import-icf` (Meilenstein 2)
 
 ```
-sbench import-icf <datei.icf> --out <job.json>
+sbench import-icf <datei.icf> [-o|--out <job.json>] [--target <pfad>]... [--json]
 ```
 
-Wandelt eine Iometer-Konfiguration (ICF) in einen Job `sb-job/1` um (Worker, Targets,
-Queue Depth, Access-Specs mit Gewichten, Laufzeit). Felder ohne Entsprechung
-(z. B. Netzwerk-Worker, Ramp-up-Varianten, mehrere Manager) werden nicht übernommen und
-als Warnungen gemeldet: Ausgabe `sb-validate/1` auf stdout mit `ok: true` und
-`warnings` (Code `W_ICF_UNSUPPORTED`, `path` = JSON Pointer auf das betroffene Ziel im
-erzeugten Job bzw. `""`). Exit-Codes: 0 ok (auch mit Warnungen), 1 Datei nicht lesbar,
-2 ICF ungültig oder nicht konvertierbar.
+Wandelt eine Iometer-Konfiguration (`.icf`, Iometer 1.1.0 und 2006.07.27; ANSI oder UTF-8,
+CRLF oder LF) in einen Job `sb-job/1` mit `storage`-Tests um.
+
+| Option | Wirkung |
+|---|---|
+| `-o`, `--out <job.json>` | Job in die Datei schreiben (UTF-8). stdout: `sb-validate/1` (Vertrag der GUI). Die Datei wird nur bei Exit 0 geschrieben. |
+| ohne `-o` | Job auf stdout, Fehler und Warnungen als Text (`CODE [pfad]: meldung`) auf stderr. |
+| `--json` | Ohne `-o`: nur `sb-validate/1` auf stdout, kein Job (Prüfmodus). Mit `-o` ohne zusätzliche Wirkung. |
+| `--target <pfad>` | Mehrfach angebbar. Ersetzt die Targets aus dem ICF in ihrer Reihenfolge; die Anzahl muss gleich sein (sonst `E_ICF_TARGET_COUNT`). Hat das ICF keine Targets, werden die angegebenen übernommen (ein Worker je Target). `kind` wird aus dem Pfad bestimmt: `\\.\PhysicalDriveN` → `physical`, `\\.\X:` → `volume`, sonst `file`. |
+
+**Abbildung**
+
+| Iometer | sb-job/1 |
+|---|---|
+| Access Specification (einem Worker zugewiesen; Iometer führt sie nacheinander aus) | je ein Test `storage`, `name` = Name der Spec, Reihenfolge wie im ICF. Ohne Zuweisung: alle Specs (`W_ICF_NO_ASSIGNMENT`, wenn es Worker gibt). |
+| Zeile `size,% of size,% reads,% random,delay,burst,align,reply` | ein Eintrag in `access_specs`: `block_size` = size, `weight` = % of size (Summe muss 100 sein), `read_pct`, `random_pct`; `delay_ms` und `burst_len` nur bei delay > 0; `align` nur bei align > 0 |
+| Test Description | `name` des Jobs (sonst Dateiname ohne Endung) |
+| Run Time (h/min/s), Ramp Up Time | `duration_s`, `warmup_s` |
+| Outstanding I/Os (pro Worker und Target) | `queue_depth` |
+| Disk-Worker × Targets | `workers` = Anzahl der Paare (Worker, Target); sbench verteilt die Worker reihum auf `targets` |
+| Target `D: "Label"` | `{"path": "D:\\iobw.tst", "kind": "file"}`, `file_size` = Disk maximum size × 512 Bytes |
+| Target `PHYSICALDRIVE:N` | `{"path": "\\\\.\\PhysicalDriveN", "kind": "physical"}` ohne `allow_destructive` |
+| – | `cache: "unbuffered"` (wie Iometer) |
+
+**Warnungen** (`ok: true`, Exit 0; `path` = JSON Pointer in den erzeugten Job bzw. `""`,
+ICF-Zeilennummern in `msg`):
+
+| Code | Bedeutung |
+|---|---|
+| `W_ICF_RUN_TIME` | Run Time 0 (unbegrenzt) oder fehlend → `duration_s` = 60 |
+| `W_ICF_DISK_SIZE` | Disk maximum size 0 (Iometer füllt das Laufwerk) → Testdatei 8 GiB; bei physischen Disks wird die Größe nicht übernommen (sbench testet die ganze Disk) |
+| `W_ICF_ALIGN` | align 0 (Iometer: Sektorgrenzen) → ohne `align`, sbench richtet zufällige Offsets an der `block_size` aus |
+| `W_ICF_REPLY` | reply ≠ 0 (nur Netzwerk) wird ignoriert |
+| `W_ICF_CYCLING` | Test Type ≠ NORMAL (Worker-/Target-/Queue-Depth-Cycling): ein Durchgang mit den Worker-Einstellungen |
+| `W_ICF_QD_MIXED` | Worker mit unterschiedlichen Outstanding I/Os → Wert des ersten Workers |
+| `W_ICF_SPEC_MIXED` | Worker mit unterschiedlichen Access Specs → Specs des ersten Workers |
+| `W_ICF_WORKER_SPLIT` | Iometer-Worker mit mehreren Targets → ein sbench-Worker je Target |
+| `W_ICF_TARGET_LAYOUT` | Targets mit unterschiedlich vielen Workern → reihum verteilt |
+| `W_ICF_MANAGERS` | mehrere Manager → nur der erste (sbench misst lokal) |
+| `W_ICF_NETWORK_WORKER` | Netzwerk-Worker werden ignoriert (dafür `net_client`/`net_server`) |
+| `W_ICF_DATA_PATTERN` | Data pattern ≠ 2 (Full random) bei Schreibanteil: sbench schreibt immer Zufallsdaten |
+| `W_ICF_SECTOR` | size/align kein Vielfaches von 512 |
+| `W_ICF_ZERO_WEIGHT` | Zeile mit 0 % of size wird weggelassen |
+| `W_ICF_NO_TARGET` | kein Disk-Worker mit Target und kein `--target` → Platzhalter `D:\sbtest.dat` (8 GiB) |
+| `W_ICF_NO_WORKERS` | keine Manager-Liste → 1 Worker je Target, `queue_depth` 1 |
+| `W_ICF_UNSUPPORTED` | sonstige Felder ohne Entsprechung (Starting Sector, fixed seed, connection rate, Burst ohne Delay, unbekannte Abschnitte oder Targets) |
+| `W_ICF_VALIDATE` | Der erzeugte Job wurde wie bei `validate` geprüft; umgebungsabhängige Fehler (`E_TARGET_NOT_FOUND`, `E_DESTRUCTIVE_NOT_ALLOWED`, `E_BLOCK_ALIGN`, `E_TARGET_SIZE`) werden nur gewarnt, der ursprüngliche Code steht am Anfang von `msg`. Vor `run` den Job anpassen. |
+
+Warnungen von `validate` (z. B. `W_NEEDS_ADMIN`, `W_LOW_DISK_SPACE`, `W_DESTRUCTIVE`) werden
+unverändert durchgereicht.
+
+**Fehler** (`ok: false`, Exit 2, keine Job-Datei): `E_ICF_FORMAT` (keine Iometer-Datei,
+fehlende `Version`-Zeile, keine Access Specifications, Datei abgeschnitten), `E_ICF_PARSE`
+(Zeile nicht lesbar, z. B. falsche Spaltenzahl), `E_ICF_VALUE` (Wert außerhalb des Bereichs),
+`E_ICF_SPEC` (Summe `% of size` ≠ 100, Spec ohne Zeilen, doppelt, unbekannte Spec bei einem
+Worker), `E_ICF_TARGET_COUNT` (`--target` passt nicht). Exit 1: ICF-Datei nicht lesbar
+(`E_IO`) oder Ausgabedatei nicht schreibbar.
+
+Beispiel:
+
+```
+sbench import-icf fileserver.icf -o fileserver.json --target E:\sbench\test.dat
+sbench validate --job fileserver.json
+sbench run --job fileserver.json
+```
 
 ### `sbench version`
 
