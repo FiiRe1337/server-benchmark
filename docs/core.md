@@ -83,7 +83,12 @@ zerstören Daten und laufen nur, wenn das Target `allow_destructive: true` hat *
 - **Ticks:** Jeder Worker führt zwei Intervall-Puffer (Zähler + Histogramm). Der
   Haupt-Thread fordert im Takt `--tick-ms` einen Wechsel an, der Worker bestätigt ihn
   zwischen zwei I/Os, ohne Sperren im I/O-Pfad. Ein letztes Teilintervall wird
-  gemeldet, wenn es mindestens 10 % eines Ticks lang ist.
+  gemeldet, wenn es mindestens 10 % eines Ticks lang ist. Der Haupt-Thread wartet höchstens
+  250 ms auf die Quittungen; ein Worker, der bis dahin nicht quittiert hat (z. B. eine I/O
+  hängt), steht im Tick mit 0 und sein Intervall zählt zum nächsten Tick. `workers[]` enthält
+  trotzdem immer alle Worker, nach `id` sortiert (Vertrag 1.3, docs/cli.md).
+- **Zeitreihe:** `timeseries[]` im Ergebnis sind genau die Tick-Intervalle (`--tick-ms`,
+  im Ergebnis `tick_ms`), nicht fest 1 s.
 - **CPU:** `cpu_pct` = Systemlast über alle logischen Prozessoren aus `GetSystemTimes`.
   `proc_cpu_pct` = CPU-Zeit von sbench (`GetProcessTimes`) bezogen auf alle logischen
   Prozessoren (gleiche Skala).
@@ -182,6 +187,11 @@ wird nicht gespeichert.
    `VirtualAllocExNuma` auf `mem_node` bzw. dem eigenen Knoten an und beschreibt ihn
    vollständig (First Touch), damit die physischen Seiten auf dem Zielknoten liegen.
    Normale 4-KiB-Seiten (keine Large Pages: dafür wäre `SeLockMemoryPrivilege` nötig).
+   Fortschritt: der Hauptthread summiert die beschriebenen Bytes aller Threads etwa alle
+   0,3 s; `total` = Threads × tatsächliche Puffergröße (`buffer_size_bytes`, auch bei `copy`).
+   Bei `latency` folgt nach dem Beschreiben noch der Aufbau der Zeigerkette, der Fortschritt
+   steht dann schon bei 100 %. Das erste `phase`-Event nennt `threads` und je Thread den
+   gebundenen Prozessor mit Kern und SMT-Geschwister (`cpus`, Vertrag 1.3).
 4. **warmup** und **measure**: Die Threads arbeiten in Batches, deren Größe sich auf
    0,5–2 ms einregelt; nach jedem Batch wird ein eigener, cache-zeilen-getrennter Zähler
    aktualisiert. Der Hauptthread liest die Zähler zu Beginn und Ende der Messphase und pro
@@ -231,7 +241,9 @@ dem GitHub-Runner `windows-2022`/`windows-2025` mit AMD EPYC 7763 (Mittel der Sm
 der M2-Kalibrierung, siehe PR #13). Die Werte sind ab Vertrag 1.2 fest; GitHub-Runner wechseln die CPU-Typen, ein
 Score von 1000 auf einem Runner ist deshalb kein Testkriterium. 1000 heißt „ein Thread der Referenzmaschine“,
 ein 16-Kern-System mit gleicher Kernleistung erreicht im Mehrthreadtest etwa 16 000
-(plus SMT-Anteil). Die Referenzen stehen in `sb_cpu_reference()` (`compute.c`).
+(plus SMT-Anteil). Die Referenzen stehen in `sb_cpu_reference()` (`compute.c`). Ab Vertrag 1.3
+gibt sbench Formel und Referenzen selbst aus (`meta.cpu_score` in `info` und Ergebnis,
+`summary.score_reference` je cpu-Test) und berechnet `score` auch je Tick und Zeitreihen-Punkt.
 
 | workload | Referenz (ops/s, 1 Thread) |
 |---|---|
@@ -254,6 +266,9 @@ ein 16-Kern-System mit gleicher Kernleistung erreicht im Mehrthreadtest etwa 16 
   Mit einem Vergleichswerkzeug auf ARM64 noch nicht gegengeprüft.
 - Die CPU-Kernel sind skalar; Vergleiche mit Cinebench oder 7-Zip zeigen Tendenzen,
   keine gleichen Zahlen (siehe `docs/abnahme-m2.md`).
+- Teilergebnisse (Vertrag 1.3): Endet ein Test durch Stop oder Laufzeitfehler, steht er mit
+  `partial: true` und `stopped_in` im Ergebnis; vor der Messphase (`preparing`, `warmup`) sind
+  seine Messwerte `null`, nicht 0. Ein Stopp zwischen zwei Tests lässt die folgenden Tests weg.
 - Selbst angelegte Testdateien werden nach jedem Test gelöscht. Nutzen mehrere Tests
   eines Jobs dieselbe Datei, legt jeder Test sie neu an; zum Wiederverwenden großer Dateien
   `--keep-files` angeben.

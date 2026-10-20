@@ -4,6 +4,9 @@
 #include <string.h>
 #include <math.h>
 #include <malloc.h>
+#include "sb/vertrag.h"
+#include "sb/compute.h"
+#include "sb/sb.h"
 #include "sb/hist.h"
 #include "sb/rng.h"
 #include "sb/job.h"
@@ -376,6 +379,94 @@ static void test_topo_pick(void) {
     CHECK(sb_topo_pick(&t, 7, 1, out) == 0, "pick unbekannter Knoten");
 }
 
+/* ---- Vertrag 1.3 (sb/vertrag.h, export) ---- */
+static void test_v13_metric_score(void) {
+    CHECK(!strcmp(sb_metric_name(-1), "iops") && !strcmp(sb_metric_name(SB_CK_CPU), "ops_per_s") &&
+          !strcmp(sb_metric_name(SB_CK_MEM_BW), "gbps") && !strcmp(sb_metric_name(SB_CK_MEM_LAT), "latency_ns"), "tick.metric-Namen");
+    CHECK(sb_stop_phase_name(SB_STOP_NONE) == NULL && !strcmp(sb_stop_phase_name(SB_STOP_PREPARING), "preparing") &&
+          !strcmp(sb_stop_phase_name(SB_STOP_WARMUP), "warmup") && !strcmp(sb_stop_phase_name(SB_STOP_MEASURE), "measure"),
+          "stopped_in-Namen");
+    for (int w = SB_CPU_INT; w <= SB_CPU_MIXED; w++) {
+        double ref = sb_cpu_reference((sb_cpu_workload)w);
+        CHECK(fabs(sb_cpu_score((sb_cpu_workload)w, ref) - 1000.0) < 1e-9 && fabs(sb_cpu_score((sb_cpu_workload)w, 16 * ref) - 16000.0) < 1e-6,
+              "Score %s: Referenz = 1000 Punkte", sb_cpu_workload_name((sb_cpu_workload)w));
+    }
+    cJSON *j = sb_cpu_score_json();
+    const cJSON *r = cJSON_GetObjectItemCaseSensitive(j, "ref_ops_per_s");
+    int ok = cJSON_GetArraySize(r) == 4 && cJSON_GetObjectItemCaseSensitive(j, "points")->valuedouble == 1000 &&
+             cJSON_IsString(cJSON_GetObjectItemCaseSensitive(j, "formula"));
+    for (int w = SB_CPU_INT; w <= SB_CPU_MIXED; w++) {
+        const cJSON *x = cJSON_GetObjectItemCaseSensitive(r, sb_cpu_workload_name((sb_cpu_workload)w));
+        ok &= cJSON_IsNumber(x) && x->valuedouble == sb_cpu_reference((sb_cpu_workload)w);
+    }
+    CHECK(ok, "meta.cpu_score: Formel, 1000 Punkte, Referenzen = sb_cpu_reference()");
+    cJSON_Delete(j);
+}
+
+static void test_v13_phase_cpus(void) {
+    /* wie test_topo_pick: 2 Knoten x 2 Kerne x 2 SMT, Knoten 1 in Prozessorgruppe 1 */
+    sb_cpu c[8];
+    for (int i = 0; i < 8; i++) {
+        c[i].group = (uint16_t)(i / 4); c[i].bit = (uint8_t)(i % 4);
+        c[i].index = c[i].group * 64u + c[i].bit;
+        c[i].node = i / 4; c[i].core = i / 2; c[i].smt = i % 2;
+    }
+    sb_topo t = {c, 8, NULL, 0, 4, 0};
+    int pick[5] = {0, 4, 2, 6, 5};   /* 0, 64, 2, 66, dann SMT-Geschwister 65 */
+    cJSON *a = sb_phase_cpus_json(&t, pick, 5);
+    CHECK(cJSON_GetArraySize(a) == 5, "phase.cpus: ein Eintrag je Thread");
+    static const struct { int cpu, group, number, node, core, sib; } want[5] = {
+        {0, 0, 0, 0, 0, -1}, {64, 1, 0, 1, 2, -1}, {2, 0, 2, 0, 1, -1}, {66, 1, 2, 1, 3, -1}, {65, 1, 1, 1, 2, 64}};
+    for (int i = 0; i < 5; i++) {
+        const cJSON *x = cJSON_GetArrayItem(a, i);
+        const cJSON *sib = cJSON_GetObjectItemCaseSensitive(x, "smt_sibling_of");
+        int ok = cJSON_GetObjectItemCaseSensitive(x, "id")->valueint == i &&
+                 cJSON_GetObjectItemCaseSensitive(x, "cpu")->valueint == want[i].cpu &&
+                 cJSON_GetObjectItemCaseSensitive(x, "group")->valueint == want[i].group &&
+                 cJSON_GetObjectItemCaseSensitive(x, "number")->valueint == want[i].number &&
+                 cJSON_GetObjectItemCaseSensitive(x, "numa_node")->valueint == want[i].node &&
+                 cJSON_GetObjectItemCaseSensitive(x, "core")->valueint == want[i].core &&
+                 (want[i].sib < 0 ? cJSON_IsNull(sib) : cJSON_IsNumber(sib) && sib->valueint == want[i].sib);
+        CHECK(ok, "phase.cpus[%d] (cpu %d, smt_sibling_of %d)", i, want[i].cpu, want[i].sib);
+    }
+    cJSON_Delete(a);
+}
+
+static void test_v13_buffer_bytes(void) {
+    CHECK(sb_mem_buffer_bytes(0, 256u << 20) == 256u << 20 && sb_mem_buffer_bytes(0, (1u << 20) + 100) == 1u << 20 &&
+          sb_mem_buffer_bytes(0, 12000) == 8192 && sb_mem_buffer_bytes(0, 8192) == 8192,
+          "bandwidth: Vielfaches von 8 KiB (auch copy: zwei 4-KiB-Hälften)");
+    CHECK(sb_mem_buffer_bytes(1, (16u << 10) + 63) == 16u << 10 && sb_mem_buffer_bytes(1, 100) == 8192 &&
+          sb_mem_buffer_bytes(1, 10000) == 9984, "latency: Vielfaches von 64 Byte, mindestens 8 KiB");
+}
+
+static void test_v13_export_partial(void) {
+    char rp[MAX_PATH + 32], cp[MAX_PATH + 32];
+    snprintf(rp, sizeof rp, "%ssb13-partial.json", g_tmpdir);
+    snprintf(cp, sizeof cp, "%ssb13-partial.csv", g_tmpdir);
+    const char *doc =
+        "{\"schema\":\"sb-result/1\",\"tests\":["
+        "{\"index\":0,\"type\":\"cpu\",\"partial\":false,\"summary\":{\"ops_per_s\":0,\"score\":0},"
+        "\"per_worker\":[{\"id\":0,\"ops_per_s\":0}]},"
+        "{\"index\":1,\"type\":\"cpu\",\"partial\":true,\"stopped_in\":\"warmup\","
+        "\"summary\":{\"ops_per_s\":null,\"score\":null},\"per_worker\":[]}]}";
+    CHECK(sb_write_file(rp, doc, strlen(doc)) == 0, "Ergebnisdatei schreiben");
+    char err[300] = "";
+    int rc = sb_export_csv(rp, cp, "flat", err, sizeof err);
+    char *csv = NULL;
+    size_t n = 0;
+    CHECK(rc == 0 && sb_read_file(cp, &csv, &n) == 0, "export flat (rc %d: %s)", rc, err);
+    if (csv) {
+        CHECK(strstr(csv, ",score,partial,stopped_in\r\n") != NULL, "flat: Spalten partial,stopped_in hinten angehängt");
+        /* 0 bleibt 0, null wird leer; Worker-Zeile ohne errors/score: leer */
+        CHECK(strstr(csv, "0,cpu,total,,,,,,,,,,,,0,,,0,false,\r\n") != NULL, "flat: gemessene 0 bleibt 0 (%s)", csv);
+        CHECK(strstr(csv, "0,cpu,worker,0,,,,,,,,,,,0,,,,false,\r\n") != NULL, "flat: Worker-Zeile errors/score leer");
+        CHECK(strstr(csv, "1,cpu,total,,,,,,,,,,,,,,,,true,warmup\r\n") != NULL, "flat: null -> leer, partial true, stopped_in");
+    }
+    free(csv);
+    DeleteFileA(rp); DeleteFileA(cp);
+}
+
 static void test_chase(void) {
     const size_t line = 64, n = 4096;
     char *b = (char *)malloc(n * line);
@@ -482,6 +573,10 @@ int main(void) {
     test_examples();
     test_srat();
     test_topo_pick();
+    test_v13_metric_score();
+    test_v13_phase_cpus();
+    test_v13_buffer_bytes();
+    test_v13_export_partial();
     test_chase();
     test_memkern();
     test_cpu_kernels();

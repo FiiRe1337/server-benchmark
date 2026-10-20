@@ -11,6 +11,7 @@ typedef enum { SB_CK_CPU, SB_CK_MEM_BW, SB_CK_MEM_LAT } sb_compute_kind;
 /* Tick: value = ops/s (cpu), GB/s (Bandbreite) bzw. ns (Latenz) im Intervall */
 typedef struct sb_ctick {
     double  t, value, cpu_pct, proc_cpu_pct;
+    double  score;               /* nur cpu (Vertrag 1.3), sonst < 0 */
     int     nworkers;
     double *w_value;
 } sb_ctick;
@@ -25,6 +26,8 @@ typedef struct sb_compute_result {
     double   *w_value;           /* pro Thread */
     uint64_t  units, *w_units;   /* Operationen, Bytes bzw. Sprünge in der Messphase */
     double    measured_s, cpu_pct;
+    double    proc_cpu_pct;      /* sbench-Prozess, Mittel über die Messphase (Vertrag 1.3) */
+    int       stop_phase;        /* SB_STOP_* (sb/vertrag.h), 0 = vollständig */
     double    score;             /* nur cpu */
     sb_simd   simd;              /* tatsächlich genutzt (memory bandwidth) */
     int       nontemporal;       /* tatsächlich genutzt */

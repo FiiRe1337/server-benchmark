@@ -60,6 +60,10 @@ try:
     from validate_examples import semantic_checks
 except Exception:  # noqa: BLE001
     semantic_checks = None
+try:
+    from validate_examples import check_progress_v13
+except Exception:  # noqa: BLE001
+    check_progress_v13 = None
 
 SCHEMAS = {p.name: json.loads(p.read_text(encoding="utf-8")) for p in SCHEMA_DIR.glob("*.schema.json")}
 V = {k: make_validator(k, SCHEMAS) for k in SCHEMAS}
@@ -127,6 +131,22 @@ def check_progress(events: list[dict], what: str, expect_aborted: bool | None = 
         if e["ev"] == "progress" and (e["phase"] != phase or e["done"] > e["total"] + 1e-9):
             prog_ok = False
     check(prog_ok, f"{what}: progress-Events passen zur Phase, done <= total")
+    # Vertrag 1.3 (nur Lauf-Ströme; bundle meldet nur preparing/progress)
+    if any(e["ev"] == "tick" or (e["ev"] == "phase" and e["name"] != "preparing") for e in events):
+        ticks = [e for e in events if e["ev"] == "tick"]
+        check(all("metric" in e and e["metric"] in e for e in ticks), f"{what}: jeder Tick mit metric (Vertrag 1.3)")
+        check(all("score" in e for e in ticks if e.get("metric") == "ops_per_s"), f"{what}: cpu-Ticks mit score")
+        first: dict[int, dict] = {}
+        for e in events:
+            if e["ev"] == "phase":
+                first.setdefault(e["test"], e)
+        check(all(e["name"] == "preparing" and e.get("threads", 0) >= 1 for e in first.values()),
+              f"{what}: erstes phase-Event je Test mit threads")
+        if check_progress_v13:
+            v = check_progress_v13(events)
+            for m in v[:5]:
+                print("         " + m)
+            check(not v, f"{what}: Regeln Vertrag 1.3 (workers[] vollständig/sortiert, phase.cpus)")
 
 
 def check_result(path: Path, what: str, expect_aborted: bool, job: Path | None = None) -> dict | None:
@@ -141,6 +161,11 @@ def check_result(path: Path, what: str, expect_aborted: bool, job: Path | None =
             print("         " + m)
         check(not extra, f"{what}: semantische Regeln (Summen = io_count, index steigend{' < Tests im Job' if jdoc else ''}, NUMA disjunkt)")
     check(doc["aborted"] is expect_aborted, f"{what}: aborted = {expect_aborted}")
+    # Vertrag 1.3
+    check(isinstance(doc.get("tick_ms"), int) and "cpu_score" in doc.get("meta", {}), f"{what}: tick_ms und meta.cpu_score")
+    check(all(isinstance(t.get("partial"), bool) for t in doc.get("tests", [])), f"{what}: partial in jedem Test")
+    check(all("proc_cpu_pct" in t["summary"] for t in doc.get("tests", []) if t["type"] in ("storage", "cpu", "memory")),
+          f"{what}: summary.proc_cpu_pct")
     return doc
 
 
@@ -433,6 +458,11 @@ def main() -> int:
           "Ticks mit read/write-Aufteilung und proc_cpu_pct")
     check(all(abs(t["read_iops"] + t["write_iops"] - t["iops"]) <= 0.2 for t in ticks), "Tick: read_iops + write_iops = iops")
     check(all("lat_us" in w for t in ticks for w in t["workers"] if w["iops"] > 0), "Tick: workers[].lat_us")
+    check(all(t.get("metric") == "iops" and [w["id"] for w in t["workers"]] == [0, 1] for t in ticks),
+          "Tick: metric iops, workers[] vollständig und nach id sortiert (Vertrag 1.3)")
+    ph0 = next((e for e in events if e["ev"] == "phase"), {})
+    check(ph0.get("name") == "preparing" and ph0.get("threads") == 2 and "cpus" not in ph0,
+          f"storage: erstes phase-Event mit threads = 2 Worker, ohne cpus ({ph0})")
     sm = json.loads(out.read_text(encoding="utf-8")) if out.exists() else {"tests": [{}]}
     tg = sm["tests"][0].get("targets", [])
     check(tg == [{"index": 0, "path": str(testfile), "kind": "file", "created": True, "deleted": True}] and not testfile.exists(),
@@ -573,6 +603,8 @@ def main() -> int:
     if sres and sres["tests"]:
         s = sres["tests"][0]["summary"]
         check(s["io_count"] > 0, f"Teilergebnis enthält Messwerte ({s['io_count']} I/Os, {s['iops']:.0f} IOPS)")
+        check(sres["tests"][0].get("partial") is True and sres["tests"][0].get("stopped_in") == "measure",
+              "Teilergebnis storage: partial true, stopped_in measure (Vertrag 1.3)")
         tg = sres["tests"][0].get("targets", [])
         check(len(tg) == 1 and tg[0]["created"] and tg[0]["deleted"] and not testfile.exists(),
               f"#5: Testdatei auch nach stop gelöscht ({tg})")

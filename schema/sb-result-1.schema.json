@@ -37,6 +37,11 @@
     "aborted": {
       "type": "boolean"
     },
+    "tick_ms": {
+      "type": "integer",
+      "minimum": 100,
+      "description": "Vertrag 1.3: Tick-Intervall des Laufs (--tick-ms) in ms; gilt auch für tests[].timeseries."
+    },
     "meta": {
       "$ref": "#/$defs/meta"
     },
@@ -424,6 +429,64 @@
           "type": "string",
           "minLength": 1,
           "description": "Datenverzeichnis von sbench (runs/, logs/). Im Ergebnis: zum Zeitpunkt des Laufs."
+        },
+        "cpu_score": {
+          "type": "object",
+          "description": "Vertrag 1.3 (sbench gibt es immer aus, auch in sb-info): Score-Formel und Referenzwerte der cpu-Tests (docs/core.md).",
+          "properties": {
+            "formula": {
+              "type": "string",
+              "description": "Lesbare Formel, z. B. score = ops_per_s / ref_ops_per_s[workload] * 1000."
+            },
+            "points": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Punkte für einen Thread der Referenzmaschine (1000)."
+            },
+            "reference_threads": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Threads, auf die sich ref_ops_per_s bezieht (1)."
+            },
+            "reference_system": {
+              "type": "string"
+            },
+            "ref_ops_per_s": {
+              "type": "object",
+              "properties": {
+                "int": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "float": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "crypto": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "mixed": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              },
+              "required": [
+                "int",
+                "float",
+                "crypto",
+                "mixed"
+              ],
+              "additionalProperties": false,
+              "description": "Referenz-Rate eines Threads je workload (ops/s)."
+            }
+          },
+          "required": [
+            "formula",
+            "points",
+            "ref_ops_per_s"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -441,45 +504,97 @@
       "type": "object",
       "properties": {
         "iops": {
-          "type": "number",
+          "type": [
+            "number",
+            "null"
+          ],
           "minimum": 0,
-          "description": "I/Os pro Sekunde gesamt."
+          "description": "I/Os pro Sekunde gesamt. Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
         },
         "mbps": {
-          "type": "number",
+          "type": [
+            "number",
+            "null"
+          ],
           "minimum": 0,
-          "description": "Durchsatz in MB/s (10^6 Bytes/s, wie Iometer 'MBps (Decimal)')."
+          "description": "Durchsatz in MB/s (10^6 Bytes/s, wie Iometer 'MBps (Decimal)'). Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
         },
         "read_iops": {
-          "type": "number",
-          "minimum": 0
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
         },
         "write_iops": {
-          "type": "number",
-          "minimum": 0
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
         },
         "read_mbps": {
-          "type": "number",
+          "type": [
+            "number",
+            "null"
+          ],
           "minimum": 0,
-          "description": "MB/s"
+          "description": "MB/s Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
         },
         "write_mbps": {
-          "type": "number",
+          "type": [
+            "number",
+            "null"
+          ],
           "minimum": 0,
-          "description": "MB/s"
+          "description": "MB/s Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
         },
         "lat_us": {
-          "$ref": "#/$defs/lat_us"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/lat_us"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Latenz der Messphase. Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
         },
         "errors": {
-          "type": "integer",
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0,
-          "description": "Anzahl fehlgeschlagener I/Os."
+          "description": "Anzahl fehlgeschlagener I/Os. Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
         },
         "io_count": {
-          "type": "integer",
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0,
-          "description": "Anzahl abgeschlossener I/Os in der Messphase."
+          "description": "Anzahl abgeschlossener I/Os in der Messphase. Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
+        },
+        "cpu_pct": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Vertrag 1.3: mittlere Systemlast in der Messphase. Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
+        },
+        "proc_cpu_pct": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Vertrag 1.3: mittlere CPU-Last des sbench-Prozesses in der Messphase (Skala wie cpu_pct: 100 = alle logischen Prozessoren). Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
         }
       },
       "required": [
@@ -512,19 +627,28 @@
           "description": "Tatsächlich genutzte Threads."
         },
         "ops_per_s": {
-          "type": "number",
+          "type": [
+            "number",
+            "null"
+          ],
           "minimum": 0,
-          "description": "Operationen pro Sekunde, Summe aller Threads (Definition je workload in docs/core.md)."
+          "description": "Operationen pro Sekunde, Summe aller Threads (Definition je workload in docs/core.md). Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
         },
         "score": {
-          "type": "number",
+          "type": [
+            "number",
+            "null"
+          ],
           "minimum": 0,
-          "description": "ops_per_s geteilt durch die Referenz-Rate eines Threads (docs/core.md) mal 1000: 1000 ≈ ein Thread der Referenzmaschine. Höher = besser."
+          "description": "ops_per_s geteilt durch die Referenz-Rate eines Threads (docs/core.md) mal 1000: 1000 ≈ ein Thread der Referenzmaschine. Höher = besser. Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
         },
         "ops": {
-          "type": "integer",
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0,
-          "description": "Operationen in der Messphase gesamt."
+          "description": "Operationen in der Messphase gesamt. Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
         },
         "numa_node": {
           "type": "integer",
@@ -540,10 +664,27 @@
           "description": "Logische Prozessoren der Threads in Thread-Reihenfolge (globale Indizes wie meta.numa_nodes[].cpus)."
         },
         "cpu_pct": {
-          "type": "number",
+          "type": [
+            "number",
+            "null"
+          ],
           "minimum": 0,
           "maximum": 100,
-          "description": "Mittlere Systemlast in der Messphase."
+          "description": "Mittlere Systemlast in der Messphase. Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
+        },
+        "proc_cpu_pct": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Vertrag 1.3: mittlere CPU-Last des sbench-Prozesses in der Messphase (Skala wie cpu_pct: 100 = alle logischen Prozessoren). Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
+        },
+        "score_reference": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Vertrag 1.3: Referenz-Rate eines Threads für diesen workload (ops/s, = meta.cpu_score.ref_ops_per_s[workload]); score = ops_per_s / score_reference × 1000."
         }
       },
       "required": [
@@ -580,14 +721,20 @@
           "description": "Tatsächliche Puffergröße pro Thread (auf 8 KiB bzw. bei latency auf 64 Byte abgerundet)."
         },
         "gbps": {
-          "type": "number",
+          "type": [
+            "number",
+            "null"
+          ],
           "minimum": 0,
-          "description": "Bandbreite in GB/s (10^9 Bytes/s), Summe aller Threads, bei mode = bandwidth. copy zählt gelesene plus geschriebene Bytes (wie STREAM)."
+          "description": "Bandbreite in GB/s (10^9 Bytes/s), Summe aller Threads, bei mode = bandwidth. copy zählt gelesene plus geschriebene Bytes (wie STREAM). Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
         },
         "latency_ns": {
-          "type": "number",
+          "type": [
+            "number",
+            "null"
+          ],
           "minimum": 0,
-          "description": "Mittlere Latenz eines abhängigen Ladezugriffs (Pointer Chasing über zufällig verkettete 64-Byte-Zeilen) in Nanosekunden, bei mode = latency."
+          "description": "Mittlere Latenz eines abhängigen Ladezugriffs (Pointer Chasing über zufällig verkettete 64-Byte-Zeilen) in Nanosekunden, bei mode = latency. Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
         },
         "simd": {
           "enum": [
@@ -604,14 +751,20 @@
           "description": "Ob Non-temporal Stores tatsächlich genutzt wurden (bandwidth)."
         },
         "bytes": {
-          "type": "integer",
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0,
-          "description": "Übertragene Bytes in der Messphase (bandwidth)."
+          "description": "Übertragene Bytes in der Messphase (bandwidth). Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
         },
         "loads": {
-          "type": "integer",
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0,
-          "description": "Abhängige Ladezugriffe in der Messphase (latency)."
+          "description": "Abhängige Ladezugriffe in der Messphase (latency). Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
         },
         "numa_node": {
           "type": "integer",
@@ -632,10 +785,22 @@
           "description": "Logische Prozessoren der Threads in Thread-Reihenfolge (globale Indizes wie meta.numa_nodes[].cpus)."
         },
         "cpu_pct": {
-          "type": "number",
+          "type": [
+            "number",
+            "null"
+          ],
           "minimum": 0,
           "maximum": 100,
-          "description": "Mittlere Systemlast in der Messphase."
+          "description": "Mittlere Systemlast in der Messphase. Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
+        },
+        "proc_cpu_pct": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Vertrag 1.3: mittlere CPU-Last des sbench-Prozesses in der Messphase (Skala wie cpu_pct: 100 = alle logischen Prozessoren). Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
         }
       },
       "required": [
@@ -1033,7 +1198,7 @@
     },
     "timeseries": {
       "type": "array",
-      "description": "Zeitreihe der Messphase; t = Sekunden seit Beginn der Messphase (Ende des Intervalls).",
+      "description": "Zeitreihe der Messphase; t = Sekunden seit Beginn der Messphase (Ende des Intervalls). Ein Punkt je tick-Event, also im Takt --tick-ms (Vertrag 1.3: tick_ms im Ergebnis), nicht fest 1 s.",
       "items": {
         "type": "object",
         "properties": {
@@ -1092,6 +1257,17 @@
             "type": "number",
             "minimum": 0,
             "description": "memory latency"
+          },
+          "proc_cpu_pct": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Vertrag 1.3: CPU-Last des sbench-Prozesses (Skala wie cpu_pct)."
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Vertrag 1.3, nur cpu: Score des Intervalls."
           }
         },
         "required": [
@@ -1151,6 +1327,18 @@
             "net_server",
             "hyperv_info"
           ]
+        },
+        "partial": {
+          "type": "boolean",
+          "description": "Vertrag 1.3 (sbench gibt es immer aus): true = der Test endete vorzeitig (sbench stop/Strg+C oder Laufzeitfehler, Ursache in errors[]). Phase in stopped_in; bei preparing/warmup sind alle Messwerte der summary null und per_worker/per_spec/histogram/timeseries leer, bei measure enthalten sie die bis dahin gemessenen Werte."
+        },
+        "stopped_in": {
+          "enum": [
+            "preparing",
+            "warmup",
+            "measure"
+          ],
+          "description": "Vertrag 1.3, nur bei partial: true: Phase, in der der Test endete (Namen wie im phase-Event)."
         },
         "config": {
           "$ref": "sb-job-1.schema.json#/$defs/test",
@@ -1365,6 +1553,30 @@
             "not": {
               "required": [
                 "per_spec"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "partial": {
+                "const": true
+              }
+            },
+            "required": [
+              "partial"
+            ]
+          },
+          "then": {
+            "required": [
+              "stopped_in"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "stopped_in"
               ]
             }
           }

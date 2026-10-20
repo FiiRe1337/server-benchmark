@@ -217,7 +217,19 @@
         "ipv6": [],
         "link_mbps": 1000
       }
-    ]
+    ],
+    "cpu_score": {
+      "formula": "score = ops_per_s / ref_ops_per_s[workload] * 1000",
+      "points": 1000,
+      "reference_threads": 1,
+      "reference_system": "GitHub-Runner windows-2022/windows-2025, AMD EPYC 7763, 1 Thread",
+      "ref_ops_per_s": {
+        "int": 280000000.0,
+        "float": 150000000.0,
+        "crypto": 3400000.0,
+        "mixed": 380000.0
+      }
+    }
   },
   "targets": {
     "volumes": [
