@@ -16,6 +16,83 @@
       "base_mhz": 2000
     },
     "ram_bytes": 549755813888,
+    "ram_free_bytes": 401338343424,
+    "numa_nodes": [
+      {
+        "id": 0,
+        "cpus": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40,
+          41,
+          42,
+          43,
+          44,
+          45,
+          46,
+          47,
+          48,
+          49,
+          50,
+          51,
+          52,
+          53,
+          54,
+          55,
+          56,
+          57,
+          58,
+          59,
+          60,
+          61,
+          62,
+          63
+        ],
+        "ram_bytes": 274877906944,
+        "ram_free_bytes": 199715979264
+      },
+      {"id": 1, "cpus": 64, "ram_bytes": 274877906944, "ram_free_bytes": 201622364160}
+    ],
+    "elevated": true,
+    "data_dir": "C:\\Tools\\sbench\\data",
     "hypervisor": {"present": true, "vendor": "Microsoft Hv", "role": "host", "partition_info": {"is_root": true}},
     "drives": [
       {
@@ -59,9 +136,10 @@
       "type": "storage",
       "config": {
         "type": "storage",
+        "name": "OLTP-ähnlicher Mix",
         "targets": [
           {"path": "D:\\sbench\\testfile.dat", "kind": "file", "file_size": "16GiB"},
-          {"path": "\\\\.\\PhysicalDrive2", "kind": "physical"}
+          {"path": "\\\\.\\PhysicalDrive2", "kind": "physical", "allow_destructive": true}
         ],
         "workers": 4,
         "queue_depth": 32,
@@ -69,8 +147,22 @@
         "duration_s": 60,
         "cache": "unbuffered",
         "access_specs": [
-          {"weight": 60, "block_size": "4KiB", "read_pct": 100, "random_pct": 100, "align": "4KiB"},
-          {"weight": 40, "block_size": "64KiB", "read_pct": 0, "random_pct": 0, "align": "64KiB"}
+          {
+            "name": "4K random read",
+            "weight": 60,
+            "block_size": "4KiB",
+            "read_pct": 100,
+            "random_pct": 100,
+            "align": "4KiB"
+          },
+          {
+            "name": "64K seq write",
+            "weight": 40,
+            "block_size": "64KiB",
+            "read_pct": 0,
+            "random_pct": 0,
+            "align": "64KiB"
+          }
         ]
       },
       "summary": {

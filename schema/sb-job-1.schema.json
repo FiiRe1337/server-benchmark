@@ -75,6 +75,11 @@
         "file_size": {
           "$ref": "#/$defs/size",
           "description": "Größe der Testdatei (nur und verpflichtend bei kind = file). Die Datei wird bei Bedarf angelegt bzw. vergrößert."
+        },
+        "allow_destructive": {
+          "type": "boolean",
+          "default": false,
+          "description": "Erlaubt Schreibzugriffe (read_pct < 100) auf kind = volume/physical. Zusätzlich muss 'sbench run --allow-destructive' gesetzt sein, sonst E_DESTRUCTIVE_NOT_ALLOWED (Exit 2). Bei kind = file ohne Wirkung."
         }
       },
       "required": [
@@ -142,6 +147,11 @@
       "type": "object",
       "description": "Zugriffsmuster (wie Iometer Access Specification). Die Gewichte aller Specs eines Tests müssen in Summe 100 ergeben (semantische Regel, geprüft von 'sbench validate', Fehlercode E_WEIGHT_SUM).",
       "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optionaler Anzeigename der Access-Spec."
+        },
         "weight": {
           "type": "integer",
           "minimum": 1,
@@ -195,6 +205,11 @@
       "properties": {
         "type": {
           "const": "storage"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optionaler Anzeigename des Tests."
         },
         "targets": {
           "type": "array",
@@ -259,6 +274,11 @@
         "type": {
           "const": "cpu"
         },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optionaler Anzeigename des Tests."
+        },
         "threads": {
           "type": "integer",
           "minimum": 0,
@@ -293,6 +313,11 @@
       "properties": {
         "type": {
           "const": "memory"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optionaler Anzeigename des Tests."
         },
         "mode": {
           "enum": [
@@ -340,6 +365,11 @@
       "properties": {
         "type": {
           "const": "net_client"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optionaler Anzeigename des Tests."
         },
         "host": {
           "type": "string",
@@ -402,6 +432,11 @@
         "type": {
           "const": "net_server"
         },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optionaler Anzeigename des Tests."
+        },
         "bind": {
           "type": "string",
           "default": "0.0.0.0",
@@ -431,6 +466,11 @@
       "properties": {
         "type": {
           "const": "hyperv_info"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optionaler Anzeigename des Tests."
         },
         "include_perfcounters": {
           "type": "boolean",

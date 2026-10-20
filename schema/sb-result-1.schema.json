@@ -238,9 +238,54 @@
       ],
       "additionalProperties": false
     },
+    "numa_node": {
+      "type": "object",
+      "description": "NUMA-Knoten.",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "NUMA-Knoten-Nummer."
+        },
+        "cpus": {
+          "description": "Logische Prozessoren des Knotens: Liste der Indizes oder nur die Anzahl.",
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "uniqueItems": true
+            },
+            {
+              "type": "integer",
+              "minimum": 0
+            }
+          ]
+        },
+        "ram_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Arbeitsspeicher des Knotens in Bytes."
+        },
+        "ram_free_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Freier Arbeitsspeicher des Knotens in Bytes."
+        }
+      },
+      "required": [
+        "id",
+        "cpus",
+        "ram_bytes",
+        "ram_free_bytes"
+      ],
+      "additionalProperties": false
+    },
     "meta": {
       "type": "object",
-      "description": "Systeminformationen.",
+      "description": "Systeminformationen. ram_free_bytes, numa_nodes, elevated und data_dir sind seit Vertrag 1.1 vorhanden (optional im Schema, sbench gibt sie immer aus).",
       "properties": {
         "host": {
           "type": "string",
@@ -354,6 +399,26 @@
           "items": {
             "$ref": "#/$defs/nic"
           }
+        },
+        "ram_free_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Freier Arbeitsspeicher in Bytes zum Erfassungszeitpunkt."
+        },
+        "numa_nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/numa_node"
+          }
+        },
+        "elevated": {
+          "type": "boolean",
+          "description": "sbench lief mit Administratorrechten (erhöhtes Token). Im Ergebnis: zum Zeitpunkt des Laufs."
+        },
+        "data_dir": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Datenverzeichnis von sbench (runs/, logs/). Im Ergebnis: zum Zeitpunkt des Laufs."
         }
       },
       "required": [

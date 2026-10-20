@@ -37,6 +37,35 @@
         ],
         "additionalProperties": false
       }
+    },
+    "warnings": {
+      "type": "array",
+      "description": "Hinweise, die ok nicht beeinflussen (seit Vertrag 1.1; sbench gibt das Feld immer aus).",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "pattern": "^(/([^/~]|~[01])*)*$",
+            "description": "JSON Pointer (RFC 6901)."
+          },
+          "code": {
+            "type": "string",
+            "pattern": "^W_[A-Z0-9_]+$",
+            "description": "Bekannte Codes: W_NEEDS_ADMIN, W_DESTRUCTIVE, W_LOW_DISK_SPACE; weitere W_-Codes dürfen ergänzt werden."
+          },
+          "msg": {
+            "type": "string",
+            "description": "Menschenlesbare Meldung (Deutsch)."
+          }
+        },
+        "required": [
+          "path",
+          "code",
+          "msg"
+        ],
+        "additionalProperties": false
+      }
     }
   },
   "required": [

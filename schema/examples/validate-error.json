@@ -11,6 +11,12 @@
       "path": "/tests/0/access_specs",
       "code": "E_WEIGHT_SUM",
       "msg": "Summe der Gewichte ist 90, erwartet 100."
+    },
+    {
+      "path": "/tests/0/targets/1/allow_destructive",
+      "code": "E_DESTRUCTIVE_NOT_ALLOWED",
+      "msg": "Schreibtest (read_pct < 100) auf physische Disk \\\\.\\PhysicalDrive2 ohne allow_destructive: true im Target."
     }
-  ]
+  ],
+  "warnings": []
 }

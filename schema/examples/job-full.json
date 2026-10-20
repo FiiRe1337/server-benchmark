@@ -3,7 +3,7 @@
   "name": "Vollständiger Lauf (alle Testtypen)",
   "tests": [
     {"type": "hyperv_info", "include_perfcounters": true, "sample_s": 5},
-    {"type": "cpu", "threads": 0, "workload": "mixed", "duration_s": 30},
+    {"type": "cpu", "name": "CPU gemischt", "threads": 0, "workload": "mixed", "duration_s": 30},
     {
       "type": "memory",
       "mode": "bandwidth",
@@ -15,7 +15,8 @@
     {"type": "memory", "mode": "latency", "threads": 1, "buffer_size": "1GiB", "duration_s": 20},
     {
       "type": "storage",
-      "targets": [{"path": "\\\\.\\E:", "kind": "volume"}],
+      "name": "Volume E: 1M seq read",
+      "targets": [{"path": "\\\\.\\E:", "kind": "volume", "allow_destructive": false}],
       "workers": 2,
       "queue_depth": 8,
       "warmup_s": 5,
@@ -23,6 +24,7 @@
       "cache": "unbuffered",
       "access_specs": [
         {
+          "name": "1M seq read",
           "weight": 100,
           "block_size": 1048576,
           "read_pct": 100,
