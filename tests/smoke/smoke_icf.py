@@ -79,7 +79,7 @@ def run_icf(h, sbench: Path, work: Path, quick: bool) -> dict:
             n = sum(s["io_count"] for s in fs["per_spec"])
             shares = [100.0 * s["io_count"] / n if n else 0 for s in fs["per_spec"]]
             dev = max(abs(sh - s["weight"]) for sh, s in zip(shares, fs["per_spec"]))
-            check(n > 1000 and dev <= 5.0, f"File Server: I/O-Anteile je Spec ≈ Gewichte (max. Abweichung {dev:.1f} Prozentpunkte, {n} I/Os)")
+            check(n > 1000 and dev <= 5.0, f"File Server: I/O-Anteile je Spec ~ Gewichte (max. Abweichung {dev:.1f} Prozentpunkte, {n} I/Os)")
             line = " / ".join(f"{t['name']} {t['summary']['iops']:.0f} IOPS" for t in res["tests"])
             SUMMARY.append(f"import-icf Standardprofile (256 MiB, QD32, {T[0]['duration_s']} s): {line}")
 
