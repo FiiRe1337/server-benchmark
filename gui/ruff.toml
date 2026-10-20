@@ -1,0 +1,15 @@
+# Minimal lint config for the GUI (CI: .github/workflows/gui-ci.yml). Run from gui/:  ruff check .
+target-version = "py313"
+line-length = 160
+extend-exclude = ["build", "dist", ".venv"]
+
+[lint]
+# pyflakes (F) + pycodestyle errors (E4/E7/E9) + bugbear subset; compact one-line style (E401/E701/E702) and
+# lambdas assigned to names (E731) are intentional in this code base.
+select = ["E4", "E7", "E9", "F", "W6", "B006", "B008", "B023"]
+ignore = ["E401", "E701", "E702", "E731", "E741"]
+
+[lint.per-file-ignores]
+"tools/*.py" = ["E402"]          # scripts set sys.path / env before importing the package
+"sbench-gui.spec" = ["F821"]     # PyInstaller injects Analysis/PYZ/EXE
+"tests/*.py" = ["E402"]

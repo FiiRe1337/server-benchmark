@@ -1,7 +1,7 @@
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (QFrame, QLabel, QVBoxLayout, QHBoxLayout, QWidget, QTableWidget, QTableWidgetItem,
-                               QHeaderView, QAbstractItemView, QSizePolicy, QGraphicsDropShadowEffect)
+                               QHeaderView, QAbstractItemView, QSizePolicy)
 import pyqtgraph as pg
 from . import theme as T
 

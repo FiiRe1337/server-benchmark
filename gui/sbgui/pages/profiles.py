@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, Q
                                QComboBox, QPlainTextEdit, QAbstractItemView, QMenu, QFileDialog, QFrame)
 from PySide6.QtGui import QColor
 from ..widgets import Card, label, chip, table, add_row, listw, short_target, Responsive, WrapLabel
-from ..model import spec_label, derived_spec_label, derived_test_label, check_schema, destructive_targets
+from ..model import derived_spec_label, derived_test_label, check_schema, destructive_targets
 from ..overlay import DestructiveConfirm, ElevationOffer, IcfImportResult
 from .. import theme as T, sbench
 

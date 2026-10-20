@@ -72,7 +72,7 @@ def build_window(a, deterministic, extra_results=()):
 def screenshots(a):
     import tempfile
     os.environ["SBENCH_GUI_DIR"] = tempfile.mkdtemp(prefix="sbench-gui-shot-")   # no user profiles/logs in screenshots
-    app = make_app(scale=a.scale)
+    _app = make_app(scale=a.scale)   # keep the QApplication alive
     from PySide6.QtCore import QCoreApplication
     from .sbench import Replay
     from .overlay import Overlay
@@ -195,7 +195,7 @@ def _emit(obj, path=None):
 def self_test_child(plat, a):
     res = {"ok": False, "platform": plat}
     try:
-        app = make_app(["-platform", plat])
+        _app = make_app(["-platform", plat])   # keep the QApplication alive
         from PySide6.QtCore import qVersion, QCoreApplication
         from PySide6.QtGui import QFontDatabase, QGuiApplication
         res["qt"] = qVersion(); res["platform_name"] = QGuiApplication.platformName()

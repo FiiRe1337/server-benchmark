@@ -1,11 +1,10 @@
 import json, os
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QListWidget, QListWidgetItem,
-                               QCheckBox, QLineEdit, QComboBox, QTextBrowser)
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QListWidgetItem,
+                               QCheckBox, QLineEdit, QTextBrowser)
 from ..widgets import Card, label, chip, listw, Responsive
-from ..model import host_label, storage_tests, check_schema
+from ..model import host_label, check_schema
 from ..report import build_html
-from .. import theme as T
 
 
 class ExportPage(QWidget):
@@ -55,7 +54,7 @@ class ExportPage(QWidget):
         oc.add(row2); mid.addWidget(oc)
 
         sc = Card("Support-Paket", "Alles, was der Support zur Analyse braucht, in einer ZIP-Datei")
-        sc.setStyleSheet(f"QFrame#card {{ border: 1px solid rgba(34,211,238,0.45); }}")
+        sc.setStyleSheet("QFrame#card { border: 1px solid rgba(34,211,238,0.45); }")
         txt = label("ZIP mit manifest.json (SHA-256 je Datei), info.json, results/, runs/ und logs/ aus dem Datenverzeichnis "
                     "(sbench bundle --all) plus GUI-Logs und Profile unter extra/. Enthält keine Inhalte der Testziele.", "muted", wrap=True)
         sc.add(txt)

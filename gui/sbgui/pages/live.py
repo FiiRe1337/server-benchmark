@@ -245,7 +245,6 @@ class LiveView(QWidget):
             self.wtable.setRowCount(0)
             for w in self.last_workers:
                 add_row(self.wtable, [w["id"], "", "", "", "", ""])
-        tot = sum(w.get("iops", 0) for w in self.last_workers) or 1
         for i, w in enumerate(self.last_workers):
             tgt = short_target(self.targets[w["id"] % len(self.targets)]["path"]) if self.targets else "–"  # worker i -> target i mod n
             wl = w.get("lat_us") or {}  # optional per worker (1.1)

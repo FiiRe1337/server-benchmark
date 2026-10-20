@@ -1,16 +1,14 @@
-import json, os
+import json
 import numpy as np, pyqtgraph as pg
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem, QComboBox, QPushButton
-from ..widgets import Card, label, chip, table, add_row, plot, fmt_num, listw, Responsive
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QListWidgetItem, QComboBox, QPushButton
+from ..widgets import Card, label, table, add_row, plot, fmt_num, listw, Responsive
 from .. import theme as T
+from ..model import match_key, host_label, storage_tests, check_schema
 
 PCTS = ["p50", "p90", "p95", "p99", "p99_9", "p99_99"]
 PCT_TXT = ["p50", "p90", "p95", "p99", "p99.9", "p99.99"]
 
-
-from ..model import test_label, match_key, host_label, storage_tests, check_schema
 
 
 def run_label(res):
@@ -104,9 +102,11 @@ class Compare(QWidget):
             xs = np.arange(len(names)) - 0.4 + w * (k + 0.5)
             self.p_bar.addItem(pg.BarGraphItem(x=xs, height=ys, width=w * 0.86, brush=pg.mkBrush(col), pen=pg.mkPen(None)))
             l = label(f"■  {run_label(r)}"); l.setStyleSheet(f"color:{col}; font-size:11px;"); self.legend.addWidget(l)
-            fkey, focus = focus_test(tests) if k == 0 else (fkey, tests.get(fkey) or next(iter(tests.values())))
-            if k == 0:
+            if k == 0:  # focus test of the first run; the other runs show the same test (by name) if present
+                fkey, focus = focus_test(tests)
                 self.lc.title_label.setText(f"Latenz-Perzentile · {fkey}")
+            else:
+                focus = tests.get(fkey) or next(iter(tests.values()))
             py = [np.log10(focus["summary"]["lat_us"][p]) for p in PCTS]  # manual log scale -> clean tick labels
             self.p_pct.plot(range(len(PCTS)), py, pen=pg.mkPen(col, width=2), symbol="o", symbolSize=7, symbolBrush=col, symbolPen=None)
             lo = min(lo, min(py)) if k else min(py); hi = max(hi, max(py)) if k else max(py)

@@ -15,7 +15,7 @@ a = Analysis(
         ("mock_sbench.py", "."),          # fallback when no sbench.exe is bundled (demo builds only)
     ],
     hiddenimports=["sb_contract", "sbgui.pipe_win"],   # pipe_win is imported lazily (Windows only)
-    excludes=["PySide6.QtQuick", "PySide6.QtQml", "PySide6.QtWebEngineCore", "PySide6.QtOpenGL", "PySide6.Qt3DCore", "tkinter"],
+    excludes=["PySide6.QtQuick", "PySide6.QtQml", "PySide6.QtWebEngineCore", "PySide6.Qt3DCore", "tkinter"],   # not QtOpenGL: pyqtgraph imports it
 )
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(

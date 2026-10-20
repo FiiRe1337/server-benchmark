@@ -35,7 +35,9 @@ def run(job, opts, tick=250, stop_after=None):
     s.finished.connect(lambda c, t: codes.append(c)); s.event.connect(evs.append)
     win.pages["live"].result_ready.connect(results.append)
     if stop_after:
-        wait(lambda: False, stop_after); win.pages["live"].refresh()
+        # stop only once the measure phase delivers ticks (mock: ~7 s preparing + 2 s warm-up for four-corners);
+        # a fixed delay is too short on slow runners and would stop during preparing (no R/W split, no worker stats)
+        wait(lambda: sum(1 for e in evs if e.get("ev") == "tick") >= stop_after, 45); win.pages["live"].refresh()
         sd = os.environ.get("SBENCH_SHOT_DIR", os.path.join(ROOT, "build")); os.makedirs(sd, exist_ok=True); win.grab().save(os.path.join(sd, "03c_live_qprocess.png")); win.stop_run()
     wait(lambda: codes, 25)
     win.pages["live"].result_ready.disconnect()
@@ -49,7 +51,7 @@ report["privilege_exit"] = c; report["elevate_offered"] = bool(elev)
 c, _, evs = run(os.path.join(ROOT, "demo", "job-oltp.json"), {"allow_destructive": False})
 report["destructive_exit"] = c; report["destructive_code"] = [e.get("code") for e in evs if e.get("ev") == "error"][:1]
 
-c, res, evs = run(os.path.join(ROOT, "profiles", "four-corners.json"), {}, stop_after=6.5)
+c, res, evs = run(os.path.join(ROOT, "profiles", "four-corners.json"), {}, stop_after=6)   # stop after 6 ticks
 live = win.pages["live"]
 report["stop_exit"] = c; report["result_after_done"] = bool(res) and os.path.exists(res[0])
 report["progress_events"] = sum(1 for e in evs if e.get("ev") == "progress")

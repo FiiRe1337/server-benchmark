@@ -19,6 +19,13 @@ python tools/live_qprocess_check.py               # E2E gegen den Mock (Exit 4/2
 python tools/make_demo.py                         # demo/ neu erzeugen
 ```
 
+CI ([`../.github/workflows/gui-ci.yml`](../.github/workflows/gui-ci.yml)): Windows 2022/2025 (ruff, pytest, `--self-test` offscreen, PyInstaller-EXE + Self-Test der EXE, Artefakt `sbench-gui-<runner>-x64`) und Linux (Schemas, `check_mock.py`, E2E, Self-Test). Lokal:
+
+```
+pip install -r requirements.txt -r requirements-ci.txt     # exakte CI-Pins
+ruff check . && QT_QPA_PLATFORM=offscreen python -m pytest
+```
+
 Umgebungsvariablen: `SBENCH_EXE` (Kern), `SBENCH_DATA_DIR` (Datenordner des Kerns; die GUI liest ihn nur aus `meta.data_dir`), `SBENCH_GUI_DIR` (GUI-Logs/Profile/Ergebnisse, Standard `%LOCALAPPDATA%\sbench-gui`), `SBENCH_SCHEMA_DIR`.
 Mock: `SBENCH_MOCK_ELEVATED=1` simuliert Administratorrechte, `SBENCH_MOCK_SPEED` beschleunigt Läufe.
 

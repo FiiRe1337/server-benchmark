@@ -229,7 +229,6 @@ def storage_model(t):
     lat_us = qd / iops * 1e6
     specs = []
     for s, bs, cap in caps:
-        share = (s["weight"] / 100 / cap) / inv  # fraction of time
         specs.append({"spec": s, "bs": bs, "w": s["weight"] / 100, "lat_rel": (1 / cap) / inv})
     avg_bs = sum(x["w"] * x["bs"] for x in specs)
     return iops, lat_us, avg_bs, specs
@@ -592,7 +591,7 @@ class Anon:
     def __call__(self, b):
         t = b.decode("utf-8", "replace")
         for h in self.hosts:
-            t = re.sub(re.escape(h), lambda mm: self._p("host", h.upper(), lambda n: f"host-{n}"), t, flags=re.I)
+            t = re.sub(re.escape(h), lambda mm, h=h: self._p("host", h.upper(), lambda n: f"host-{n}"), t, flags=re.I)
         t = USER.sub(lambda mm: mm.group(1) + self._p("user", mm.group(2).lower(), lambda n: f"user-{n}"), t)
         t = IPV4.sub(lambda mm: mm.group(0) if mm.group(0).startswith(("0.", "127.")) else self._p("ip4", mm.group(0), lambda n: f"10.0.0.{n}"), t)
         t = IPV6.sub(lambda mm: self._p("ip6", mm.group(0).lower(), lambda n: f"fd00::{n:x}"), t)

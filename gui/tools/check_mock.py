@@ -3,7 +3,7 @@
 
   python tools/check_mock.py <file.json|file.jsonl|bundle.zip> ...
 JSON files are matched by their "schema" field; .jsonl = sb-progress/1 stream; .zip = sbench bundle (manifest + sha256)."""
-import hashlib, json, os, sys, zipfile
+import hashlib, json, sys, zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
