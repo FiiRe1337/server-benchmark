@@ -1,4 +1,4 @@
-"""Contract 1.1: schema discovery, validator set (incl. pending sb-bundle/1 overlay), demo data validity."""
+"""Contract 1.1: schema discovery, validator set from schema/ on main (single source), demo data validity."""
 import glob, json, os
 
 import pytest
@@ -29,7 +29,7 @@ def test_validators_cover_all_formats(V):
     assert EXPECTED <= set(V)
 
 
-def test_bundle_overlay_patch(V):
+def test_bundle_schema_final(V):  # from schema/ on main, no GUI-side patch any more
     s = V["sb-bundle/1"].schema
     assert "extra/" in s["properties"]["files"]["items"]["properties"]["path"]["pattern"]
     assert {"anonymized", "includes"} <= set(s["properties"])

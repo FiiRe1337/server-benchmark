@@ -248,15 +248,22 @@ class Replay(EventSource):
         self._timer.stop()
 
 
-def bundle(out_path, results=None, include=(), anonymize=False, parent=None):
-    """Async `sbench bundle --out <zip> (--results ...|--all) [--include <dir>]... [--anonymize] --progress stdout`."""
-    p = QProcess(parent)
+def bundle_args(out_path, results=None, include=(), anonymize=False):
+    """`bundle --out <zip> (--results ...|--all) [--include <dir>]... [--anonymize] --progress stdout`.
+    No selection -> always --all (without it the core would bundle only info.json + includes)."""
     args = ["bundle", "--out", out_path] + (["--results", *results] if results else ["--all"])
     for d in include:
         args += ["--include", d]
     if anonymize:
         args.append("--anonymize")
-    cmd = sbench_command() + args + ["--progress", "stdout"]
+    return args + ["--progress", "stdout"]
+
+
+def bundle(out_path, results=None, include=(), anonymize=False, parent=None):
+    """Async `sbench bundle ...` (see bundle_args)."""
+    p = QProcess(parent)
+    args = bundle_args(out_path, results, include, anonymize)
+    cmd = sbench_command() + args
     log.info("bundle %s", subprocess.list2cmdline(args))
     p.start(cmd[0], cmd[1:]); return p
 

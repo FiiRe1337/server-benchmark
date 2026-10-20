@@ -1,7 +1,7 @@
 # sbench GUI – Plan (Entwurf v0.3, 20.10.2026)
 
 Portable Windows-GUI für den Messkern `sbench.exe` (Devend). Python 3.13 + PySide6 6.12 + pyqtgraph, ausgeliefert als **eine** EXE.
-Schnittstelle ist ausschließlich der CLI-Vertrag in diesem Repo (**Vertrag 1.1**, `main` @ cc46005 = PR #1 + PR #3: `docs/cli.md`, `schema/*.schema.json`). **Kein ctypes/DLL-Binding an den Messkern** (ctypes nur für Win32-Pipe/UAC in `sbgui/pipe_win.py`). `sb-bundle/1` ist noch nicht auf `main`; die GUI nutzt vorläufig die Fassung aus `feat/core-m1` (`gui/contract/sb-bundle-1.schema.json`, zur Laufzeit auf das 1.1-Layout `runs/`, `extra/`, `anonymized`, `includes` erweitert).
+Schnittstelle ist ausschließlich der CLI-Vertrag in diesem Repo (**Vertrag 1.1**, `main` @ 5670020 = PR #1 + PR #3 + Kern M1 PR #2: `docs/cli.md`, `docs/core.md`, `schema/*.schema.json`). **Kein ctypes/DLL-Binding an den Messkern** (ctypes nur für Win32-Pipe/UAC in `sbgui/pipe_win.py`). Einzige Schema-Quelle ist `schema/` auf `main` (inkl. `sb-bundle/1`); die frühere GUI-Kopie unter `gui/contract/` ist entfernt.
 
 Code: `gui/` · Mockups (**Mockup mit Beispieldaten**, Mock-Kern): `docs/img/` (1440×900) und `docs/img/rdp1366/` (1366×768); 150 % wird lokal/in der CI nach `docs/img/scale150/` gerendert (nicht eingecheckt).
 
@@ -67,7 +67,7 @@ Der Support-Button sitzt zusätzlich dauerhaft im Sidebar-Footer; „Auswahl fü
 
 ## 5. Packaging
 
-- **PyInstaller one-file, windowed** (`gui/sbench-gui.spec`): `sbench.exe` als `binaries` eingebettet, `sb_contract.py`, Schemas (`schema/`, `contract/`), Profile, Demo-Daten, Fonts (Inter, JetBrains Mono, OFL) als `datas`, unnötige Qt-Module (Quick, QML, WebEngine, OpenGL) ausgeschlossen. Erwartete Größe ~45–60 MB *(Schätzung)*. Kein UPX (AV-Fehlalarme).
+- **PyInstaller one-file, windowed** (`gui/sbench-gui.spec`): `sbench.exe` als `binaries` eingebettet, `sb_contract.py`, Schemas (`schema/`), Profile, Demo-Daten, Fonts (Inter, JetBrains Mono, OFL) als `datas`, unnötige Qt-Module (Quick, QML, WebEngine) ausgeschlossen (QtOpenGL bleibt, pyqtgraph braucht es). Erwartete Größe ~45–60 MB *(Schätzung)*. Kein UPX (AV-Fehlalarme).
 - **One-file-Fallen:** Entpackt nach `%TEMP%\_MEIxxxx` und löscht beim Beenden → sbench.exe beim ersten Start nach `sbench-data\bin\` kopieren (Hash-Prüfung) und von dort starten, v. a. für erhöhte Läufe (überlebt GUI-Ende, kein Start aus `%TEMP%`, AppLocker-freundlicher). `--self-test`/`--screenshot` schreiben JSON per `--report <datei>`, da windowed EXE kein stdout hat.
 - **Nuitka** als Alternative (`--onefile --enable-plugin=pyside6`): schnellerer Start, weniger AV-Treffer, aber längere CI-Builds und MSVC nötig; Entscheidung nach M2 anhand Startzeit/AV-Scan.
 - **Rechte/UAC:** EXE-Manifest `asInvoker`; normale Datei-Ziele brauchen keinen Admin. Admin nur für `volume`/`physical` (und schnelles `SetFileValidData`) → UAC-Prompt nur für sbench.exe. Schreibtests auf Volume/Disk zerstören Daten → doppeltes Opt-in: `allow_destructive` am Ziel **und** `--allow-destructive` bei `run`; die GUI setzt beides erst nach Tippen des Zielnamens (auch wenn das Profil das Flag schon trägt).

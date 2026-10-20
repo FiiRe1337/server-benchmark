@@ -103,6 +103,7 @@ class LiveView(QWidget):
     def _reset(self):
         self.buf.clear(); self.offset = 0.0; self.last_raw = 0.0; self.phase = None; self.cur_test = None
         self.total = 0.0; self.last_workers = []; self.targets = []; self.test_idx = 0; self.test_names = []; self.jobtests = []
+        self.skipped = []  # job indices the core skipped (E_NOT_IMPLEMENTED, core M1: absent from result tests[])
         for p, ln in getattr(self, "bounds", []):
             p.removeItem(ln)
         self.bounds = []
@@ -196,6 +197,14 @@ class LiveView(QWidget):
             if "read_iops" in ev and not self.has_rw:
                 self.has_rw = True; self.rw.setEnabled(True)
             self.last_workers = ev.get("workers") or []
+        elif e == "error" and ev.get("code") == "E_NOT_IMPLEMENTED":
+            ti = ev.get("test")
+            if isinstance(ti, int) and ti not in self.skipped:
+                self.skipped.append(ti)
+                if 0 <= ti < len(self.jobtests):  # x axis = measurement time of tests that actually run
+                    self.total = max(0.0, self.total - self.jobtests[ti].get("duration_s", 0))
+            self.run_chip.setText(f"{len(self.skipped)} Test(s) übersprungen (nicht implementiert)"); self.run_chip.setObjectName("chipWarn")
+            self.run_chip.style().polish(self.run_chip)
         elif e == "error":
             self.run_chip.setText(f"Fehler {ev.get('code')}"); self.run_chip.setObjectName("chipErr"); self.run_chip.style().polish(self.run_chip)
         elif e == "done":
@@ -204,7 +213,8 @@ class LiveView(QWidget):
 
     def on_finished(self, code, text):
         self.refresh(); self.timer.stop()
-        self.run_chip.setText(f"beendet · {text} ({code})"); self.run_chip.setObjectName("chipOk" if code == 0 else "chipWarn")
+        skip = f" · {len(self.skipped)} übersprungen" if self.skipped else ""
+        self.run_chip.setText(f"beendet · {text} ({code}){skip}"); self.run_chip.setObjectName("chipOk" if code == 0 and not skip else "chipWarn")
         self.run_chip.style().unpolish(self.run_chip); self.run_chip.style().polish(self.run_chip)
         if code == 4:
             self.elevate_requested.emit()  # GUI offers 'Als Administrator neu starten' (runas sbench.exe + named pipe)

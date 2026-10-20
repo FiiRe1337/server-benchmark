@@ -10,7 +10,6 @@ a = Analysis(
     binaries=core,
     datas=fonts + [
         ("../schema", "schema"),          # contract (sb_contract.base_dir: <here>/schema when frozen)
-        ("contract", "contract"),         # sb-bundle/1 until it is on main
         ("profiles", "profiles"), ("demo", "demo"),
         ("mock_sbench.py", "."),          # fallback when no sbench.exe is bundled (demo builds only)
     ],

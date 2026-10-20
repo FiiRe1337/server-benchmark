@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 r"""Mock of the core CLI `sbench.exe`, implemented against the contract in
-FiiRe1337/server-benchmark@main, contract 1.1 (PR #3: docs/cli.md + schema/*.schema.json);
-sb-bundle/1 from feat/core-m1 with the 1.1 bundle layout (see sb_contract.py).
+FiiRe1337/server-benchmark@main, contract 1.1 (docs/cli.md, docs/core.md + schema/*.schema.json,
+core M1 5670020 incl. sb-bundle/1).
 
   sbench run --job <job.json> --out <result.json> [--progress stdout|file:<p.jsonl>|pipe:\\.\pipe\sbench-<id>]
              [--tick-ms <ms>=1000, min 100] [--id <id>] [--allow-destructive]
@@ -19,7 +19,8 @@ Every run additionally writes <data_dir>/runs/<run_id>.jsonl (all events) and ru
 data_dir: $SBENCH_DATA_DIR, else data\ next to sbench (writable), else %ProgramData%\sbench.
 Exit codes: 0 ok, 1 runtime error, 2 invalid job/args, 3 aborted, 4 missing privileges.
 Mock knobs (env): SBENCH_MOCK_SPEED (time compression), SBENCH_MOCK_HOST (host|vm|vm-san),
-SBENCH_MOCK_ELEVATED=1 (pretend to be elevated), SBENCH_DATA_DIR, SBENCH_SCHEMA_DIR.
+SBENCH_MOCK_ELEVATED=1 (pretend to be elevated), SBENCH_MOCK_ALL_TYPES=1 (simulate non-storage tests; default like
+core M1: E_NOT_IMPLEMENTED + skipped), SBENCH_DATA_DIR, SBENCH_SCHEMA_DIR.
 Stop: real core uses the named event Global\sbench-stop-<id> (fallback Local\); the mock uses a marker file.
 """
 import argparse, copy, csv, datetime as dt, hashlib, json, math, os, random, re, signal, sys, time, zipfile
@@ -52,6 +53,7 @@ HOSTKIND = os.environ.get("SBENCH_MOCK_HOST", "host")
 PERF = {"host": (1.0, 1.0), "vm": (0.78, 1.25), "vm-san": (0.42, 2.4)}[HOSTKIND]  # IOPS factor, latency factor
 SCHEMA_DIR = sb_contract.base_dir()
 ELEVATED = os.environ.get("SBENCH_MOCK_ELEVATED") == "1"
+ALL_TYPES = os.environ.get("SBENCH_MOCK_ALL_TYPES") == "1"  # simulate cpu/memory/net/hyperv_info (post-M1); default = core M1
 EXIT_OK, EXIT_ERR, EXIT_INVALID, EXIT_ABORTED, EXIT_PRIV = 0, 1, 2, 3, 4
 UNITS = {"KiB": 1024, "MiB": 1024**2, "GiB": 1024**3}
 GIB = 1024**3
@@ -89,7 +91,8 @@ def info_doc():
         if "numa_nodes" not in m:  # contract 1.0 example
             s = m["cpu"]["sockets"]
             m["ram_free_bytes"] = int(m["ram_bytes"] * 0.81)
-            m["numa_nodes"] = [{"id": i, "cpus": m["cpu"]["threads"] // s, "ram_bytes": m["ram_bytes"] // s,
+            n = m["cpu"]["threads"] // s  # final contract: cpus = list of global indices (group * 64 + bit)
+            m["numa_nodes"] = [{"id": i, "cpus": list(range(i * n, (i + 1) * n)), "ram_bytes": m["ram_bytes"] // s,
                                 "ram_free_bytes": int(m["ram_bytes"] // s * (0.78 + 0.06 * i))} for i in range(s)]
         return info
     vm = copy.deepcopy(info)
@@ -98,7 +101,7 @@ def info_doc():
     m["cpu"].update(sockets=1, cores=8, threads=16)
     m["ram_bytes"] = 64 * GIB
     m["ram_free_bytes"] = 41 * GIB
-    m["numa_nodes"] = [{"id": 0, "cpus": 16, "ram_bytes": 64 * GIB, "ram_free_bytes": 41 * GIB}]
+    m["numa_nodes"] = [{"id": 0, "cpus": list(range(16)), "ram_bytes": 64 * GIB, "ram_free_bytes": 41 * GIB}]
     m["hypervisor"] = {"present": True, "vendor": "Microsoft Hv", "role": "guest", "partition_info": {"is_root": False}}
     m["drives"] = [{"path": "\\\\.\\PhysicalDrive0", "model": "Msft Virtual Disk", "size_bytes": 136365211648, "bus": "SCSI",
                     "sector_logical": 512, "sector_physical": 4096},
@@ -234,15 +237,18 @@ def storage_model(t):
     return iops, lat_us, avg_bs, specs
 
 
+HIST_PER_OCTAVE = 32  # core M1 (docs/core.md): 32 classes per power of two, only non-empty buckets, overflow le_us = null
+
+
 def lognorm_hist(mean, n):
     p50 = mean / math.exp(SIGMA ** 2 / 2)
-    edges = [2 ** k for k in range(0, 17)]
+    edges = [round(2 ** (k / HIST_PER_OCTAVE), 3) for k in range(-2 * HIST_PER_OCTAVE, 18 * HIST_PER_OCTAVE + 1)]  # 0.25 us .. 262 ms
     cdf = lambda x: 0.5 * (1 + math.erf((math.log(x) - math.log(p50)) / (SIGMA * math.sqrt(2))))
     probs, prev = [], 0.0
     for e in edges:
         c = cdf(e); probs.append(c - prev); prev = c
     probs.append(1 - prev)
-    return [{"le_us": e, "count": c} for e, c in zip(edges + [None], split_int(n, probs))]
+    return [{"le_us": e, "count": c} for e, c in zip(edges + [None], split_int(n, probs)) if c]
 
 
 def split_int(n, weights):
@@ -496,9 +502,10 @@ def run(a):
                     return EXIT_PRIV
     open(marker("run", rid), "w").close()
     started = utc_now()
+    job_name = job.get("name") or os.path.splitext(os.path.basename(a.job))[0] or "job"  # sb-runs/1 job_name
     lock = os.path.join(DATA, "runs", f"{rid}.lock.json")
     with open(lock, "w", encoding="utf-8") as f:
-        json.dump({"run_id": rid, "pid": os.getpid(), "started_utc": utc_now(), "job": os.path.join(DATA, "jobs", f"{rid}.json"),
+        json.dump({"run_id": rid, "job_name": job_name, "pid": os.getpid(), "started_utc": utc_now(), "job": os.path.join(DATA, "jobs", f"{rid}.json"),
                    "out": os.path.abspath(a.out)}, f, indent=1, ensure_ascii=False)  # sb-runs-1#/$defs/lock_file
     rc = EXIT_ERR
     try:
@@ -508,12 +515,16 @@ def run(a):
         rng = random.Random(f"{HOSTKIND}-{rid}")
         tick = a.tick_ms / 1000; results = []
         for ti, t in enumerate(job["tests"]):
+            if t["type"] != "storage" and not ALL_TYPES:  # core M1: skipped, not in tests[] (indices keep the job position)
+                msg = f"Testtyp '{t['type']}' ist in Meilenstein 1 noch nicht implementiert und wird übersprungen."
+                emit({"ev": "error", "code": "E_NOT_IMPLEMENTED", "msg": msg, "test": ti}); log(f"Test {ti}: {msg}")
+                continue
             r = run_storage(ti, t, tick, rng, rid) if t["type"] == "storage" else run_simple(ti, t, tick, rng, rid, meta)
             if r:
                 results.append(r)
             if _stop:
                 break
-        res = {"schema": "sb-result/1", "kern_version": VERSION, "started_utc": started, "ended_utc": utc_now(),
+        res = {"schema": "sb-result/1", "kern_version": VERSION, "run_id": rid, "started_utc": started, "ended_utc": utc_now(),
                "aborted": _stop, "meta": meta, "tests": results}
         tmp = a.out + ".tmp"  # write <out>.tmp, then atomic rename
         with open(tmp, "w", encoding="utf-8", newline="\n") as f:
@@ -614,7 +625,7 @@ def bundle(a):
     def add_run(rid, res_path):
         if res_path and os.path.exists(res_path):
             files.append((res_path, f"results/{rid}.json"))
-        for d, ext in (("runs", ".jsonl"), ("logs", ".log")):
+        for d, ext in (("runs", ".jsonl"), ("logs", ".log"), ("jobs", ".json")):
             p = os.path.join(DATA, d, rid + ext)
             if os.path.exists(p):
                 files.append((p, f"{d}/{rid}{ext}"))
@@ -697,7 +708,7 @@ def list_running():
             except (OSError, json.JSONDecodeError):
                 continue
             if _pid_alive(lk["pid"]):
-                runs.append({"run_id": lk["run_id"], "pid": lk["pid"], "started_utc": lk["started_utc"], "out": lk["out"],
+                runs.append({"run_id": lk["run_id"], "job_name": lk.get("job_name") or "job", "pid": lk["pid"], "started_utc": lk["started_utc"], "out": lk["out"],
                              "progress_file": os.path.join(d, lk["run_id"] + ".jsonl")})
             else:  # orphaned lock -> ignore and remove (cli.md 1.1)
                 try:

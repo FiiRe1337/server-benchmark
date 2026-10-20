@@ -83,7 +83,7 @@ class Compare(QWidget):
         return [s["iops"], s["mbps"], s["lat_us"]["mean"], s["lat_us"]["p99"]][i]
 
     def update(self, *_):
-        sel = self.selected()
+        sel = [(f, r) for f, r in self.selected() if storage_tests(r)]  # results without storage tests (all skipped) have nothing to plot
         self.p_bar.clear(); self.p_pct.clear()
         while self.legend.count():
             wd = self.legend.takeAt(0).widget()
@@ -112,7 +112,7 @@ class Compare(QWidget):
             lo = min(lo, min(py)) if k else min(py); hi = max(hi, max(py)) if k else max(py)
         ax = self.p_bar.getAxis("bottom"); ax.setTicks([[(i, _wrap(nm)) for i, nm in enumerate(names)]]); ax.setHeight(34)
         self.p_bar.setXRange(-0.55, len(names) - 0.45, padding=0)
-        ymax = max(self._val(t) for _, r in sel for t in r["tests"] if t["type"] == "storage")
+        ymax = max((self._val(t) for _, r in sel for t in storage_tests(r)), default=0) or 1
         self.p_bar.setYRange(0, ymax * 1.1, padding=0)
         self.p_bar.getAxis("left").setTicks(None)
         self.p_pct.getAxis("bottom").setTicks([list(enumerate(PCT_TXT))]); self.p_pct.setXRange(-0.35, len(PCTS) - 0.55, padding=0)

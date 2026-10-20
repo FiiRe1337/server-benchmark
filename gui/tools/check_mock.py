@@ -3,7 +3,7 @@
 
   python tools/check_mock.py <file.json|file.jsonl|bundle.zip> ...
 JSON files are matched by their "schema" field; .jsonl = sb-progress/1 stream; .zip = sbench bundle (manifest + sha256)."""
-import hashlib, json, sys, zipfile
+import hashlib, json, re, sys, zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -23,7 +23,16 @@ def _doc_errs(d):
         return [f"unknown schema {k!r}"]
     errs = [f"/{'/'.join(map(str, x.absolute_path))}: {x.message}" for x in V[k].iter_errors(d)]
     if not errs and k in SEM:
-        errs += semantic_checks(SEM[k], d)
+        sem = semantic_checks(SEM[k], d)
+        if k == "sb-result/1":
+            # core M1 (docs/core.md): unimplemented test types are skipped and absent from tests[]; index keeps the job
+            # position, so gaps are valid. tools/validate_examples.py (main) still expects index == array position.
+            idx = [t["index"] for t in d["tests"]]
+            if idx == sorted(set(idx)):
+                sem = [e for e in sem if not re.match(r"^/tests/\d+/index: ", e)]
+            else:
+                sem.append(f"tests[].index not strictly increasing: {idx}")
+        errs += sem
     if not errs and k == "sb-validate/1" and "warnings" not in d:
         errs.append("warnings missing (contract 1.1: always emitted)")
     if not errs and k in ("sb-result/1", "sb-info/1"):

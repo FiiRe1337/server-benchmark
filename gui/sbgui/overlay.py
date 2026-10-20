@@ -116,7 +116,8 @@ class ReattachOffer(Overlay):
                          "Anfang an und folgt ihr bis zum Ende.", "info", 560)
         self.radios = []
         for i, r in enumerate(runs):
-            rb = QRadioButton(f"{r['run_id']}   ·   PID {r['pid']}   ·   gestartet {_local(r['started_utc'])}")
+            name = r.get("job_name")  # sb-runs/1: required since core M1; tolerate older cores
+            rb = QRadioButton(f"{name + '   ·   ' if name else ''}{r['run_id']}   ·   PID {r['pid']}   ·   gestartet {_local(r['started_utc'])}")
             rb.setChecked(i == 0); self.radios.append((rb, r)); self.add(rb)
             self.add(label(f"Ergebnis → {r['out']}", "dim"))
         self.button("Ignorieren")

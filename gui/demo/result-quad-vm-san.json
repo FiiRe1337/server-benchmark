@@ -1,6 +1,7 @@
 {
  "schema": "sb-result/1",
  "kern_version": "0.1.0-mock",
+ "run_id": "20261020-111800-e5f6",
  "started_utc": "2026-10-20T12:40:32.643Z",
  "ended_utc": "2026-10-20T12:40:32.900Z",
  "aborted": false,
@@ -23,7 +24,24 @@
   "numa_nodes": [
    {
     "id": 0,
-    "cpus": 16,
+    "cpus": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11,
+     12,
+     13,
+     14,
+     15
+    ],
     "ram_bytes": 68719476736,
     "ram_free_bytes": 44023414784
    }

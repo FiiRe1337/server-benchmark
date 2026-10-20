@@ -10,8 +10,12 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 @pytest.fixture(scope="session")
 def qapp():
-    from PySide6.QtCore import QCoreApplication
-    return QCoreApplication.instance() or QCoreApplication([])
+    """One QApplication (widgets) for the whole session, themed like the real GUI."""
+    from PySide6.QtWidgets import QApplication
+    if QApplication.instance():
+        return QApplication.instance()
+    from sbgui.app import make_app
+    return make_app()
 
 
 @pytest.fixture
