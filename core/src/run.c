@@ -212,8 +212,10 @@ static cJSON *compute_test_json(int idx, const sb_test *t, const sb_compute_resu
         if (t->mem_node >= 0) cJSON_AddNumberToObject(s, "mem_node", t->mem_node);
     }
     if (t->numa_node >= 0) cJSON_AddNumberToObject(s, "numa_node", t->numa_node);
-    cJSON *cp = cJSON_AddArrayToObject(s, "cpus");
-    for (int i = 0; i < r->nthreads; i++) cJSON_AddItemToArray(cp, cJSON_CreateNumber(r->cpus[i]));
+    if (r->nthreads > 0) {
+        cJSON *cp = cJSON_AddArrayToObject(s, "cpus");
+        for (int i = 0; i < r->nthreads; i++) cJSON_AddItemToArray(cp, cJSON_CreateNumber(r->cpus[i]));
+    }
     cJSON_AddNumberToObject(s, "cpu_pct", rnd(r->cpu_pct, 1));
     cJSON *pw = cJSON_AddArrayToObject(o, "per_worker");
     for (int i = 0; i < r->nthreads; i++) {
