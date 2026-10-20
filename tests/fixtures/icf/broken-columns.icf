@@ -1,0 +1,8 @@
+Version 1.1.0 
+'ACCESS SPECIFICATIONS ====
+'Access specification name,default assignment
+	Kurz,NONE
+'size,% of size,% reads,% random,delay,burst,align,reply
+	4096,100,67,100,0,1,0
+'END access specifications
+Version 1.1.0 

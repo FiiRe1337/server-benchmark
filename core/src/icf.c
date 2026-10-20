@@ -27,7 +27,7 @@
 #define ICF_DEFAULT_DURATION 60
 
 typedef struct { long long size, pct, rd, rnd, delay, burst, align, reply; int line; } icf_line;
-typedef struct { char name[128]; icf_line l[ICF_MAX_LINES]; int n, line; } icf_spec;
+typedef struct { char name[128]; icf_line l[ICF_MAX_LINES]; int n, line, bad; } icf_spec;
 typedef struct { char name[200]; char type[32]; int line; } icf_target;
 typedef struct {
     char name[128], type[64];
@@ -218,7 +218,14 @@ static int parse_doc(icf_doc *d, char *text, sb_verrs *e, sb_verrs *w) {
             if (sec == SEC_MANAGERS && cw && ieq(key, "End worker")) cw = NULL;
             continue;
         }
-        /* Datenzeile */
+        /* Datenzeile; "Version ..." am Zeilenanfang ist das Dateiende-Kennzeichen von Iometer */
+        if (raw[0] != '\t' && raw[0] != ' ' && ieq_prefix(s, "Version")) {
+            if (sec == SEC_SPECS || sec == SEC_MANAGERS) {
+                sb_verrs_add(e, "", "E_ICF_FORMAT", "Zeile %d: Dateiende, aber Abschnitt '%s' (ab Zeile %d) ist nicht abgeschlossen; abgeschnitten?", lineno, secname, sec_line);
+                return 2;
+            }
+            continue;
+        }
         if (sec == SEC_NONE || sec == SEC_RESULTS || sec == SEC_OTHER) continue; /* auch "Version ..." am Ende */
         char buf[1024];
         cpy(buf, sizeof buf, s);
@@ -267,6 +274,7 @@ static int parse_doc(icf_doc *d, char *text, sb_verrs *e, sb_verrs *w) {
                 int ok = n == 8;
                 for (int i = 0; ok && i < 8; i++) ok = parse_ll(f[i], &v[i]);
                 if (!ok) {
+                    cs->bad = 1;
                     sb_verrs_add(e, "", "E_ICF_PARSE", "Zeile %d: erwartet 8 Zahlen (size,%% of size,%% reads,%% random,delay,burst,align,reply), gelesen: '%s'.", lineno, s);
                     continue;
                 }
@@ -283,6 +291,7 @@ static int parse_doc(icf_doc *d, char *text, sb_verrs *e, sb_verrs *w) {
                                 : v[6] < 0 || v[6] > (1LL << 30) ? "align (>= 0)"
                                 : v[7] < 0 ? "reply (>= 0)" : NULL;
                 if (bad) {
+                    cs->bad = 1;
                     sb_verrs_add(e, "", "E_ICF_VALUE", "Zeile %d: Wert für %s außerhalb des gültigen Bereichs: '%s'.", lineno, bad, s);
                     continue;
                 }
@@ -381,6 +390,7 @@ static int parse_doc(icf_doc *d, char *text, sb_verrs *e, sb_verrs *w) {
         icf_spec *S = &d->specs[i];
         long long sum = 0;
         for (int j = 0; j < S->n; j++) sum += S->l[j].pct;
+        if (S->bad) continue;
         if (!S->n)
             sb_verrs_add(e, "", "E_ICF_SPEC", "Zeile %d: Access Specification '%s' hat keine Zeilen.", S->line, S->name);
         else if (sum != 100)
@@ -591,7 +601,7 @@ int sb_icf_convert(const char *text, size_t len, const sb_icf_opts *o, cJSON **j
                      d->has_run ? d->run_line : ICF_DEFAULT_DURATION, ICF_DEFAULT_DURATION);
     }
     if (d->test_type[0] && !ieq(d->test_type, "NORMAL"))
-        sb_verrs_add(w, "/tests", "W_ICF_CYCLING", "Test Type '%s' (Cycling) wird nicht nachgebildet; es läuft ein Durchgang mit den eingestellten Startwerten.", d->test_type);
+        sb_verrs_add(w, "/tests", "W_ICF_CYCLING", "Test Type '%s' (Cycling) wird nicht nachgebildet; es läuft ein Durchgang mit Outstanding I/Os und Workern aus der Worker-Konfiguration.", d->test_type);
 
     int writes = 0, align0 = 0;
     for (int i = 0; i < nseq; i++)
