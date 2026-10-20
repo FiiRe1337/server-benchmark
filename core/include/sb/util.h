@@ -39,6 +39,7 @@ const char *sb_basename(const char *p);
  * sbench.exe (falls beschreibbar), sonst %ProgramData%\sbench.
  * Unterordner results\, jobs\, logs\, runs\ werden angelegt. */
 const char *sb_data_dir(void);
+int sb_set_data_dir(const char *path_u8);
 
 /* Laufzeit-Größenangaben "4K", "8KiB", "256MiB", "1G", Zahl */
 int sb_parse_size(const char *s, uint64_t *out);
