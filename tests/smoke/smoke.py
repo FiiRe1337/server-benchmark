@@ -181,7 +181,7 @@ INVALID_HANDLE = wintypes.HANDLE(-1).value
 
 def run_restricted(exe, *args, cwd: Path, timeout=120):
     """Startet exe mit eingeschränktem Token (Administratoren nur 'deny only', LUA_TOKEN,
-    Integrität Medium) wie aus einer nicht erhöhten Konsole. Rückgabe (exit_code, stdout,
+    Integrität unverändert) wie aus einer nicht erhöhten Konsole. Rückgabe (exit_code, stdout,
     stderr) oder None, wenn der Runner das nicht zulässt (dann wird der Test übersprungen)."""
     k32 = ctypes.WinDLL("kernel32", use_last_error=True)
     adv = ctypes.WinDLL("advapi32", use_last_error=True)
@@ -229,10 +229,8 @@ def run_restricted(exe, *args, cwd: Path, timeout=120):
     if not adv.CreateRestrictedToken(tok, 0x1 | 0x4, 0, None, 0, None, 0, None, ctypes.byref(rtok)):
         print(f"  CreateRestrictedToken: Fehler {ctypes.get_last_error()}")
         return None
-    sid = ctypes.c_void_p()
-    if adv.ConvertStringSidToSidW("S-1-16-8192", ctypes.byref(sid)):  # Medium Mandatory Level
-        tml = SA(sid, 0x20)  # SE_GROUP_INTEGRITY
-        adv.SetTokenInformation(rtok, 25, ctypes.byref(tml), ctypes.sizeof(tml) + adv.GetLengthSid(sid))
+    # Integritätsstufe bleibt High: mit Medium scheitert der Prozessstart im Dienst-Desktop
+    # des Runners (STATUS_DLL_INIT_FAILED). Für sbench zählt die Admin-Gruppe (deny only).
     outp, errp = cwd / "restricted.out", cwd / "restricted.err"
     with open(outp, "wb") as fo, open(errp, "wb") as fe:
         import msvcrt
@@ -630,6 +628,9 @@ def main() -> int:
                     "access_specs": [{"weight": 100, "block_size": "4KiB", "read_pct": 100, "random_pct": 100}]}]}),
                     encoding="utf-8")
     rr = run_restricted(sbench, "--data-dir", rdd, "info", "--json", cwd=work)
+    if rr is not None and rr[0] >= 0xC0000000:
+        print(f"  Prozessstart mit eingeschränktem Token fehlgeschlagen (NTSTATUS 0x{rr[0]:08X})")
+        rr = None
     if rr is None:
         print("  [SKIP] eingeschränkter Token auf diesem Runner nicht möglich, Exit 4 manuell prüfen (docs/abnahme-m1.md)")
         SUMMARY.append("#6 Exit 4: übersprungen (kein eingeschränkter Token)")
