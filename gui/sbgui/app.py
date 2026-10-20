@@ -44,13 +44,13 @@ def result_files(d, extra_dirs=()):
         files += sorted(glob.glob(os.path.join(e, "*.json")), reverse=True)
     try:
         sys.path.insert(0, ROOT); import sb_contract
-        ex = os.path.join(sb_contract.base_dir(), "examples", "result-storage.json")
+        exs = [os.path.join(sb_contract.base_dir(), "examples", f) for f in ("result-storage.json", "result-compute.json")]  # 1.2: cpu/memory + NUMA
     except (ImportError, FileNotFoundError):
-        ex = ""
+        exs = []
     quad = [f for f in files if "quad" in f]
     order = [f for h in ("host", "vm.json", "vm-san") for f in quad if f.endswith(f"-{h}" if h != "vm.json" else "-vm.json") or f.endswith(f"-{h}.json")]
     rest = [f for f in files if f not in order]
-    return order + rest + ([ex] if os.path.exists(ex) else [])
+    return order + rest + [ex for ex in exs if os.path.exists(ex)]
 
 
 def make_app(argv_extra=(), scale=1.0):
@@ -138,6 +138,7 @@ def screenshots(a):
                          "out": "C:\\Users\\michi\\AppData\\Local\\sbench-gui\\results\\20261020-091500-demo.json",
                          "progress_file": "C:\\Tools\\sbench\\data\\runs\\20261020-091500-demo.jsonl"}])
     shot("03d_reattach_offer"); close_overlays()
+    _m2_shots(win, live, shot)
     win.show_page("compare"); shot("04_compare")
     win.show_page("export"); shot("05_export")
     win.support_bundle([], anonymize=True); shot("06_support_dialog"); close_overlays()
@@ -146,6 +147,40 @@ def screenshots(a):
     _emit({"ok": True, "scale": a.scale, "size": a.size, "min_size": [win.minimumWidth(), win.minimumHeight()],
            "files": saved, "layout": layout}, a.report)
     return 0
+
+
+def _m2_shots(win, live, shot):
+    """Contract 1.2 (M2): CPU/RAM live view, results, host-vs-VM compare, profile editor (demo data from tools/make_demo.py)."""
+    from PySide6.QtCore import Qt
+    from .sbench import Replay
+    jp, pp = os.path.join(DEMO, "job-m2.json"), os.path.join(DEMO, "progress-m2.jsonl")
+    if not (os.path.exists(jp) and os.path.exists(pp)):
+        return
+    job = json.load(open(jp, encoding="utf-8"))
+    win.show_page("live")
+    for name, pred in (("08_live_cpu", lambda e: e.get("ev") == "tick" and e["test"] == 0 and e["t"] >= 6),
+                       ("08b_live_ram_preparing", lambda e: e.get("ev") == "progress" and e["phase"] == "preparing" and e["done"] >= e["total"] * 0.45),
+                       ("08c_live_ram_bandwidth", lambda e: e.get("ev") == "tick" and e["test"] == 2 and e["t"] >= 7),
+                       ("08d_live_ram_latency", lambda e: e.get("ev") == "tick" and e["test"] == 5 and e["t"] >= 4)):
+        rep = Replay(pp); live.attach(rep, job, tick_ms=250)
+        rep.feed_until(pred); live.refresh(); live.timer.stop(); shot(name)
+    rp = win.pages["results"]
+    for name, stem in (("09_results_cpu_ram", "result-m2-host"), ("09b_results_numa", "result-m2-numa")):
+        f = next((x for x, _ in rp.results if stem in x), None)
+        if f:
+            rp.select_file(f); win.show_page("results"); shot(name)
+    cp = win.pages["compare"]
+    for i in range(cp.list.count()):
+        it = cp.list.item(i); f = cp.results[it.data(Qt.UserRole)][0]
+        it.setCheckState(Qt.Checked if ("result-m2-host" in f or "result-m2-vm" in f) else Qt.Unchecked)
+    win.show_page("compare"); shot("10_compare_cpu_ram")
+    for i in range(cp.list.count()):        # back to the storage selection for 04_compare
+        cp.list.item(i).setCheckState(Qt.Checked if i < 3 else Qt.Unchecked)
+    pe = win.pages["profiles"]
+    for name, kind in (("11_profile_cpu", "cpu"), ("11b_profile_ram", "memory")):
+        if pe.open_quick(kind):
+            win.show_page("profiles"); pe.validate(); shot(name)
+    _select(pe, "mix-60-40")
 
 
 def _select(pe, stem):

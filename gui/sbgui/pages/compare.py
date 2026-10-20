@@ -4,7 +4,8 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QListWidgetItem, QComboBox, QPushButton
 from ..widgets import Card, label, table, add_row, plot, fmt_num, listw, Responsive
 from .. import theme as T
-from ..model import match_key, host_label, storage_tests, check_schema
+from ..model import (match_key, host_label, storage_tests, check_schema, compute_tests, summary_metric, fmt_metric, lower_is_better,
+                     compute_details)
 
 PCTS = ["p50", "p90", "p95", "p99", "p99_9", "p99_99"]
 PCT_TXT = ["p50", "p90", "p95", "p99", "p99.9", "p99.99"]
@@ -35,6 +36,33 @@ def by_name(res):
     return {match_key(t["config"]): t for t in storage_tests(res)}
 
 
+COMPUTE_UNIT = {"score": "Score", "gbps": "GB/s", "latency_ns": "ns"}
+
+
+def compute_rows(runs):
+    """cpu/memory comparison (contract 1.2), matched by test name like storage: [(name, key, [value per run], details)].
+    cpu -> summary.score (higher = better), memory bandwidth -> gbps, latency -> latency_ns (lower = better).
+    Order: tests of the first run that has cpu/memory tests, then tests only present in later runs."""
+    names, rows = [], {}
+    for k, r in enumerate(runs):
+        for t in compute_tests(r):
+            nm = match_key(t["config"])
+            key, val = ("score", t["summary"].get("score")) if t["type"] == "cpu" else summary_metric(t)
+            if nm not in rows:
+                names.append(nm); rows[nm] = [key, [None] * len(runs), " · ".join(compute_details(t))]
+            if rows[nm][0] == key:
+                rows[nm][1][k] = val
+    return [(nm, rows[nm][0], rows[nm][1], rows[nm][2]) for nm in names]
+
+
+def rel_delta(val, base, key):
+    """Percent vs. base; positive = better for every metric (latency inverted)."""
+    if val is None or not base:
+        return None
+    d = (val - base) / base * 100
+    return -d if lower_is_better(key) else d
+
+
 def focus_test(tests):
     """Latency-percentile focus: first mixed random test (e.g. 4K 70/30), else first."""
     for k, t in tests.items():
@@ -57,7 +85,7 @@ class Compare(QWidget):
         tv.addWidget(label("Ergebnisvergleich", "h1"))
         tv.addWidget(label("2–3 Läufe aus sb-result/1-Dateien, z. B. Host vs. VM. Basis = erster ausgewählter Lauf.", "muted"))
         hdr.addLayout(tv); hdr.addStretch(1)
-        hdr.addWidget(label("Metrik", "muted"))
+        self.metric_lbl = label("Metrik", "muted"); hdr.addWidget(self.metric_lbl)
         self.metric_box = QComboBox(); self.metric_box.addItems(["IOPS", "MB/s", "Latenz Ø (µs)", "Latenz p99 (µs)"]); self.metric_box.setMinimumWidth(150)
         self.metric_box.currentIndexChanged.connect(self.update); hdr.addWidget(self.metric_box)
         v.addLayout(hdr)
@@ -65,8 +93,10 @@ class Compare(QWidget):
         left = Card("Ergebnisse", f"{len(self.results)} Läufe"); left.setMinimumHeight(170)
         self.list = listw(); left.add(self.list, 1)
         for i, (f, r) in enumerate(self.results):
+            nst, ncp = len(storage_tests(r)), len(compute_tests(r))
+            cnt = " · ".join(x for x in (f"{nst} Storage" if nst else "", f"{ncp} CPU/RAM" if ncp else "") if x) or "0 Tests"
             it = QListWidgetItem(f"{run_label(r)}{'  · Beispiel' if r.get('_example') else ''}\n"
-                                 f"{len(storage_tests(r))} Tests · {_load_cfg(r) + ' · ' if _load_cfg(r) else ''}{_local(r['started_utc'])}")
+                                 f"{cnt} · {_load_cfg(r) + ' · ' if _load_cfg(r) else ''}{_local(r['started_utc'])}")
             it.setFlags(it.flags() | Qt.ItemIsUserCheckable); it.setCheckState(Qt.Checked if i < 3 else Qt.Unchecked)
             it.setData(Qt.UserRole, i); self.list.addItem(it)
         self.list.itemChanged.connect(self.update)
@@ -79,10 +109,18 @@ class Compare(QWidget):
         self.p_bar = plot(left_width=62); self.bar_card.add(self.p_bar, 1); self.bar_card.setMinimumHeight(240)
         self.lc = lc = Card("Latenz-Perzentile", "µs, log. Skala", margins=14); lc.setMinimumHeight(240)
         self.p_pct = plot(left_width=50); lc.add(self.p_pct, 1)
-        center.addWidget(Responsive([(self.bar_card, 3, None), (lc, 2, None)], breakpoint=820), 5)
+        self.st_row = Responsive([(self.bar_card, 3, None), (lc, 2, None)], breakpoint=820)
+        center.addWidget(self.st_row, 5)
         self.dc = Card("Delta-Tabelle", "Abweichung gegenüber Basislauf", margins=14); self.dc.setMinimumHeight(200)
         self.delta = table([], stretch_col=None); self.dc.add(self.delta, 1)
         center.addWidget(self.dc, 4)
+        # contract 1.2: cpu / memory (score, GB/s, latency) relative to the base run, e.g. host vs. VM
+        self.cleg = QHBoxLayout(); self.cleg.setSpacing(12); clw = QWidget(); clw.setLayout(self.cleg); self.cleg.setContentsMargins(0, 0, 0, 0)
+        self.cc = Card("CPU & Arbeitsspeicher", "relativ zum Basislauf A = 100 % · höher = besser (Latenz invertiert)", right=[clw], margins=14)
+        self.cc.setMinimumHeight(380)
+        self.p_cmp = plot(left_width=50); self.p_cmp.setMinimumHeight(150); self.cc.add(self.p_cmp, 2)
+        self.ctab = table([], stretch_col=None); self.ctab.setMinimumHeight(120); self.cc.add(self.ctab, 3)
+        center.addWidget(self.cc, 5)
         v.addWidget(Responsive([(left, 0, 270), (center_w, 1, None)], breakpoint=900), 1)
         self.update()
 
@@ -98,7 +136,10 @@ class Compare(QWidget):
         return [s["iops"], s["mbps"], s["lat_us"]["mean"], s["lat_us"]["p99"]][i]
 
     def update(self, *_):
+        self._update_compute([r for _, r in self.selected() if compute_tests(r)])
         sel = [(f, r) for f, r in self.selected() if storage_tests(r)]  # results without storage tests (all skipped) have nothing to plot
+        for w in (self.st_row, self.dc, self.metric_lbl, self.metric_box):
+            w.setVisible(bool(sel) or not any(compute_tests(r) for _, r in self.selected()))
         self.p_bar.clear(); self.p_pct.clear()
         while self.legend.count():
             wd = self.legend.takeAt(0).widget()
@@ -165,6 +206,52 @@ class Compare(QWidget):
                         good = (d < 0) if lower_better else (d > 0)
                         colors[len(row) - 1] = T.GREEN if good or abs(d) < 2 else (T.AMBER if abs(d) < 25 else T.RED)
             add_row(self.delta, row, colors)
+
+
+    def _update_compute(self, runs):
+        self.cc.setVisible(bool(runs)); self.p_cmp.clear()
+        while self.cleg.count():
+            wd = self.cleg.takeAt(0).widget()
+            if wd:
+                wd.setParent(None); wd.deleteLater()
+        if not runs:
+            return
+        rows = compute_rows(runs); letters = "ABC"; n = len(runs); w = 0.8 / n; top = 100.0
+        for k, r in enumerate(runs):
+            col = T.SERIES[k]
+            ys = []
+            for _, key, vals, _ in rows:
+                d = rel_delta(vals[k], vals[0], key)
+                ys.append(100 + d if d is not None else 0)
+            top = max([top] + ys)
+            xs = np.arange(len(rows)) - 0.4 + w * (k + 0.5)
+            self.p_cmp.addItem(pg.BarGraphItem(x=xs, height=ys, width=w * 0.86, brush=pg.mkBrush(col), pen=pg.mkPen(None)))
+            lab = label(f"■  {letters[k]} = {run_label(r, runs)}"); lab.setStyleSheet(f"color:{col}; font-size:11px;"); self.cleg.addWidget(lab)
+        self.p_cmp.addItem(pg.InfiniteLine(pos=100, angle=0, pen=pg.mkPen(T.DIM, width=1, style=Qt.DashLine)))
+        ax = self.p_cmp.getAxis("bottom"); ax.setTicks([[(i, _wrap(nm, 14)) for i, (nm, *_r) in enumerate(rows)]]); ax.setHeight(34)
+        self.p_cmp.setXRange(-0.55, len(rows) - 0.45, padding=0)
+        self.p_cmp.setYRange(0, top * 1.12, padding=0)
+        self.p_cmp.getAxis("left").setTicks([[(v, f"{v} %") for v in range(0, int(top * 1.12) + 1, 25 if top < 200 else 50)]])
+        hdrs = ["Test", "Metrik"]
+        for k in range(n):
+            hdrs.append(letters[k])
+            if k:
+                hdrs.append(f"Δ {letters[k]}")
+        self.ctab.clear(); self.ctab.setRowCount(0); self.ctab.setColumnCount(len(hdrs)); self.ctab.setHorizontalHeaderLabels(hdrs)
+        self.ctab._mono = set(range(2, len(hdrs)))
+        from PySide6.QtWidgets import QHeaderView
+        hh = self.ctab.horizontalHeader(); hh.setSectionResizeMode(QHeaderView.Stretch); hh.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        for nm, key, vals, det in rows:
+            row, colors = [nm, COMPUTE_UNIT[key]], {}
+            for k, val in enumerate(vals):
+                row.append(fmt_metric(key, val))
+                if k:
+                    d = rel_delta(val, vals[0], key)
+                    row.append("–" if d is None else f"{d:+.0f} %")
+                    if d is not None:
+                        colors[len(row) - 1] = T.GREEN if d >= 0 or abs(d) < 2 else (T.AMBER if abs(d) < 25 else T.RED)
+            r_ = add_row(self.ctab, row, colors); self.ctab.item(r_, 0).setToolTip(det)
+        self.ctab.setMinimumHeight(min(32 * len(rows) + 38, 260))
 
 
 def _wrap(name, n=11):

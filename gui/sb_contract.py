@@ -1,6 +1,6 @@
 """Locate the sbench interface contract (JSON Schemas) and build the validator set.
 
-Single source: <repo>/schema on main (contract 1.1 incl. sb-bundle/1 since core M1, 5670020):
+Single source: <repo>/schema on main (contract 1.2 since core M2 #13, 2f9ed6c: cpu/memory tests; 1.1 incl. sb-bundle/1 since M1):
 sb-job/1, sb-result/1, sb-progress/1, sb-info/1, sb-validate/1, sb-runs/1, sb-bundle/1.
 
 Schema lookup order: $SBENCH_SCHEMA_DIR, <repo>/schema (GUI lives in <repo>/gui), <here>/schema (frozen EXE).

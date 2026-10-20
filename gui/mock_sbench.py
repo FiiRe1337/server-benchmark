@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 r"""Mock of the core CLI `sbench.exe`, implemented against the contract in
-FiiRe1337/server-benchmark@main, contract 1.1 (docs/cli.md, docs/core.md + schema/*.schema.json,
-core M1 5670020 incl. sb-bundle/1).
+FiiRe1337/server-benchmark, contract 1.2 (core M2, PR #13 branch feat/m2-mem-cpu: docs/cli.md, docs/core.md +
+schema/*.schema.json + schema/examples/*-compute.*). Contract 1.1 (core M1 5670020) via SBENCH_MOCK_CONTRACT=1.1.
 
   sbench run --job <job.json> --out <result.json> [--progress stdout|file:<p.jsonl>|pipe:\\.\pipe\sbench-<id>]
              [--tick-ms <ms>=1000, min 100] [--id <id>] [--allow-destructive]
@@ -20,8 +20,10 @@ Every run additionally writes <data_dir>/runs/<run_id>.jsonl (all events) and ru
 data_dir: --data-dir, else $SBENCH_DATA_DIR, else data\ next to sbench (writable), else %ProgramData%\sbench.
 Exit codes: 0 ok, 1 runtime error, 2 invalid job/args, 3 aborted, 4 missing privileges.
 Mock knobs (env): SBENCH_MOCK_SPEED (time compression), SBENCH_MOCK_HOST (host|vm|vm-san),
-SBENCH_MOCK_ELEVATED=1 (pretend to be elevated), SBENCH_MOCK_ALL_TYPES=1 (simulate non-storage tests; default like
-core M1: E_NOT_IMPLEMENTED + skipped), SBENCH_DATA_DIR, SBENCH_SCHEMA_DIR.
+SBENCH_MOCK_ELEVATED=1 (pretend to be elevated), SBENCH_MOCK_CONTRACT=1.2|1.1 (default 1.2 = core M2: cpu + memory
+implemented, net_*/hyperv_info E_NOT_IMPLEMENTED; 1.1 = core M1: every non-storage test E_NOT_IMPLEMENTED + skipped,
+no ram_method, 14 CSV columns), SBENCH_MOCK_ALL_TYPES=1 (additionally simulate net_*/hyperv_info), SBENCH_DATA_DIR,
+SBENCH_SCHEMA_DIR.
 Stop: real core uses the named event Global\sbench-stop-<id> (fallback Local\); the mock uses a marker file.
 """
 import argparse, copy, csv, datetime as dt, hashlib, json, math, os, random, re, signal, sys, time, zipfile
@@ -54,7 +56,12 @@ HOSTKIND = os.environ.get("SBENCH_MOCK_HOST", "host")
 PERF = {"host": (1.0, 1.0), "vm": (0.78, 1.25), "vm-san": (0.42, 2.4)}[HOSTKIND]  # IOPS factor, latency factor
 SCHEMA_DIR = sb_contract.base_dir()
 ELEVATED = os.environ.get("SBENCH_MOCK_ELEVATED") == "1"
-ALL_TYPES = os.environ.get("SBENCH_MOCK_ALL_TYPES") == "1"  # simulate cpu/memory/net/hyperv_info (post-M1); default = core M1
+ALL_TYPES = os.environ.get("SBENCH_MOCK_ALL_TYPES") == "1"  # simulate cpu/memory/net/hyperv_info regardless of contract
+CONTRACT = os.environ.get("SBENCH_MOCK_CONTRACT", "1.2")
+if CONTRACT not in ("1.1", "1.2"):
+    raise SystemExit(f"SBENCH_MOCK_CONTRACT={CONTRACT!r}: 1.1 oder 1.2")
+M2 = CONTRACT == "1.2"
+IMPLEMENTED = {"storage"} | ({"cpu", "memory"} if M2 else set()) | ({"cpu", "memory", "net_client", "net_server", "hyperv_info"} if ALL_TYPES else set())
 EXIT_OK, EXIT_ERR, EXIT_INVALID, EXIT_ABORTED, EXIT_PRIV = 0, 1, 2, 3, 4
 UNITS = {"KiB": 1024, "MiB": 1024**2, "GiB": 1024**3}
 GIB = 1024**3
@@ -95,14 +102,14 @@ def info_doc():
             n = m["cpu"]["threads"] // s  # final contract: cpus = list of global indices (group * 64 + bit)
             m["numa_nodes"] = [{"id": i, "cpus": list(range(i * n, (i + 1) * n)), "ram_bytes": m["ram_bytes"] // s,
                                 "ram_free_bytes": int(m["ram_bytes"] // s * (0.78 + 0.06 * i))} for i in range(s)]
-        return info
+        return _ram_method(info)
     vm = copy.deepcopy(info)
     m = vm["meta"]
     m["host"] = "VM-BENCH01" if HOSTKIND == "vm" else "VM-SAN02"
     m["cpu"].update(sockets=1, cores=8, threads=16)
     m["ram_bytes"] = 64 * GIB
     m["ram_free_bytes"] = 41 * GIB
-    m["numa_nodes"] = [{"id": 0, "cpus": list(range(16)), "ram_bytes": 64 * GIB, "ram_free_bytes": 41 * GIB}]
+    m["numa_nodes"] = [{"id": 0, "cpus": list(range(16)), "ram_bytes": 64 * GIB, "ram_free_bytes": 41 * GIB, "ram_method": "total"}]
     m["hypervisor"] = {"present": True, "vendor": "Microsoft Hv", "role": "guest", "partition_info": {"is_root": False}}
     m["drives"] = [{"path": "\\\\.\\PhysicalDrive0", "model": "Msft Virtual Disk", "size_bytes": 136365211648, "bus": "SCSI",
                     "sector_logical": 512, "sector_physical": 4096},
@@ -114,7 +121,17 @@ def info_doc():
                                  {"path": "\\\\.\\D:", "letter": "D", "label": "Daten", "fs": "ReFS", "size_bytes": 1099511627776 - 2**30,
                                   "free_bytes": 912680550400}],
                      "physical_disks": m["drives"], "nics": m["nics"]}
-    return vm
+    return _ram_method(vm)
+
+
+def _ram_method(info):
+    """Contract 1.2 (#8): numa_nodes[].ram_method (total|srat|estimate); contract 1.1 core: field absent."""
+    for n in info["meta"].get("numa_nodes", []):
+        if not M2:
+            n.pop("ram_method", None)
+        else:
+            n.setdefault("ram_method", "total" if len(info["meta"]["numa_nodes"]) == 1 else "srat")
+    return info
 
 
 # ----------------------------------------------------------------------------- validate
@@ -152,6 +169,9 @@ def validate(job):
     sectors = {d["path"]: d.get("sector_logical", 512) for d in info["targets"]["physical_disks"]}
     vols = info["targets"]["volumes"]
     for i, t in enumerate(job.get("tests", [])):
+        if t.get("type") in ("cpu", "memory") and M2:
+            validate_compute(i, t, info["meta"], errs, warns)
+            continue
         if t.get("type") != "storage":
             if t.get("type") == "net_client":
                 udp_tp = t.get("proto", "tcp") == "udp" and t.get("mode", "throughput") == "throughput"
@@ -197,6 +217,83 @@ def validate(job):
                         errs.append({"path": f"/tests/{i}/access_specs/{j}/{key}", "code": "E_BLOCK_ALIGN",
                                      "msg": f"{key} {parse_size(s[key])} ist kein Vielfaches der logischen Sektorgröße (512 Bytes); bei cache = unbuffered erforderlich."})
     return errs, warns
+
+
+# ----------------------------------------------------------------------------- cpu / memory (contract 1.2)
+ARCH = "x64"
+SIMD_OK = {"x64": ("scalar", "sse2", "avx2", "avx512"), "arm64": ("scalar", "neon")}[ARCH]  # mock CPU: Xeon Gold 6338 (AVX-512F)
+
+
+def nodes_of(meta):
+    return {n["id"]: n for n in meta.get("numa_nodes", [])} or {0: {"id": 0, "cpus": list(range(meta["cpu"]["threads"])),
+                                                                     "ram_free_bytes": meta.get("ram_free_bytes", meta["ram_bytes"])}}
+
+
+def thread_cpus(meta, threads, numa_node=None):
+    """docs/cli.md 1.2: one logical CPU per physical core first, NUMA nodes alternating (or only numa_node), then the
+    SMT siblings; more threads than CPUs wrap around (W_OVERSUBSCRIBED). Mock topology: siblings = (2k, 2k+1)."""
+    nodes = nodes_of(meta)
+    sel = [nodes[numa_node]] if numa_node is not None else [nodes[k] for k in sorted(nodes)]
+    smt = meta["cpu"]["threads"] > meta["cpu"]["cores"]
+    cores = [n["cpus"][0::2] if smt else n["cpus"] for n in sel]
+    sibs = [n["cpus"][1::2] if smt else [] for n in sel]
+    order = []
+    for group in (cores, sibs):
+        for k in range(max((len(g) for g in group), default=0)):
+            order += [g[k] for g in group if k < len(g)]
+    n = threads or len(order)
+    return [order[i % len(order)] for i in range(n)]
+
+
+def node_of(meta, cpu):
+    for nid, n in nodes_of(meta).items():
+        if cpu in n["cpus"]:
+            return nid
+    return 0
+
+
+def mem_threads(t, meta):
+    if t.get("mode") == "latency":
+        return 1
+    return t.get("threads", 0) or len(nodes_of(meta)[t["numa_node"]]["cpus"] if "numa_node" in t else thread_cpus(meta, 0))
+
+
+def validate_compute(i, t, meta, errs, warns):
+    """Semantic rules of contract 1.2 (docs/cli.md: E_NUMA_NODE, E_SIMD_UNSUPPORTED, E_BUFFER_SIZE, E_OUT_OF_MEMORY + W_*)."""
+    nodes = nodes_of(meta)
+    with_cpus = {k for k, n in nodes.items() if n.get("cpus")}
+    if "numa_node" in t and t["numa_node"] not in with_cpus:
+        errs.append({"path": f"/tests/{i}/numa_node", "code": "E_NUMA_NODE",
+                     "msg": f"NUMA-Knoten {t['numa_node']} hat keine logischen Prozessoren (vorhanden: {sorted(with_cpus)})."})
+        return
+    if "mem_node" in t and t["mem_node"] not in nodes:
+        errs.append({"path": f"/tests/{i}/mem_node", "code": "E_NUMA_NODE", "msg": f"NUMA-Knoten {t['mem_node']} existiert nicht."})
+        return
+    logical = len(nodes[t["numa_node"]]["cpus"]) if "numa_node" in t else sum(len(n["cpus"]) for n in nodes.values())
+    if t.get("threads", 0) > logical:
+        warns.append({"path": f"/tests/{i}/threads", "code": "W_OVERSUBSCRIBED",
+                      "msg": f"{t['threads']} Threads, aber nur {logical} logische Prozessoren; Prozessoren werden mehrfach belegt."})
+    if t["type"] != "memory":
+        return
+    simd = t.get("simd", "auto")
+    if simd != "auto" and simd not in SIMD_OK:
+        errs.append({"path": f"/tests/{i}/simd", "code": "E_SIMD_UNSUPPORTED", "msg": f"Befehlssatz {simd} wird auf {ARCH} nicht unterstützt."})
+    bs = parse_size(t["buffer_size"])
+    if bs < 8192:
+        errs.append({"path": f"/tests/{i}/buffer_size", "code": "E_BUFFER_SIZE", "msg": "buffer_size muss mindestens 8 KiB sein."})
+        return
+    if t["mode"] == "latency" and t.get("threads", 0) > 1:
+        warns.append({"path": f"/tests/{i}/threads", "code": "W_THREADS_IGNORED", "msg": "Latenz wird immer mit einem Thread gemessen."})
+    if t.get("nontemporal") and t["mode"] == "bandwidth" and t.get("op", "read") == "read":
+        warns.append({"path": f"/tests/{i}/nontemporal", "code": "W_NONTEMPORAL_IGNORED", "msg": "nontemporal wirkt nur bei write und copy."})
+    need = mem_threads(t, meta) * bs
+    free = nodes[t["mem_node"]].get("ram_free_bytes", 0) if "mem_node" in t else meta.get("ram_free_bytes", meta["ram_bytes"])
+    if need > free * 0.9:
+        errs.append({"path": f"/tests/{i}/buffer_size", "code": "E_OUT_OF_MEMORY",
+                     "msg": f"Puffer gesamt {need / GIB:.1f} GiB > 90 % des freien Arbeitsspeichers ({free / GIB:.1f} GiB)."})
+    elif need > free * 0.5:
+        warns.append({"path": f"/tests/{i}/buffer_size", "code": "W_LOW_MEMORY",
+                      "msg": f"Puffer gesamt {need / GIB:.1f} GiB belegen mehr als 50 % des freien Arbeitsspeichers ({free / GIB:.1f} GiB)."})
 
 
 # ----------------------------------------------------------------------------- performance model
@@ -395,6 +492,156 @@ def run_storage(ti, t, tick, rng, rid):
             "per_worker": per_worker, "per_spec": per_spec, "histogram": lognorm_hist(mean, n), "timeseries": ts, "errors": []}
 
 
+CPU_REF = {"int": 2.8e8, "float": 1.5e8, "crypto": 3.4e6, "mixed": 3.8e5}   # docs/core.md, ops/s of 1 reference thread
+CPU_HOST = {"host": 1.01, "vm": 0.93, "vm-san": 0.93}[HOSTKIND]
+# memory: per-thread GB/s (DRAM, avx2) and per-memory-node caps; copy counts read + write (STREAM)
+MEM_ST = {"read": 16.0, "write": 12.0, "copy": 20.0}
+MEM_ST_NT = {"write": 18.0, "copy": 24.0}
+MEM_CAP = {"read": 110.0, "write": 70.0, "copy": 100.0}
+MEM_CAP_NT = {"write": 95.0, "copy": 120.0}
+SIMD_F = {"scalar": 0.55, "sse2": 0.85, "avx2": 1.0, "avx512": 1.08, "neon": 0.9}
+
+
+def _per_thread_model(t, meta, cpus):
+    """-> (metric key, [base value per thread]) for cpu / memory bandwidth / memory latency."""
+    if t["type"] == "cpu":
+        seen, out = {}, []
+        for c in cpus:
+            seen[c // 2] = seen.get(c // 2, 0) + 1
+        logical = meta["cpu"]["threads"]
+        over = max(1.0, len(cpus) / logical)
+        for c in cpus:
+            share = 0.62 if seen[c // 2] > 1 and meta["cpu"]["threads"] > meta["cpu"]["cores"] else 1.0  # SMT siblings busy
+            out.append(CPU_REF[t.get("workload", "mixed")] * CPU_HOST * share / over)
+        return "ops_per_s", out
+    bs = parse_size(t["buffer_size"])
+    vmf = 1.0 if HOSTKIND == "host" else 0.9
+    if t["mode"] == "latency":
+        n = node_of(meta, cpus[0]); mn = t.get("mem_node", n)
+        lat = 1.3 if bs <= 32 * 1024 else 4.2 if bs <= 1 << 20 else 19 if bs <= 32 << 20 else 95 / vmf
+        if bs > 32 << 20 and mn != n:
+            lat *= 1.45
+        return "latency_ns", [lat]
+    op = t.get("op", "read"); nt = t.get("nontemporal", False) and op != "read"
+    simd = t.get("simd", "auto"); simd = "avx2" if simd == "auto" else simd
+    st = (MEM_ST_NT[op] if nt else MEM_ST[op]) * SIMD_F[simd] * vmf
+    if bs <= 1 << 20:
+        st *= 4.0                           # L2
+    elif bs <= 32 << 20:
+        st *= 2.0                           # L3
+    vals = []
+    for c in cpus:
+        n = node_of(meta, c); mn = t.get("mem_node", n)
+        vals.append(st * (0.6 if mn != n else 1.0))
+    if bs > 32 << 20:                       # DRAM: cap per memory node
+        cap = (MEM_CAP_NT[op] if nt else MEM_CAP[op]) * vmf
+        by_mem = {}
+        for k, c in enumerate(cpus):
+            by_mem.setdefault(t.get("mem_node", node_of(meta, c)), []).append(k)
+        for mn, ks in by_mem.items():
+            tot = sum(vals[k] for k in ks)
+            remote = any(node_of(meta, cpus[k]) != mn for k in ks)
+            lim = cap * (0.45 if remote else 1.0)
+            if tot > lim:
+                for k in ks:
+                    vals[k] *= lim / tot
+    return "gbps", vals
+
+
+def run_compute(ti, t, tick, rng, rid, meta):
+    """Contract 1.2: cpu / memory with pinned threads. Phases: preparing (memory, progress in bytes = threads x buffer),
+    warmup (progress in s), measure (ticks with ops_per_s | gbps | latency_ns + cpu_pct + proc_cpu_pct and, except for
+    latency, workers[] with the per-thread value), cleanup. Stop during measure -> partial values; before -> absent."""
+    typ = t["type"]
+    latency = typ == "memory" and t["mode"] == "latency"
+    threads = 1 if latency else (t.get("threads", 0) or 0)
+    cpus = thread_cpus(meta, threads, t.get("numa_node"))
+    if latency:
+        cpus = cpus[:1]
+    key, base = _per_thread_model(t, meta, cpus)
+    if typ == "memory":
+        emit({"ev": "phase", "test": ti, "name": "preparing"})
+        total = len(cpus) * parse_size(t["buffer_size"]); done = 0; rate = 6 * GIB
+        while done < total and not _stop:
+            step = min(total - done, rate)
+            sleep_tick(step / rate, rid); done += step
+            emit({"ev": "progress", "test": ti, "phase": "preparing", "done": done, "total": total, "unit": "bytes"})
+        if _stop:
+            return None
+    wu = float(t.get("warmup_s", 1))
+    if wu:
+        emit({"ev": "phase", "test": ti, "name": "warmup", "duration_s": wu}); el = 0.0
+        while el < wu and not _stop:
+            step = min(1.0, wu - el); sleep_tick(step, rid); el += step
+            emit({"ev": "progress", "test": ti, "phase": "warmup", "done": round(el, 3), "total": wu, "unit": "s"})
+        if _stop:
+            return None
+    dur = float(t["duration_s"])
+    emit({"ev": "phase", "test": ti, "name": "measure", "duration_s": dur})
+    logical = meta["cpu"]["threads"]
+    load = min(100.0, len(set(cpus)) / logical * 100)
+    jitter = [1 + rng.uniform(-.02, .02) for _ in cpus]
+    el = 0.0; ticks = []; nd = 3 if key != "ops_per_s" else 1
+    while el + 1e-9 < dur and not _stop:
+        step = min(tick, dur - el); sleep_tick(step, rid)
+        if _stop:
+            break
+        el = round(el + step, 3)
+        f = 1 + .012 * math.sin(el / 2.1) + rng.gauss(0, .006)
+        per = [round(b * j * f * (1 + rng.gauss(0, .004)), nd) for b, j in zip(base, jitter)]
+        tot = round(sum(per), nd) if key != "latency_ns" else per[0]
+        tk = {"ev": "tick", "test": ti, "t": el, key: tot, "cpu_pct": round(min(100, load * 1.01 + abs(rng.gauss(0, .3))), 2),
+              "proc_cpu_pct": round(load * 0.99, 2)}
+        if not latency:
+            tk["workers"] = [{"id": i, key: v} for i, v in enumerate(per)]
+        emit(tk); ticks.append((step, per, tk))
+    emit({"ev": "phase", "test": ti, "name": "cleanup"}); sleep_tick(0.1, rid)
+    if not ticks:
+        return None
+    secs = sum(s for s, _, _ in ticks)
+    avg = [round(sum(s * p[i] for s, p, _ in ticks) / secs, nd) for i in range(len(cpus))]
+    total = round(sum(avg), nd) if key != "latency_ns" else avg[0]
+    cpu_pct = round(sum(s * tk["cpu_pct"] for s, _, tk in ticks) / secs, 1)
+    per_worker = []
+    for i, (c, v) in enumerate(zip(cpus, avg)):
+        w = {"id": i, "cpu": c, "node": node_of(meta, c)}
+        if typ == "memory":
+            w["mem_node"] = t.get("mem_node", w["node"])
+        w[key] = v; per_worker.append(w)
+    if typ == "cpu":
+        wl = t.get("workload", "mixed")
+        summ = {"workload": wl, "threads": len(cpus), "ops_per_s": total, "score": round(total / CPU_REF[wl] * 1000, 1),
+                "ops": int(total * secs)}
+    else:
+        bs = parse_size(t["buffer_size"])
+        summ = {"mode": t["mode"]}
+        if not latency:
+            summ["op"] = t.get("op", "read")
+        summ.update(threads=len(cpus), buffer_size_bytes=bs // 64 * 64 if latency else bs // 8192 * 8192)
+        if latency:
+            summ.update(latency_ns=total, loads=int(secs * 1e9 / total))
+        else:
+            simd = t.get("simd", "auto")
+            summ.update(gbps=total, simd="avx2" if simd == "auto" else simd,
+                        nontemporal=bool(t.get("nontemporal")) and summ["op"] != "read" and ARCH == "x64", bytes=int(total * 1e9 * secs))
+        if "mem_node" in t:
+            summ["mem_node"] = t["mem_node"]
+    if "numa_node" in t:
+        summ["numa_node"] = t["numa_node"]
+    summ.update(cpus=cpus, cpu_pct=cpu_pct)
+    if typ == "memory" and "mem_node" in t:      # schema order: numa_node before mem_node (cosmetic)
+        summ["mem_node"] = summ.pop("mem_node")
+    ts, bucket, acc = [], 1, []
+    for s, _, tk in ticks:
+        acc.append(tk)
+        if tk["t"] + 1e-9 >= bucket or tk is ticks[-1][2]:
+            k = len(acc)
+            ts.append({"t": round(min(bucket, tk["t"]), 3), key: round(sum(a[key] for a in acc) / k, nd),
+                       "cpu_pct": round(sum(a["cpu_pct"] for a in acc) / k, 1)})
+            acc = []; bucket += 1
+    return {"index": ti, "type": typ, "config": t, "summary": summ, "per_worker": per_worker, "timeseries": ts, "errors": []}
+
+
 def run_simple(ti, t, tick, rng, rid, meta):
     """cpu / memory / net / hyperv_info: plausible values, schema-conform."""
     typ = t["type"]
@@ -516,11 +763,16 @@ def run(a):
         rng = random.Random(f"{HOSTKIND}-{rid}")
         tick = a.tick_ms / 1000; results = []
         for ti, t in enumerate(job["tests"]):
-            if t["type"] != "storage" and not ALL_TYPES:  # core M1: skipped, not in tests[] (indices keep the job position)
-                msg = f"Testtyp '{t['type']}' ist in Meilenstein 1 noch nicht implementiert und wird übersprungen."
+            if t["type"] not in IMPLEMENTED:  # core M1/M2: skipped, not in tests[] (indices keep the job position)
+                msg = f"Testtyp '{t['type']}' ist in Meilenstein {'2' if M2 else '1'} noch nicht implementiert und wird übersprungen."
                 emit({"ev": "error", "code": "E_NOT_IMPLEMENTED", "msg": msg, "test": ti}); log(f"Test {ti}: {msg}")
                 continue
-            r = run_storage(ti, t, tick, rng, rid) if t["type"] == "storage" else run_simple(ti, t, tick, rng, rid, meta)
+            if t["type"] == "storage":
+                r = run_storage(ti, t, tick, rng, rid)
+            elif t["type"] in ("cpu", "memory") and M2:
+                r = run_compute(ti, t, tick, rng, rid, meta)
+            else:
+                r = run_simple(ti, t, tick, rng, rid, meta)
             if r:
                 results.append(r)
             if _stop:
@@ -546,27 +798,34 @@ def run(a):
 # ----------------------------------------------------------------------------- export / bundle
 FLAT = ["test", "type", "scope", "id", "iops", "mbps", "read_iops", "write_iops", "read_mbps", "write_mbps",
         "lat_mean_us", "lat_p99_us", "lat_max_us", "errors"]
+FLAT_M2 = ["ops_per_s", "gbps", "latency_ns", "score"]   # contract 1.2: appended, older positions unchanged
+
+
+def _flat_row(idx, typ, scope, id_, x, rw_mbps):
+    """Like core export.c flat_row(): every type gets total/worker/spec rows; missing values stay empty."""
+    g = lambda o, k: "" if not isinstance(o, dict) or o.get(k) is None or isinstance(o.get(k), (dict, list)) else o[k]
+    lat = x.get("lat_us") if isinstance(x.get("lat_us"), dict) else {}
+    e = x.get("errors", "")
+    row = [idx, typ, scope, id_, g(x, "iops"), g(x, "mbps"), g(x, "read_iops"), g(x, "write_iops"),
+           g(x, "read_mbps") if rw_mbps else "", g(x, "write_mbps") if rw_mbps else "", g(lat, "mean"), g(lat, "p99"), g(lat, "max"),
+           len(e) if isinstance(e, list) else e]
+    return row + ([g(x, k) for k in FLAT_M2] if M2 else [])
 
 
 def export(a):
     res = json.load(open(a.result, encoding="utf-8"))
     with open(a.csv, "w", encoding="utf-8", newline="") as f:
-        w = csv.writer(f, lineterminator="\n")
+        w = csv.writer(f, lineterminator="\r\n")
         if a.style == "flat":
-            w.writerow(FLAT)
+            w.writerow(FLAT + (FLAT_M2 if M2 else []))
             for t in res["tests"]:
-                s = t["summary"]
-                if t["type"] != "storage":
-                    w.writerow([t["index"], t["type"], "test", "", "", s.get("mbps", ""), "", "", "", "", "", "", "", ""]); continue
-                l = s["lat_us"]
-                w.writerow([t["index"], "storage", "test", "", s["iops"], s["mbps"], s["read_iops"], s["write_iops"], s["read_mbps"],
-                            s["write_mbps"], l["mean"], l["p99"], l["max"], s["errors"]])
-                for x in t["per_worker"]:
-                    w.writerow([t["index"], "storage", "worker", x["id"], x.get("iops"), x.get("mbps"), x.get("read_iops"), x.get("write_iops"),
-                                "", "", x["lat_us"]["mean"], x["lat_us"]["p99"], x["lat_us"]["max"], x.get("errors", 0)])
-                for x in t["per_spec"]:
-                    w.writerow([t["index"], "storage", "spec", x["spec"], x["iops"], x["mbps"], "", "", "", "", x["lat_us"]["mean"],
-                                x["lat_us"]["p99"], x["lat_us"]["max"], ""])
+                if t["type"] not in IMPLEMENTED and t["type"] != "storage":
+                    continue
+                w.writerow(_flat_row(t["index"], t["type"], "total", "", {**t["summary"], "errors": t["summary"].get("errors", t["errors"])}, True))
+                for x in t.get("per_worker", []):
+                    w.writerow(_flat_row(t["index"], t["type"], "worker", x["id"], x, False))
+                for x in t.get("per_spec", []):
+                    w.writerow(_flat_row(t["index"], t["type"], "spec", x["spec"], x, False))
         else:
             w.writerow(["Target Type", "Target Name", "Access Specification Name", "# Managers", "# Workers", "# Disks", "IOps",
                         "Read IOps", "Write IOps", "MBps (Decimal)", "Read MBps (Decimal)", "Write MBps (Decimal)",

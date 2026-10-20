@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate mock sbench output / recorded files against the contract (main, Vertrag 1.1; sb-bundle/1 see sb_contract.py).
+"""Validate mock sbench output / recorded files against the contract (main, Vertrag 1.2; sb-bundle/1 see sb_contract.py).
 
   python tools/check_mock.py <file.json|file.jsonl|bundle.zip> ...
 JSON files are matched by their "schema" field; .jsonl = sb-progress/1 stream; .zip = sbench bundle (manifest + sha256)."""

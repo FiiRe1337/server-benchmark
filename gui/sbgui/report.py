@@ -1,6 +1,7 @@
 """HTML/PDF report from sb-result/1 (GUI-side; CSV comes from `sbench export`)."""
 import html
-from .model import test_label, host_label, human_bytes, storage_tests
+from .model import (test_label, host_label, human_bytes, storage_tests, compute_tests, fmt_metric, numa_placement, short_size,
+                    RAM_METHOD_TXT)
 
 
 def build_html(results, compact=False):
@@ -18,17 +19,52 @@ td{border-bottom:1px solid #e3e8ee;padding:3px 6px;font-size:8.5pt} td.n{text-al
         out.append(f"<div class='m'>{html.escape(m['os']['name'])} {m['os']['build']} · {html.escape(m['cpu']['model'])} "
                    f"({m['cpu']['cores']}C/{m['cpu']['threads']}T) · {human_bytes(m['ram_bytes'])} RAM · Kern {r['kern_version']} · "
                    f"{r['started_utc'][:16].replace('T', ' ')} UTC</div>")
-        cols = ["Test", "IOPS", "MB/s", "Ø µs", "p99 µs"] + ([] if compact else ["p99.9 µs", "Fehler"])
-        out.append("<table><tr>" + "".join(f"<th nowrap>{c}</th>" for c in cols) + "</tr>")
-        for t in storage_tests(r):
-            s = t["summary"]; l = s["lat_us"]
-            vals = [f"{s['iops']:,.0f}", f"{s['mbps']:,.0f}", f"{l['mean']:,.0f}", f"{l['p99']:,.0f}"] + ([] if compact else [f"{l['p99_9']:,.0f}", str(s["errors"])])
-            out.append(f"<tr><td nowrap>{html.escape(test_label(t['config']))}</td>" + "".join(f"<td class='n' nowrap>{v}</td>" for v in vals) + "</tr>")
-        out.append("</table>")
+        if storage_tests(r) or not compute_tests(r):
+            cols = ["Test", "IOPS", "MB/s", "Ø µs", "p99 µs"] + ([] if compact else ["p99.9 µs", "Fehler"])
+            out.append(_table(cols, [[test_label(t["config"]), f"{t['summary']['iops']:,.0f}", f"{t['summary']['mbps']:,.0f}",
+                                      f"{t['summary']['lat_us']['mean']:,.0f}", f"{t['summary']['lat_us']['p99']:,.0f}"]
+                                     + ([] if compact else [f"{t['summary']['lat_us']['p99_9']:,.0f}", str(t['summary']['errors'])])
+                                     for t in storage_tests(r)]))
+        out += _compute_html(r, compact)
         if compact:
             continue
     out.append("</body></html>")
     return "".join(out)
+
+
+def _table(cols, rows):
+    out = ["<table><tr>" + "".join(f"<th nowrap>{c}</th>" for c in cols) + "</tr>"]
+    for row in rows:
+        out.append(f"<tr><td nowrap>{html.escape(str(row[0]))}</td>" + "".join(f"<td class='n' nowrap>{html.escape(str(v))}</td>" for v in row[1:]) + "</tr>")
+    return "".join(out) + "</table>"
+
+
+def _compute_html(r, compact):
+    """Contract 1.2: CPU score table, RAM GB/s + latency table, NUMA RAM source (ram_method)."""
+    out, ct = [], compute_tests(r)
+    cpu = [t for t in ct if t["type"] == "cpu"]; mem = [t for t in ct if t["type"] == "memory"]
+    if cpu:
+        out.append("<div class='m'>CPU · Score = ops/s ÷ Referenz-Thread × 1000</div>")
+        out.append(_table(["CPU-Test", "Workload", "Threads", "NUMA", "ops/s", "Score"],
+                          [[test_label(t["config"]), t["summary"]["workload"], t["summary"]["threads"], numa_placement(t) or "alle",
+                            fmt_metric("ops_per_s", t["summary"]["ops_per_s"]), fmt_metric("score", t["summary"]["score"])] for t in cpu]))
+    if mem:
+        out.append("<div class='m'>Arbeitsspeicher · GB/s = 10⁹ Byte/s · Latenz in ns</div>")
+        rows = []
+        for t in mem:
+            s = t["summary"]; bw = s["mode"] == "bandwidth"
+            rows.append([test_label(t["config"]), (s.get("op", "") + (" NT" if s.get("nontemporal") else "")) if bw else "Latenz",
+                         s.get("simd", "–") if bw else "–", s["threads"], short_size(s["buffer_size_bytes"]), numa_placement(t) or "lokal",
+                         fmt_metric("gbps", s.get("gbps")), fmt_metric("latency_ns", s.get("latency_ns"))])
+        out.append(_table(["RAM-Test", "Modus", "SIMD", "Threads", "Puffer", "NUMA", "GB/s", "Latenz ns"], rows))
+    nodes = r["meta"].get("numa_nodes") or []
+    if ct and not compact and nodes:
+        out.append("<div class='m'>NUMA-Knoten · RAM-Quelle (ram_method)</div>")
+        out.append(_table(["Knoten", "CPUs", "RAM", "frei", "Quelle"],
+                          [[n["id"], len(n.get("cpus") or []), human_bytes(n.get("ram_bytes", 0)), human_bytes(n.get("ram_free_bytes", 0))
+                            if n.get("ram_free_bytes") is not None else "–", RAM_METHOD_TXT.get(n.get("ram_method"), n.get("ram_method") or "–")]
+                           for n in nodes]))
+    return out
 
 
 def write_pdf(results, path):

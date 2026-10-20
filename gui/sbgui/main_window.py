@@ -8,6 +8,7 @@ from .pages.dashboard import Dashboard
 from .pages.profiles import ProfileEditor
 from .pages.live import LiveView
 from .pages.compare import Compare
+from .pages.results import ResultsPage
 from .pages.export import ExportPage
 from .overlay import ReattachOffer, SupportDialog, Overlay
 from . import theme as T, sbench
@@ -16,7 +17,7 @@ from .sbench import ROOT
 from .core import gui_version, build_info, CoreError
 
 GUI_VERSION = gui_version()        # from sbgui/_build_info.py (CI build) or 0.1.0-dev (source)
-NAV = [("dashboard", "Übersicht"), ("profiles", "Testprofile"), ("live", "Live-Lauf"), ("compare", "Vergleich"), ("export", "Export")]
+NAV = [("dashboard", "Übersicht"), ("profiles", "Testprofile"), ("live", "Live-Lauf"), ("results", "Ergebnisse"), ("compare", "Vergleich"), ("export", "Export")]
 MIN_W, MIN_H = 1280, 720          # logical px; RDP 1366x768 must fit
 COLLAPSE_BELOW = 1400             # sidebar auto-collapses below this window width
 SIDEBAR_W, SIDEBAR_MINI = 232, 64
@@ -91,8 +92,10 @@ class MainWindow(QMainWindow):
         gd = sbench.gui_dir()
         self.pages = {
             "dashboard": Dashboard(info, kern_version),
-            "profiles": ProfileEditor([os.path.join(ROOT, "profiles"), os.path.join(gd, "profiles")], elevated=self.elevated),
+            "profiles": ProfileEditor([os.path.join(ROOT, "profiles"), os.path.join(gd, "profiles")], elevated=self.elevated,
+                                      numa_nodes=((info or {}).get("meta") or {}).get("numa_nodes")),
             "live": LiveView(),
+            "results": ResultsPage(result_files),
             "compare": Compare(result_files),
             "export": ExportPage(result_files, os.path.join(gd, "export")),
         }
@@ -105,6 +108,7 @@ class MainWindow(QMainWindow):
 
         self.result_files = list(result_files)
         self.pages["profiles"].run_requested.connect(self.start_run)
+        self.pages["dashboard"].quickstart.connect(self._quickstart)
         self.pages["live"].stop_requested.connect(self.stop_run)
         self.pages["live"].elevate_requested.connect(self.offer_elevation)
         self._connect_result_pages()
@@ -126,11 +130,13 @@ class MainWindow(QMainWindow):
             except (OSError, ValueError):
                 pass
         keys = [k for k, _ in NAV]
-        for key, page in (("compare", lambda: Compare(files)), ("export", lambda: ExportPage(files, os.path.join(sbench.gui_dir(), "export")))):
+        for key, page in (("results", lambda: ResultsPage(files)), ("compare", lambda: Compare(files)), ("export", lambda: ExportPage(files, os.path.join(sbench.gui_dir(), "export")))):
             i = keys.index(key); old = self.stack.widget(i); cur = self.stack.currentIndex()
             self.pages[key] = page(); self.stack.removeWidget(old); self.stack.insertWidget(i, scroll(self.pages[key])); old.deleteLater()
             self.stack.setCurrentIndex(cur)
         self._connect_result_pages()
+        if new and new[0] in files:
+            self.pages["results"].select_file(new[0])       # newest run (also a partial result after Stop) in "Ergebnisse"
 
     # --------------------------------------------------------------- layout
     def _nav_icons(self):
@@ -162,6 +168,14 @@ class MainWindow(QMainWindow):
             self.toast.reposition()
         for ov in self.centralWidget().findChildren(Overlay):
             ov.setGeometry(self.centralWidget().rect())
+
+    def _quickstart(self, key):
+        if key in ("cpu", "memory"):
+            pe = self.pages["profiles"]
+            if pe.list.count() == 0:
+                pe._load_list()
+            if pe.open_quick(key):
+                self.show_page("profiles")
 
     def show_page(self, key):
         i = [k for k, _ in NAV].index(key); self.nav[key].setChecked(True); self.stack.setCurrentIndex(i)

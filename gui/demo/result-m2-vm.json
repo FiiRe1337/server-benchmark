@@ -1,0 +1,980 @@
+{
+ "schema": "sb-result/1",
+ "kern_version": "0.1.0-mock",
+ "run_id": "20261020-134000-m2v1",
+ "started_utc": "2026-10-20T15:55:07.003Z",
+ "ended_utc": "2026-10-20T15:55:07.147Z",
+ "aborted": false,
+ "meta": {
+  "host": "VM-BENCH01",
+  "os": {
+   "name": "Windows Server 2022 Datacenter",
+   "version": "21H2",
+   "build": "20348.2762"
+  },
+  "cpu": {
+   "model": "Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz",
+   "sockets": 1,
+   "cores": 8,
+   "threads": 16,
+   "base_mhz": 2000
+  },
+  "ram_bytes": 68719476736,
+  "ram_free_bytes": 44023414784,
+  "numa_nodes": [
+   {
+    "id": 0,
+    "cpus": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11,
+     12,
+     13,
+     14,
+     15
+    ],
+    "ram_bytes": 68719476736,
+    "ram_free_bytes": 44023414784,
+    "ram_method": "total"
+   }
+  ],
+  "elevated": false,
+  "data_dir": "C:\\Tools\\sbench\\data",
+  "hypervisor": {
+   "present": true,
+   "vendor": "Microsoft Hv",
+   "role": "guest",
+   "partition_info": {
+    "is_root": false
+   }
+  },
+  "drives": [
+   {
+    "path": "\\\\.\\PhysicalDrive0",
+    "model": "Msft Virtual Disk",
+    "size_bytes": 136365211648,
+    "bus": "SCSI",
+    "sector_logical": 512,
+    "sector_physical": 4096
+   },
+   {
+    "path": "\\\\.\\PhysicalDrive1",
+    "model": "Msft Virtual Disk",
+    "size_bytes": 1099511627776,
+    "bus": "SCSI",
+    "sector_logical": 512,
+    "sector_physical": 4096
+   }
+  ],
+  "nics": [
+   {
+    "name": "Microsoft Hyper-V Network Adapter",
+    "ipv4": [
+     "10.0.5.31"
+    ],
+    "ipv6": [],
+    "link_mbps": 10000
+   }
+  ]
+ },
+ "tests": [
+  {
+   "index": 0,
+   "type": "cpu",
+   "config": {
+    "type": "cpu",
+    "name": "CPU mixed alle Threads",
+    "threads": 0,
+    "workload": "mixed",
+    "warmup_s": 2,
+    "duration_s": 10
+   },
+   "summary": {
+    "workload": "mixed",
+    "threads": 16,
+    "ops_per_s": 3536953.8,
+    "score": 9307.8,
+    "ops": 35369538,
+    "cpus": [
+     0,
+     2,
+     4,
+     6,
+     8,
+     10,
+     12,
+     14,
+     1,
+     3,
+     5,
+     7,
+     9,
+     11,
+     13,
+     15
+    ],
+    "cpu_pct": 100.0
+   },
+   "per_worker": [
+    {
+     "id": 0,
+     "cpu": 0,
+     "node": 0,
+     "ops_per_s": 222576.3
+    },
+    {
+     "id": 1,
+     "cpu": 2,
+     "node": 0,
+     "ops_per_s": 220480.5
+    },
+    {
+     "id": 2,
+     "cpu": 4,
+     "node": 0,
+     "ops_per_s": 217934.6
+    },
+    {
+     "id": 3,
+     "cpu": 6,
+     "node": 0,
+     "ops_per_s": 221617.7
+    },
+    {
+     "id": 4,
+     "cpu": 8,
+     "node": 0,
+     "ops_per_s": 219744.4
+    },
+    {
+     "id": 5,
+     "cpu": 10,
+     "node": 0,
+     "ops_per_s": 224064.2
+    },
+    {
+     "id": 6,
+     "cpu": 12,
+     "node": 0,
+     "ops_per_s": 218972.1
+    },
+    {
+     "id": 7,
+     "cpu": 14,
+     "node": 0,
+     "ops_per_s": 224833.2
+    },
+    {
+     "id": 8,
+     "cpu": 1,
+     "node": 0,
+     "ops_per_s": 222236.9
+    },
+    {
+     "id": 9,
+     "cpu": 3,
+     "node": 0,
+     "ops_per_s": 224735.8
+    },
+    {
+     "id": 10,
+     "cpu": 5,
+     "node": 0,
+     "ops_per_s": 224321.2
+    },
+    {
+     "id": 11,
+     "cpu": 7,
+     "node": 0,
+     "ops_per_s": 217188.6
+    },
+    {
+     "id": 12,
+     "cpu": 9,
+     "node": 0,
+     "ops_per_s": 216886.1
+    },
+    {
+     "id": 13,
+     "cpu": 11,
+     "node": 0,
+     "ops_per_s": 220932.0
+    },
+    {
+     "id": 14,
+     "cpu": 13,
+     "node": 0,
+     "ops_per_s": 219082.8
+    },
+    {
+     "id": 15,
+     "cpu": 15,
+     "node": 0,
+     "ops_per_s": 221347.4
+    }
+   ],
+   "timeseries": [
+    {
+     "t": 1,
+     "ops_per_s": 3544393.7,
+     "cpu_pct": 100.0
+    },
+    {
+     "t": 2,
+     "ops_per_s": 3592284.8,
+     "cpu_pct": 100.0
+    },
+    {
+     "t": 3,
+     "ops_per_s": 3535770.3,
+     "cpu_pct": 100.0
+    },
+    {
+     "t": 4,
+     "ops_per_s": 3570251.7,
+     "cpu_pct": 100.0
+    },
+    {
+     "t": 5,
+     "ops_per_s": 3562576.7,
+     "cpu_pct": 100.0
+    },
+    {
+     "t": 6,
+     "ops_per_s": 3546706.1,
+     "cpu_pct": 100.0
+    },
+    {
+     "t": 7,
+     "ops_per_s": 3527620.0,
+     "cpu_pct": 100.0
+    },
+    {
+     "t": 8,
+     "ops_per_s": 3482933.6,
+     "cpu_pct": 100.0
+    },
+    {
+     "t": 9,
+     "ops_per_s": 3516849.7,
+     "cpu_pct": 100.0
+    },
+    {
+     "t": 10,
+     "ops_per_s": 3490150.1,
+     "cpu_pct": 100.0
+    }
+   ],
+   "errors": []
+  },
+  {
+   "index": 1,
+   "type": "cpu",
+   "config": {
+    "type": "cpu",
+    "name": "CPU int 1 Thread",
+    "threads": 1,
+    "workload": "int",
+    "warmup_s": 1,
+    "duration_s": 5
+   },
+   "summary": {
+    "workload": "int",
+    "threads": 1,
+    "ops_per_s": 267401375.0,
+    "score": 955.0,
+    "ops": 1337006875,
+    "cpus": [
+     0
+    ],
+    "cpu_pct": 6.5
+   },
+   "per_worker": [
+    {
+     "id": 0,
+     "cpu": 0,
+     "node": 0,
+     "ops_per_s": 267401375.0
+    }
+   ],
+   "timeseries": [
+    {
+     "t": 1,
+     "ops_per_s": 264934748.9,
+     "cpu_pct": 6.5
+    },
+    {
+     "t": 2,
+     "ops_per_s": 265875981.4,
+     "cpu_pct": 6.4
+    },
+    {
+     "t": 3,
+     "ops_per_s": 266748240.1,
+     "cpu_pct": 6.6
+    },
+    {
+     "t": 4,
+     "ops_per_s": 270376510.7,
+     "cpu_pct": 6.4
+    },
+    {
+     "t": 5,
+     "ops_per_s": 269071394.0,
+     "cpu_pct": 6.3
+    }
+   ],
+   "errors": []
+  },
+  {
+   "index": 2,
+   "type": "memory",
+   "config": {
+    "type": "memory",
+    "name": "RAM lesen",
+    "mode": "bandwidth",
+    "op": "read",
+    "threads": 0,
+    "buffer_size": "1GiB",
+    "warmup_s": 1,
+    "duration_s": 10
+   },
+   "summary": {
+    "mode": "bandwidth",
+    "op": "read",
+    "threads": 16,
+    "buffer_size_bytes": 1073741824,
+    "gbps": 99.589,
+    "simd": "avx2",
+    "nontemporal": false,
+    "bytes": 995890000000,
+    "cpus": [
+     0,
+     2,
+     4,
+     6,
+     8,
+     10,
+     12,
+     14,
+     1,
+     3,
+     5,
+     7,
+     9,
+     11,
+     13,
+     15
+    ],
+    "cpu_pct": 100.0
+   },
+   "per_worker": [
+    {
+     "id": 0,
+     "cpu": 0,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 6.179
+    },
+    {
+     "id": 1,
+     "cpu": 2,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 6.26
+    },
+    {
+     "id": 2,
+     "cpu": 4,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 6.214
+    },
+    {
+     "id": 3,
+     "cpu": 6,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 6.231
+    },
+    {
+     "id": 4,
+     "cpu": 8,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 6.27
+    },
+    {
+     "id": 5,
+     "cpu": 10,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 6.348
+    },
+    {
+     "id": 6,
+     "cpu": 12,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 6.115
+    },
+    {
+     "id": 7,
+     "cpu": 14,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 6.281
+    },
+    {
+     "id": 8,
+     "cpu": 1,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 6.322
+    },
+    {
+     "id": 9,
+     "cpu": 3,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 6.211
+    },
+    {
+     "id": 10,
+     "cpu": 5,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 6.274
+    },
+    {
+     "id": 11,
+     "cpu": 7,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 6.109
+    },
+    {
+     "id": 12,
+     "cpu": 9,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 6.104
+    },
+    {
+     "id": 13,
+     "cpu": 11,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 6.185
+    },
+    {
+     "id": 14,
+     "cpu": 13,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 6.146
+    },
+    {
+     "id": 15,
+     "cpu": 15,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 6.34
+    }
+   ],
+   "timeseries": [
+    {
+     "t": 1,
+     "gbps": 99.83,
+     "cpu_pct": 100.0
+    },
+    {
+     "t": 2,
+     "gbps": 99.775,
+     "cpu_pct": 100.0
+    },
+    {
+     "t": 3,
+     "gbps": 100.156,
+     "cpu_pct": 100.0
+    },
+    {
+     "t": 4,
+     "gbps": 100.47,
+     "cpu_pct": 100.0
+    },
+    {
+     "t": 5,
+     "gbps": 100.838,
+     "cpu_pct": 100.0
+    },
+    {
+     "t": 6,
+     "gbps": 100.281,
+     "cpu_pct": 100.0
+    },
+    {
+     "t": 7,
+     "gbps": 100.115,
+     "cpu_pct": 100.0
+    },
+    {
+     "t": 8,
+     "gbps": 98.717,
+     "cpu_pct": 100.0
+    },
+    {
+     "t": 9,
+     "gbps": 98.285,
+     "cpu_pct": 100.0
+    },
+    {
+     "t": 10,
+     "gbps": 97.439,
+     "cpu_pct": 100.0
+    }
+   ],
+   "errors": []
+  },
+  {
+   "index": 3,
+   "type": "memory",
+   "config": {
+    "type": "memory",
+    "name": "RAM schreiben NT",
+    "mode": "bandwidth",
+    "op": "write",
+    "threads": 0,
+    "buffer_size": "512MiB",
+    "nontemporal": true,
+    "warmup_s": 1,
+    "duration_s": 5
+   },
+   "summary": {
+    "mode": "bandwidth",
+    "op": "write",
+    "threads": 16,
+    "buffer_size_bytes": 536870912,
+    "gbps": 86.135,
+    "simd": "avx2",
+    "nontemporal": true,
+    "bytes": 430675000000,
+    "cpus": [
+     0,
+     2,
+     4,
+     6,
+     8,
+     10,
+     12,
+     14,
+     1,
+     3,
+     5,
+     7,
+     9,
+     11,
+     13,
+     15
+    ],
+    "cpu_pct": 100.0
+   },
+   "per_worker": [
+    {
+     "id": 0,
+     "cpu": 0,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.316
+    },
+    {
+     "id": 1,
+     "cpu": 2,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.495
+    },
+    {
+     "id": 2,
+     "cpu": 4,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.395
+    },
+    {
+     "id": 3,
+     "cpu": 6,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.487
+    },
+    {
+     "id": 4,
+     "cpu": 8,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.374
+    },
+    {
+     "id": 5,
+     "cpu": 10,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.438
+    },
+    {
+     "id": 6,
+     "cpu": 12,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.359
+    },
+    {
+     "id": 7,
+     "cpu": 14,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.445
+    },
+    {
+     "id": 8,
+     "cpu": 1,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.381
+    },
+    {
+     "id": 9,
+     "cpu": 3,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.306
+    },
+    {
+     "id": 10,
+     "cpu": 5,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.299
+    },
+    {
+     "id": 11,
+     "cpu": 7,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.358
+    },
+    {
+     "id": 12,
+     "cpu": 9,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.45
+    },
+    {
+     "id": 13,
+     "cpu": 11,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.387
+    },
+    {
+     "id": 14,
+     "cpu": 13,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.354
+    },
+    {
+     "id": 15,
+     "cpu": 15,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.291
+    }
+   ],
+   "timeseries": [
+    {
+     "t": 1,
+     "gbps": 85.217,
+     "cpu_pct": 100.0
+    },
+    {
+     "t": 2,
+     "gbps": 86.697,
+     "cpu_pct": 100.0
+    },
+    {
+     "t": 3,
+     "gbps": 86.368,
+     "cpu_pct": 100.0
+    },
+    {
+     "t": 4,
+     "gbps": 86.038,
+     "cpu_pct": 100.0
+    },
+    {
+     "t": 5,
+     "gbps": 86.355,
+     "cpu_pct": 100.0
+    }
+   ],
+   "errors": []
+  },
+  {
+   "index": 4,
+   "type": "memory",
+   "config": {
+    "type": "memory",
+    "name": "RAM copy",
+    "mode": "bandwidth",
+    "op": "copy",
+    "threads": 0,
+    "buffer_size": "512MiB",
+    "warmup_s": 1,
+    "duration_s": 5
+   },
+   "summary": {
+    "mode": "bandwidth",
+    "op": "copy",
+    "threads": 16,
+    "buffer_size_bytes": 536870912,
+    "gbps": 90.868,
+    "simd": "avx2",
+    "nontemporal": false,
+    "bytes": 454340000000,
+    "cpus": [
+     0,
+     2,
+     4,
+     6,
+     8,
+     10,
+     12,
+     14,
+     1,
+     3,
+     5,
+     7,
+     9,
+     11,
+     13,
+     15
+    ],
+    "cpu_pct": 100.0
+   },
+   "per_worker": [
+    {
+     "id": 0,
+     "cpu": 0,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.675
+    },
+    {
+     "id": 1,
+     "cpu": 2,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.683
+    },
+    {
+     "id": 2,
+     "cpu": 4,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.656
+    },
+    {
+     "id": 3,
+     "cpu": 6,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.679
+    },
+    {
+     "id": 4,
+     "cpu": 8,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.73
+    },
+    {
+     "id": 5,
+     "cpu": 10,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.694
+    },
+    {
+     "id": 6,
+     "cpu": 12,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.719
+    },
+    {
+     "id": 7,
+     "cpu": 14,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.663
+    },
+    {
+     "id": 8,
+     "cpu": 1,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.79
+    },
+    {
+     "id": 9,
+     "cpu": 3,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.617
+    },
+    {
+     "id": 10,
+     "cpu": 5,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.654
+    },
+    {
+     "id": 11,
+     "cpu": 7,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.77
+    },
+    {
+     "id": 12,
+     "cpu": 9,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.594
+    },
+    {
+     "id": 13,
+     "cpu": 11,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.734
+    },
+    {
+     "id": 14,
+     "cpu": 13,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.583
+    },
+    {
+     "id": 15,
+     "cpu": 15,
+     "node": 0,
+     "mem_node": 0,
+     "gbps": 5.627
+    }
+   ],
+   "timeseries": [
+    {
+     "t": 1,
+     "gbps": 90.652,
+     "cpu_pct": 100.0
+    },
+    {
+     "t": 2,
+     "gbps": 91.045,
+     "cpu_pct": 100.0
+    },
+    {
+     "t": 3,
+     "gbps": 90.216,
+     "cpu_pct": 100.0
+    },
+    {
+     "t": 4,
+     "gbps": 91.658,
+     "cpu_pct": 100.0
+    },
+    {
+     "t": 5,
+     "gbps": 90.77,
+     "cpu_pct": 100.0
+    }
+   ],
+   "errors": []
+  },
+  {
+   "index": 5,
+   "type": "memory",
+   "config": {
+    "type": "memory",
+    "name": "RAM-Latenz",
+    "mode": "latency",
+    "buffer_size": "1GiB",
+    "warmup_s": 1,
+    "duration_s": 5
+   },
+   "summary": {
+    "mode": "latency",
+    "threads": 1,
+    "buffer_size_bytes": 1073741824,
+    "latency_ns": 105.176,
+    "loads": 47539362,
+    "cpus": [
+     0
+    ],
+    "cpu_pct": 6.7
+   },
+   "per_worker": [
+    {
+     "id": 0,
+     "cpu": 0,
+     "node": 0,
+     "mem_node": 0,
+     "latency_ns": 105.176
+    }
+   ],
+   "timeseries": [
+    {
+     "t": 1,
+     "latency_ns": 105.292,
+     "cpu_pct": 6.6
+    },
+    {
+     "t": 2,
+     "latency_ns": 106.212,
+     "cpu_pct": 6.7
+    },
+    {
+     "t": 3,
+     "latency_ns": 104.478,
+     "cpu_pct": 6.5
+    },
+    {
+     "t": 4,
+     "latency_ns": 104.961,
+     "cpu_pct": 6.7
+    },
+    {
+     "t": 5,
+     "latency_ns": 104.939,
+     "cpu_pct": 6.9
+    }
+   ],
+   "errors": []
+  }
+ ]
+}

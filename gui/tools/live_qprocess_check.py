@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Headless end-to-end check against the mock sbench (contract 1.1):
+"""Headless end-to-end check against the mock sbench (contract 1.2):
  1. exit 4 (raw disk without admin) -> elevation hint      2. destructive job without --allow-destructive -> exit 2
  3. live run via QProcess/stdout, R/W split + worker latency, stop -> exit 3, result read only after done
+ 3b. contract 1.2: cpu + memory run, live metric/thread bars, stop during memory measure -> exit 3, partial result
  4. re-attach: run started outside the GUI -> sbench list --running -> TailSession follows runs/<id>.jsonl to done
  5. support bundle with --include (GUI logs + profiles) and --anonymize -> manifest/sha256 validated
 Writes $SBENCH_SHOT_DIR (default build/)/03c_live_qprocess.png. Uses temp SBENCH_DATA_DIR / SBENCH_GUI_DIR."""
@@ -59,6 +60,29 @@ report["rw_split_available"] = live.has_rw; report["worker_lat_shown"] = live.wt
 if res:
     r = json.load(open(res[0], encoding="utf-8")); report["result_aborted"] = r["aborted"]
 
+# 3b) contract 1.2: cpu + memory, stop during the memory measure phase -> exit 3, cpu complete + memory partial
+m2 = os.path.join(os.environ["SBENCH_GUI_DIR"], "job-m2-e2e.json")
+json.dump({"schema": "sb-job/1", "name": "M2 E2E", "tests": [
+    {"type": "cpu", "name": "CPU int 4", "threads": 4, "workload": "int", "warmup_s": 0, "duration_s": 2},
+    {"type": "memory", "name": "RAM lesen", "mode": "bandwidth", "op": "read", "threads": 4, "buffer_size": "256MiB", "warmup_s": 0,
+     "duration_s": 60}]}, open(m2, "w", encoding="utf-8"))
+modes = []
+codes, res, evs = [], [], []
+win.start_run(m2, {}, tick_ms=250); s = win.session
+s.finished.connect(lambda c, t: codes.append(c)); s.event.connect(evs.append); live.result_ready.connect(res.append)
+wait(lambda: any(e.get("ev") == "tick" and e.get("test") == 0 for e in evs), 30); live.refresh(); modes.append(live.mode)
+report["m2_cpu_thread_bars"] = len(live.thread_bars.opts["height"])
+report["m2_preparing_seen"] = wait(lambda: any(e.get("ev") == "progress" and e.get("phase") == "preparing" for e in evs), 30)
+wait(lambda: sum(1 for e in evs if e.get("ev") == "tick" and e.get("test") == 1) >= 4, 45); live.refresh(); modes.append(live.mode)
+win.stop_run(); wait(lambda: codes, 25); live.result_ready.disconnect()
+report["m2_modes"] = modes; report["m2_stop_exit"] = codes[:1]
+if res:
+    r = json.load(open(res[0], encoding="utf-8"))
+    report["m2_result"] = {"aborted": r["aborted"], "tests": [t["type"] for t in r["tests"]],
+                           "gbps": r["tests"][-1]["summary"].get("gbps") if r["tests"] else None}
+    chk = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "check_mock.py"), res[0]], capture_output=True, text=True)
+    report["m2_result_valid"] = chk.returncode == 0
+
 # 4) re-attach
 env = dict(os.environ, SBENCH_MOCK_SPEED="4")
 rid = "reattach-1"
@@ -90,5 +114,8 @@ print(json.dumps(report, indent=1))
 ok = (report["privilege_exit"] == [4] and report["destructive_exit"] == [2] and report["stop_exit"] == [3]
       and report.get("result_aborted") is True and report["rw_split_available"] and report["worker_lat_shown"]
       and report["reattach_exit"] == [0] and report["reattach_ticks"] > 5 and report["bundle_exit"] == [0] and report["bundle_valid"]
-      and report["bundle_anonymized"] is True and report["bundle_has_gui_log"] and report["data_dir_from_info"])
+      and report["bundle_anonymized"] is True and report["bundle_has_gui_log"] and report["data_dir_from_info"]
+      and report["m2_modes"] == ["ops_per_s", "gbps"] and report["m2_cpu_thread_bars"] == 4 and report["m2_preparing_seen"]
+      and report["m2_stop_exit"] == [3] and report.get("m2_result_valid")
+      and (report.get("m2_result") or {}).get("tests") == ["cpu", "memory"] and report["m2_result"]["aborted"] is True)
 sys.exit(0 if ok else 1)

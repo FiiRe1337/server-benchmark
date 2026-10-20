@@ -32,8 +32,8 @@ class ExportPage(QWidget):
         mid_w = QWidget(); mid = QVBoxLayout(mid_w); mid.setContentsMargins(0, 0, 0, 0); mid.setSpacing(14)
         fc = Card("Formate")
         g = QGridLayout(); g.setHorizontalSpacing(16); g.setVerticalSpacing(10)
-        fmts = (("JSON", "sb-result/1 unverändert", True), ("CSV flat", "sbench export --style flat", True),
-                ("CSV Iometer", "sbench export --style iometer", False), ("HTML-Bericht", "eigenständig, Diagramme als PNG", True),
+        fmts = (("JSON", "sb-result/1 unverändert", True), ("CSV flat", "sbench export --style flat · inkl. CPU/RAM", True),
+                ("CSV Iometer", "sbench export --style iometer · nur Storage", False), ("HTML-Bericht", "eigenständig, Diagramme als PNG", True),
                 ("PDF-Bericht", "A4 aus demselben HTML", False))
         for i, (n, d, on) in enumerate(fmts):
             cb = QCheckBox(n); cb.setChecked(on); g.addWidget(cb, i, 0); g.addWidget(label(d, "dim"), i, 1)

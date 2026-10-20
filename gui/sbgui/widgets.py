@@ -26,8 +26,8 @@ class Card(QFrame):
         if title:
             h = QHBoxLayout(); h.setSpacing(8)
             v = QVBoxLayout(); v.setSpacing(1); self.title_label = label(title, "h2"); v.addWidget(self.title_label)
-            if subtitle:
-                v.addWidget(label(subtitle, "muted"))
+            self.subtitle_label = label(subtitle or "", "muted"); v.addWidget(self.subtitle_label)
+            self.subtitle_label.setVisible(bool(subtitle))
             h.addLayout(v); h.addStretch(1)
             for w in (right or []):
                 h.addWidget(w)
@@ -46,17 +46,22 @@ class Kpi(QFrame):
         super().__init__(); self.setObjectName("kpi")
         self.setStyleSheet(f"QFrame#kpi {{ border-top: 2px solid {color}; }}")
         v = QVBoxLayout(self); v.setContentsMargins(16, 12, 16, 12); v.setSpacing(2)
-        v.addWidget(label(title.upper(), "kpiLabel"))
+        self.title_lbl = label(title.upper(), "kpiLabel"); v.addWidget(self.title_lbl)
         h = QHBoxLayout(); h.setSpacing(6)
         self.value = label("–", "kpiValue"); h.addWidget(self.value, 0, Qt.AlignBottom)
         self.unit = label(unit, "kpiUnit"); h.addWidget(self.unit, 0, Qt.AlignBottom); h.addStretch(1)
         v.addLayout(h)
         self.sub = label(" ", "dim"); v.addWidget(self.sub)
+        # long sub texts (cpu/memory facts) must never widen the KPI row (1280x720 / RDP): clip instead of growing
+        self.sub.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred); self.sub.setMinimumWidth(0)
+
+    def set_title(self, title, unit):
+        self.title_lbl.setText(title.upper()); self.unit.setText(unit)
 
     def set(self, value, sub=None):
         self.value.setText(value)
         if sub is not None:
-            self.sub.setText(sub)
+            self.sub.setText(sub); self.sub.setToolTip(sub.strip())
 
 
 def table(headers, rows=(), stretch_col=0, mono_cols=()):
@@ -172,6 +177,10 @@ def nav_icon(kind, color, size=18):
         elif kind == "export":
             p.drawLine(QPointF(9, 2), QPointF(9, 11)); p.drawLine(QPointF(5.5, 7.5), QPointF(9, 11)); p.drawLine(QPointF(12.5, 7.5), QPointF(9, 11))
             path = QPainterPath(QPointF(2.5, 11)); path.lineTo(2.5, 15.5); path.lineTo(15.5, 15.5); path.lineTo(15.5, 11); p.drawPath(path)
+        elif kind == "results":
+            p.drawRoundedRect(QRectF(3, 2, 12, 14), 2, 2)
+            for y, x2 in ((6, 12), (9, 12), (12, 9)):
+                p.drawLine(QPointF(6, y), QPointF(x2, y))
         elif kind == "support":
             p.drawRoundedRect(QRectF(2.5, 6, 13, 9.5), 1.5, 1.5); p.drawLine(QPointF(9, 1.5), QPointF(9, 10))
             p.drawLine(QPointF(6, 4.5), QPointF(9, 1.5)); p.drawLine(QPointF(12, 4.5), QPointF(9, 1.5))
