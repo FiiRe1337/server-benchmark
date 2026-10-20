@@ -1,0 +1,59 @@
+{
+ "schema": "sb-job/1",
+ "name": "OLTP 8K gemischt (SQL-ähnlich)",
+ "tests": [
+  {
+   "type": "storage",
+   "targets": [
+    {
+     "path": "D:\\sbench\\testfile.dat",
+     "kind": "file",
+     "file_size": "16GiB"
+    },
+    {
+     "path": "E:\\sbench\\testfile.dat",
+     "kind": "file",
+     "file_size": "16GiB"
+    },
+    {
+     "path": "\\\\.\\PhysicalDrive2",
+     "kind": "physical"
+    }
+   ],
+   "workers": 6,
+   "queue_depth": 32,
+   "warmup_s": 10,
+   "duration_s": 60,
+   "cache": "unbuffered",
+   "access_specs": [
+    {
+     "weight": 60,
+     "block_size": "8KiB",
+     "read_pct": 100,
+     "random_pct": 100,
+     "align": "8KiB",
+     "name": "8K Read"
+    },
+    {
+     "weight": 30,
+     "block_size": "8KiB",
+     "read_pct": 0,
+     "random_pct": 100,
+     "align": "8KiB",
+     "name": "8K Write"
+    },
+    {
+     "weight": 10,
+     "block_size": "64KiB",
+     "read_pct": 100,
+     "random_pct": 0,
+     "align": "64KiB",
+     "burst_len": 4,
+     "delay_ms": 2,
+     "name": "64K Scan"
+    }
+   ],
+   "name": "OLTP 8K"
+  }
+ ]
+}
