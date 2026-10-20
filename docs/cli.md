@@ -14,7 +14,7 @@ in [`schema/`](../schema/) definiert, Beispiele liegen in [`schema/examples/`](.
 | Systeminfo | [`sb-info-1.schema.json`](../schema/sb-info-1.schema.json) | [`info.json`](../schema/examples/info.json) |
 | Validierung | [`sb-validate-1.schema.json`](../schema/sb-validate-1.schema.json) | [`validate-error.json`](../schema/examples/validate-error.json), [`validate-warnings.json`](../schema/examples/validate-warnings.json) |
 | Laufende Läufe | [`sb-runs-1.schema.json`](../schema/sb-runs-1.schema.json) | [`runs.json`](../schema/examples/runs.json) |
-| Diagnose-Bundle | `sb-bundle-1` (wird im Kern-Branch angelegt) | – |
+| Diagnose-Bundle (`manifest.json`) | [`sb-bundle-1.schema.json`](../schema/sb-bundle-1.schema.json) | [`bundle-manifest.json`](../schema/examples/bundle-manifest.json) |
 
 **Vertragsstand 1.1.** Gegenüber 1.0 kamen nur optionale Felder, das Event `progress`,
 das Format `sb-runs/1` und neue Befehle hinzu. Die Formatversionen (`sb-job/1` usw.)
@@ -227,8 +227,11 @@ sbench bundle --out <bundle.zip> [--all] [--results <result.json> ...]
               [--include <ordner>]... [--anonymize]
 ```
 
-Erstellt ein Diagnose-/Austausch-ZIP. Das Manifest-Schema `sb-bundle/1` wird im
-Kern-Branch definiert; hier ist nur die CLI beschrieben.
+Erstellt ein Diagnose-/Austausch-ZIP. `manifest.json` folgt `schema/sb-bundle-1.schema.json`
+(Dateiliste mit Größe und SHA-256, `anonymized`, `includes`); Beispiel:
+`schema/examples/bundle-manifest.json`. Zusätzlich zu `results/`, `runs/` und `logs/`
+enthält das Bundle je Lauf die Job-Kopie unter `jobs/<run_id>.json`. Optional
+`--progress` wie bei `run` (Events `start`, `phase`, `progress` in Bytes, `done`).
 
 | Option | Bedeutung |
 |---|---|

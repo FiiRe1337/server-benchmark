@@ -32,6 +32,7 @@ MAPPING = {
     "info": "sb-info-1.schema.json",
     "validate-": "sb-validate-1.schema.json",
     "runs": "sb-runs-1.schema.json",
+    "bundle-": "sb-bundle-1.schema.json",
 }
 
 

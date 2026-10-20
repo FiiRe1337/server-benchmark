@@ -1,0 +1,209 @@
+name: Windows-Build (sbench)
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }} (MSVC, /MT)
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            cmake_arch: x64
+          - arch: arm64
+            cmake_arch: ARM64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version bestimmen
+        id: ver
+        shell: pwsh
+        run: |
+          $v = "0.1.0"
+          if ($env:GITHUB_REF -like "refs/tags/v*") { $v = $env:GITHUB_REF_NAME.Substring(1) }
+          else { $v = "$v-ci.$($env:GITHUB_RUN_NUMBER)+$($env:GITHUB_SHA.Substring(0,7))" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+      - name: CMake konfigurieren (MSVC ${{ matrix.cmake_arch }}, statische CRT)
+        run: cmake -S . -B build -A ${{ matrix.cmake_arch }} -DSB_VERSION_STR="${{ steps.ver.outputs.version }}"
+      - name: Bauen (Release)
+        run: cmake --build build --config Release --parallel
+      - name: Unit-Tests (nativ, nur x64)
+        if: matrix.arch == 'x64'
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Abhängigkeiten prüfen (keine VC-Runtime-DLLs)
+        shell: pwsh
+        run: |
+          $dumpbin = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -prerelease -products * -find "VC\Tools\MSVC\**\bin\Hostx64\x64\dumpbin.exe" | Select-Object -First 1
+          foreach ($f in "build\Release\sbench.exe","build\Release\sbcore.dll") {
+            $deps = & $dumpbin /dependents $f | Select-String -Pattern "\.dll" | ForEach-Object { $_.Line.Trim() }
+            Write-Host "$f -> $($deps -join ', ')"
+            $bad = $deps | Where-Object { $_ -match '^(vcruntime|msvcp|ucrtbase|api-ms-win-crt)' }
+            if ($bad) { throw "Unerwünschte Laufzeit-Abhängigkeit in ${f}: $bad" }
+          }
+      - name: Paket zusammenstellen
+        shell: pwsh
+        run: |
+          $d = "dist\sbench-windows-${{ matrix.arch }}"
+          New-Item -ItemType Directory -Force "$d\include\sb", "$d\lib", "$d\licenses", "dist\cli", "dist\tests" | Out-Null
+          Copy-Item build\Release\sbench.exe, build\Release\sbcore.dll $d
+          Copy-Item build\Release\sbcore.lib "$d\lib\"
+          Copy-Item core\include\sb\sb.h "$d\include\sb\"
+          Copy-Item third_party\cjson\LICENSE "$d\licenses\cJSON-LICENSE.txt"
+          Copy-Item third_party\miniz\LICENSE "$d\licenses\miniz-LICENSE.txt"
+          New-Item -ItemType Directory -Force "$d\docs", "$d\jobs\abnahme-m1" | Out-Null
+          Copy-Item docs\*.md "$d\docs\"
+          Copy-Item jobs\abnahme-m1\*.json "$d\jobs\abnahme-m1\"
+          Copy-Item build\Release\sbench.exe dist\cli\
+          Copy-Item build\Release\sb_unit_tests.exe dist\tests\
+          "${{ steps.ver.outputs.version }}" | Out-File -Encoding ascii "$d\VERSION.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbench-windows-${{ matrix.arch }}
+          path: dist/sbench-windows-${{ matrix.arch }}
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbench-cli-${{ matrix.arch }}
+          path: dist/cli/sbench.exe
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbench-tests-${{ matrix.arch }}
+          path: dist/tests
+          retention-days: 7
+
+  test:
+    name: Test ${{ matrix.arch }} auf ${{ matrix.os }}
+    needs: build
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            arch: x64
+          - os: windows-2025
+            arch: x64
+          - os: windows-11-arm
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: sbench-windows-${{ matrix.arch }}
+          path: art
+      - uses: actions/download-artifact@v4
+        with:
+          name: sbench-tests-${{ matrix.arch }}
+          path: art-tests
+      - name: Systeminfo
+        shell: pwsh
+        run: |
+          [Environment]::OSVersion.VersionString
+          $env:PROCESSOR_ARCHITECTURE
+          art\sbench.exe version
+          art\sbench.exe info
+      - name: Unit-Tests
+        run: art-tests\sb_unit_tests.exe
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: ${{ matrix.arch }}
+      - name: jsonschema installieren
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check jsonschema
+          if ($LASTEXITCODE -ne 0) { python -m pip install --disable-pip-version-check "jsonschema<4.18" }
+      - name: Smoke-Test (Storage, Stop, Pipe, Export, Bundle)
+        env:
+          SBENCH_SMOKE_OUT: ${{ github.workspace }}\smoke-out
+        run: python tests/smoke/smoke.py art\sbench.exe
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sbench-smoke-${{ matrix.os }}-${{ matrix.arch }}
+          path: smoke-out
+          if-no-files-found: ignore
+          retention-days: 14
+
+  container:
+    name: Server Core Container (ltsc2022)
+    needs: build
+    runs-on: windows-2022
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: sbench-windows-x64
+          path: art
+      - name: Image ziehen
+        run: docker pull mcr.microsoft.com/windows/servercore:ltsc2022
+      - name: CLI-Smoke im Container (Prozessisolation)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          docker run --rm -v "${{ github.workspace }}:C:\w" mcr.microsoft.com/windows/servercore:ltsc2022 `
+            powershell -NoProfile -ExecutionPolicy Bypass -File C:\w\tests\smoke\container_smoke.ps1 -Exe C:\w\art\sbench.exe -Out C:\w\out
+          if ($LASTEXITCODE -ne 0) { throw "Container-Smoke fehlgeschlagen ($LASTEXITCODE)" }
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Container-Ergebnisse gegen Schemas prüfen
+        run: |
+          python -m pip install --disable-pip-version-check jsonschema
+          python tests/smoke/check_files.py out
+      - name: Optional ltsc2019 mit --isolation=hyperv
+        continue-on-error: true
+        timeout-minutes: 20
+        shell: pwsh
+        run: |
+          docker pull mcr.microsoft.com/windows/servercore:ltsc2019
+          if ($LASTEXITCODE -ne 0) { throw "Pull ltsc2019 fehlgeschlagen" }
+          New-Item -ItemType Directory -Force out2019 | Out-Null
+          docker run --rm --isolation=hyperv -v "${{ github.workspace }}:C:\w" mcr.microsoft.com/windows/servercore:ltsc2019 `
+            powershell -NoProfile -ExecutionPolicy Bypass -File C:\w\tests\smoke\container_smoke.ps1 -Exe C:\w\art\sbench.exe -Out C:\w\out2019
+          if ($LASTEXITCODE -ne 0) { throw "ltsc2019/hyperv fehlgeschlagen ($LASTEXITCODE)" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: container-results
+          path: |
+            out
+            out2019
+          if-no-files-found: ignore
+          retention-days: 14
+
+  release:
+    name: Release (Tag v*)
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, test, container]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sbench-*
+          path: rel
+      - name: Archive packen und Release anlegen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd rel
+          for d in sbench-windows-x64 sbench-windows-arm64 sbench-cli-x64 sbench-cli-arm64; do (cd "$d" && zip -r "../$d-${GITHUB_REF_NAME}.zip" .); done
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "sbench $GITHUB_REF_NAME" --generate-notes *.zip
