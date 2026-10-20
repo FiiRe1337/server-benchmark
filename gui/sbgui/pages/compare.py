@@ -161,7 +161,7 @@ class Compare(QWidget):
                     row.append(fmt_num(val))
                     if k:
                         d = (val - vals[0]) / vals[0] * 100 if val and vals[0] else 0
-                        row.append(f"{d:+.0f} %")
+                        row.append("±0 %" if abs(d) < 0.5 else f"{d:+.0f} %")
                         good = (d < 0) if lower_better else (d > 0)
                         colors[len(row) - 1] = T.GREEN if good or abs(d) < 2 else (T.AMBER if abs(d) < 25 else T.RED)
             add_row(self.delta, row, colors)

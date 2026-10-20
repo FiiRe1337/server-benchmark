@@ -81,7 +81,7 @@ class MainWindow(QMainWindow):
         self.sup.clicked.connect(lambda: self.support_bundle([])); sv.addWidget(self.sup); sv.addSpacing(10)
         self.data_label = label(f"Daten: {_short_path(self.data_dir or '?')}", "dim")
         self.data_label.setToolTip(f"meta.data_dir: {self.data_dir}"); sv.addWidget(self.data_label)
-        self.ver_label = label(f"GUI {GUI_VERSION}\nKern {kern_version}", "dim")   # two lines: CI versions are long; sv.addWidget(self.ver_label)
+        self.ver_label = label(f"GUI {GUI_VERSION}\nKern {kern_version}", "dim"); sv.addWidget(self.ver_label)  # zweizeilig: CI-Versionen sind lang
         bi = build_info()
         self.ver_label.setToolTip(f"GUI {GUI_VERSION} (Commit {bi['commit']})\nKern {kern_version}"
                                   + (f"\nKern-SHA-256 {bi['core_sha256']}" if bi.get("core_sha256") else ""))
