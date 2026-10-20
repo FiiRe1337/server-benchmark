@@ -29,7 +29,12 @@ festgelegt; bei Widersprüchen gilt der Vertrag.
    Ende abgeschlossen** wurde. I/Os, die über das Ende hinauslaufen, fallen heraus (kein
    Verzerren durch angeschnittene I/Os).
 5. **cleanup** – laufende I/Os werden mit `CancelIoEx` abgebrochen, Threads beendet,
-   Handles und Puffer freigegeben. Testdateien bleiben bestehen.
+   Handles und Puffer freigegeben. Danach löscht sbench Testdateien, die es in diesem Test
+   selbst angelegt hat (`CreateFileW` meldete nicht `ERROR_ALREADY_EXISTS`); das gilt nach
+   normalem Ende, nach `stop`/Strg+C und nach Fehlern. Vorher vorhandene Dateien bleiben
+   unangetastet, auch wenn sbench sie vergrößert hat. `--keep-files` schaltet das Löschen
+   ab. Ergebnis pro Test: `targets[].created`/`deleted`. Wird der Prozess hart beendet
+   (Task-Manager, `TerminateProcess`), bleibt die Datei liegen.
 
 ### I/O-Pfad
 
@@ -153,8 +158,9 @@ wird nicht gespeichert.
   `hyperv_info` erzeugen ein `error`-Event `E_NOT_IMPLEMENTED` und werden übersprungen;
   sie erscheinen nicht in `tests[]` des Ergebnisses.
 - Kein Pinning der Worker auf CPUs oder NUMA-Knoten; Windows verteilt die Threads.
-- Testdateien werden nach dem Lauf nicht gelöscht (Wiederverwendung, kein erneutes
-  Anlegen). Löschen ist Sache des Benutzers.
+- Selbst angelegte Testdateien werden nach jedem Test gelöscht. Nutzen mehrere Tests
+  eines Jobs dieselbe Datei, legt jeder Test sie neu an; zum Wiederverwenden großer Dateien
+  `--keep-files` angeben.
 - Fester Zufalls-Seed (kein Feld im Vertrag).
 - Gelesene Daten werden nicht geprüft (keine Datenintegritäts-Prüfung).
 - Höchstens 64 Targets und 64 Access-Specs je Test.

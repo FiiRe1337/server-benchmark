@@ -28,7 +28,7 @@ static void usage(FILE *f) {
         "Aufruf: sbench [--data-dir <pfad>] <befehl> ...\n\n"
         "Befehle:\n"
         "  sbench run --job <job.json> [--out <result.json>] [--progress stdout|pipe:\\\\.\\pipe\\sbench-<id>|file:<pfad>]\n"
-        "             [--tick-ms N] [--id <id>] [--log <pfad>] [--allow-destructive]\n"
+        "             [--tick-ms N] [--id <id>] [--log <pfad>] [--allow-destructive] [--keep-files]\n"
         "  sbench stop --id <id>\n"
         "  sbench list --running --json\n"
         "  sbench info [--json]\n"
@@ -76,6 +76,7 @@ static int cmd_run(int argc, char **argv, const char *cmdline) {
             o.tick_ms = (uint32_t)t;
         }
         else if (!strcmp(a, "--allow-destructive")) o.allow_destructive = 1;
+        else if (!strcmp(a, "--keep-files")) o.keep_files = 1;
         else { fprintf(stderr, "sbench: unbekannte Option '%s'\n", a); return 2; }
     }
     if (!o.job_path) { fprintf(stderr, "sbench run: --job fehlt\n"); return 2; }

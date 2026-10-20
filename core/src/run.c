@@ -101,6 +101,16 @@ static cJSON *storage_test_json(int idx, const sb_test *t, const sb_storage_resu
     cJSON_AddItemToObject(s, "lat_us", lat_obj(r->hist));
     cJSON_AddNumberToObject(s, "errors", (double)c->errors);
     cJSON_AddNumberToObject(s, "io_count", (double)(c->ops_r + c->ops_w));
+    cJSON *ta = cJSON_AddArrayToObject(o, "targets");
+    for (int k = 0; k < t->ntargets; k++) {
+        cJSON *x = cJSON_CreateObject();
+        cJSON_AddNumberToObject(x, "index", k);
+        cJSON_AddStringToObject(x, "path", t->targets[k].path ? t->targets[k].path : "");
+        cJSON_AddStringToObject(x, "kind", sb_target_type_name(t->targets[k].type));
+        cJSON_AddBoolToObject(x, "created", r->t_created && k < r->ntargets && r->t_created[k]);
+        cJSON_AddBoolToObject(x, "deleted", r->t_deleted && k < r->ntargets && r->t_deleted[k]);
+        cJSON_AddItemToArray(ta, x);
+    }
     cJSON *pw = cJSON_AddArrayToObject(o, "per_worker");
     for (int i = 0; i < r->nworkers; i++) {
         const sb_io_counts *w = &r->w_counts[i];
@@ -437,8 +447,8 @@ int sb_run(const sb_run_options *o) {
     sb_log_write(&log, "INFO", "sbench %s run, run_id=%s", sb_version(), run_id);
     if (o->cmdline) sb_log_write(&log, "INFO", "Aufruf: %s", o->cmdline);
     sb_log_write(&log, "INFO", "Datenverzeichnis: %s", dd);
-    sb_log_write(&log, "INFO", "Job: %s, progress=%s, tick_ms=%u", o->job_path, o->progress ? o->progress : "(keins)",
-                 o->tick_ms ? o->tick_ms : 1000);
+    sb_log_write(&log, "INFO", "Job: %s, progress=%s, tick_ms=%u, keep_files=%d", o->job_path,
+                 o->progress ? o->progress : "(keins)", o->tick_ms ? o->tick_ms : 1000, o->keep_files);
 
     char *out_path = o->out_path ? full_path(o->out_path) : sb_aprintf("%s\\results\\%s.json", dd, run_id);
     char *job_full = full_path(o->job_path);
@@ -548,7 +558,7 @@ int sb_run(const sb_run_options *o) {
     cJSON *tests = cJSON_CreateArray();
     runctx ctx = {&pr, &log};
     sb_storage_cb cb = {&ctx, ev_phase, ev_progress, ev_tick, ev_error, ev_log};
-    sb_storage_opts so = {o->tick_ms ? o->tick_ms : 1000, g_stop_evt, o->allow_destructive};
+    sb_storage_opts so = {o->tick_ms ? o->tick_ms : 1000, g_stop_evt, o->allow_destructive, o->keep_files};
     int aborted = 0, rights = 0;
     for (int i = 0; i < job.ntests && !aborted; i++) {
         const sb_test *t = &job.tests[i];

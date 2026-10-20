@@ -130,20 +130,22 @@ void sb_target_probe_path(const sb_target *t, sb_target_probe *p) {
     free(w);
 }
 
-int sb_target_prepare_file(const sb_target *t, int *used_valid_data, int *filled, sb_fill_cb cb, void *cbctx,
+int sb_target_prepare_file(const sb_target *t, int *created, int *used_valid_data, int *filled, sb_fill_cb cb, void *cbctx,
                            char *err, size_t errlen) {
     *used_valid_data = 0;
     *filled = 0;
+    *created = 0;
     wchar_t *w = sb_u8_to_w(t->path);
     if (!w) { snprintf(err, errlen, "ungültiger Pfad"); return SB_TERR_IO; }
     HANDLE h = CreateFileW(w, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS,
                            FILE_ATTRIBUTE_NORMAL, NULL);
+    DWORD cerr = GetLastError();
     free(w);
     if (h == INVALID_HANDLE_VALUE) {
-        DWORD e = GetLastError();
-        snprintf(err, errlen, "Testdatei '%s' nicht anlegbar: %s", t->path, sb_errtext(e));
-        return e == ERROR_ACCESS_DENIED ? SB_TERR_ACCESS : SB_TERR_IO;
+        snprintf(err, errlen, "Testdatei '%s' nicht anlegbar: %s", t->path, sb_errtext(cerr));
+        return cerr == ERROR_ACCESS_DENIED ? SB_TERR_ACCESS : SB_TERR_IO;
     }
+    if (cerr != ERROR_ALREADY_EXISTS) *created = 1;   /* von sbench angelegt -> nach dem Test löschen */
     LARGE_INTEGER cur;
     GetFileSizeEx(h, &cur);
     uint64_t have = (uint64_t)cur.QuadPart;

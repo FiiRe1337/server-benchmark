@@ -44,6 +44,9 @@ typedef struct sb_storage_result {
     sb_run_error *errs; int nerrs, cap_errs;
     int          aborted;           /* Stop-Event während des Tests */
     int          measured;          /* Messphase hat begonnen */
+    int          ntargets;
+    int         *t_created;         /* pro Target: von sbench angelegt */
+    int         *t_deleted;         /* pro Target: nach dem Test gelöscht */
 } sb_storage_result;
 
 /* Callbacks in den Lauf-Kontext (Progress, Log) */
@@ -62,6 +65,7 @@ typedef struct sb_storage_opts {
     uint32_t tick_ms;
     HANDLE   stop_event;        /* gesetzt -> Abbruch */
     int      allow_destructive;
+    int      keep_files;        /* --keep-files: angelegte Testdateien nicht löschen */
 } sb_storage_opts;
 
 /* Rückgabe: 0 ok, 1 Laufzeitfehler, 3 abgebrochen, 4 fehlende Rechte.

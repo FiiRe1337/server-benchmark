@@ -101,10 +101,9 @@ jobs:
   core:
     name: core
     uses: ./.github/workflows/build-windows.yml
-    # build-windows.yml contains the tag-only `release` job requesting contents: write (skipped under workflow_call,
-    # `if: github.workflow == ...`). GitHub validates nested job permissions statically, so the caller must allow it.
+    # build-windows.yml needs only contents: read (no release job any more; publishing is release.yml)
     permissions:
-      contents: write
+      contents: read
 
   gui:
     name: gui
