@@ -10,6 +10,8 @@ Prüft:
     < Anzahl Tests im Job, disjunkte NUMA-CPU-Listen),
   * Vertrag 1.3: partial/stopped_in und null-Messwerte (check_partial), Progress-Regeln
     (check_progress_v13: tick.metric, workers[] vollständig/sortiert, phase.threads/cpus),
+  * Vertrag 1.3.1: tests[].cpus bei cpu/memory (check_cpu_list, gleiche Regeln wie phase.cpus, passend
+    zu summary.cpus und per_worker[].node),
   * einen Selbsttest der semantischen Regeln mit absichtlich falschen Dokumenten.
 
 Die Funktionen check_result_indices() und check_numa() nutzen auch die Smoke-Tests
@@ -109,6 +111,24 @@ def check_numa(meta: dict, prefix: str = "/meta") -> list[str]:
     return errs
 
 
+def check_cpu_list(cpus: list[dict], threads: int | None, where: str) -> list[str]:
+    """phase.cpus (Vertrag 1.3) bzw. tests[].cpus (Vertrag 1.3.1): ein Eintrag je Thread, id 0..n-1,
+    cpu = group*64+number, smt_sibling_of liegt auf demselben Kern und ist nicht der Prozessor selbst."""
+    errs: list[str] = []
+    if threads is not None and len(cpus) != threads:
+        errs.append(f"{where}: {len(cpus)} Einträge, threads = {threads}")
+    if [c["id"] for c in cpus] != list(range(len(cpus))):
+        errs.append(f"{where}: id muss 0..n-1 sein")
+    core = {c["cpu"]: c["core"] for c in cpus}
+    for c in cpus:
+        if c["cpu"] != c["group"] * 64 + c["number"]:
+            errs.append(f"{where}: cpu {c['cpu']} != group*64+number")
+        sib = c["smt_sibling_of"]
+        if sib is not None and (sib == c["cpu"] or (sib in core and core[sib] != c["core"])):
+            errs.append(f"{where}: smt_sibling_of {sib} von cpu {c['cpu']} liegt nicht auf demselben Kern")
+    return errs
+
+
 def check_compute(i: int, t: dict, meta: dict) -> list[str]:
     """cpu/memory (Vertrag 1.2): Threads, gepinnte CPUs, NUMA-Zuordnung, Summen."""
     errs: list[str] = []
@@ -120,6 +140,14 @@ def check_compute(i: int, t: dict, meta: dict) -> list[str]:
         errs.append(f"{pre}/summary/threads: latency misst immer mit 1 Thread")
     if "cpus" in s and len(s["cpus"]) != s["threads"]:
         errs.append(f"{pre}/summary/cpus: {len(s['cpus'])} Einträge, threads = {s['threads']}")
+    tc = t.get("cpus")
+    if tc is not None:
+        # Vertrag 1.3.1: tests[].cpus wie phase.cpus, passend zu summary.cpus und per_worker
+        errs += check_cpu_list(tc, s.get("threads"), f"{pre}/cpus")
+        if "cpus" in s and [c["cpu"] for c in tc] != s["cpus"]:
+            errs.append(f"{pre}/cpus: cpu passt nicht zu summary.cpus")
+        if pw and len(pw) == len(tc) and any(w.get("node", c["numa_node"]) != c["numa_node"] for w, c in zip(pw, tc)):
+            errs.append(f"{pre}/cpus: numa_node passt nicht zu per_worker[].node")
     if pw:
         if len(pw) != s["threads"]:
             errs.append(f"{pre}/per_worker: {len(pw)} Einträge, threads = {s['threads']}")
@@ -194,17 +222,7 @@ def check_progress_v13(events: list[dict]) -> list[str]:
             threads[e["test"]] = e["threads"]
             cpus = e.get("cpus")
             if cpus is not None:
-                if len(cpus) != e["threads"]:
-                    errs.append(f"Zeile {n}: phase.cpus hat {len(cpus)} Einträge, threads = {e['threads']}")
-                if [c["id"] for c in cpus] != list(range(len(cpus))):
-                    errs.append(f"Zeile {n}: phase.cpus[].id muss 0..n-1 sein")
-                core = {c["cpu"]: c["core"] for c in cpus}
-                for c in cpus:
-                    if c["cpu"] != c["group"] * 64 + c["number"]:
-                        errs.append(f"Zeile {n}: cpu {c['cpu']} != group*64+number")
-                    sib = c["smt_sibling_of"]
-                    if sib is not None and (sib == c["cpu"] or (sib in core and core[sib] != c["core"])):
-                        errs.append(f"Zeile {n}: smt_sibling_of {sib} von cpu {c['cpu']} liegt nicht auf demselben Kern")
+                errs += check_cpu_list(cpus, e["threads"], f"Zeile {n}: phase.cpus")
         if e.get("ev") == "tick" and "metric" in e:
             if METRIC_KEY.get(e["metric"]) not in e:
                 errs.append(f"Zeile {n}: tick.metric {e['metric']!r}, Feld fehlt")
@@ -324,6 +342,12 @@ def selftest() -> list[str]:
         ("workers unvollständig", check_progress_v13([_ph(2), _tk("ops_per_s", [0])]), True),
         ("cpus != threads", check_progress_v13([dict(_ph(2), threads=3)]), True),
         ("SMT anderer Kern", check_progress_v13([_ph(2, core1=5)]), True),
+        # Vertrag 1.3.1: tests[].cpus
+        ("result cpus ok", check_compute(0, dict(_ct(), cpus=_ph(2)["cpus"]), _M2), False),
+        ("result cpus != threads", check_compute(0, dict(_ct(), cpus=_ph(1)["cpus"]), _M2), True),
+        ("result cpus != summary.cpus", check_compute(0, dict(_ct(), cpus=[dict(c, cpu=c["cpu"] + 64, group=1) for c in _ph(2)["cpus"]]), _M2), True),
+        ("result cpus SMT anderer Kern", check_compute(0, dict(_ct(), cpus=_ph(2, core1=5)["cpus"]), _M2), True),
+        ("result cpus Knoten != per_worker", check_compute(0, dict(_ct(), cpus=[dict(c, numa_node=1) for c in _ph(2)["cpus"]]), _M2), True),
     ]
     for name, errs, expect_err in cases:
         if bool(errs) != expect_err:

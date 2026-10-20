@@ -41,6 +41,10 @@ CSV-Spalten `partial,stopped_in`. **Einzige Lockerung:** Messwerte der `summary`
 sein, aber nur bei `partial: true` mit `stopped_in` `preparing`/`warmup` (Test vor der
 Messphase beendet); vorher stand dort 0.
 
+**Vertragsstand 1.3.1.** Ein zusätzliches, optionales Feld: `tests[].cpus` im Ergebnis
+(cpu/memory), gleiches Format wie `phase.cpus` (Abschnitt
+[Vertrag 1.3.1](#vertrag-131-cpus-im-ergebnis)). Formatversionen unverändert.
+
 ## Allgemeines
 
 - Alle JSON-Ausgaben sind UTF-8 ohne BOM, Zeilenende LF.
@@ -479,6 +483,23 @@ score_reference × 1000`. Die GUI muss keine Werte aus `docs/core.md` übernehme
 | cpu | keine `progress`-Events (nichts vorzubereiten) | – |
 
 `warmup`: storage etwa jede Sekunde, cpu/memory etwa alle 0,5 s (`unit: "s"`).
+
+## Vertrag 1.3.1: `cpus` im Ergebnis
+
+Bei cpu- und memory-Tests steht `cpus[]` zusätzlich direkt im Testobjekt des Ergebnisses
+(`tests[].cpus`, neben `summary`), mit demselben Inhalt wie `phase.cpus` im ersten
+`phase`-Event des Tests (Felder `id`, `cpu`, `group`, `number`, `numa_node`, `core`,
+`smt_sibling_of`, siehe [phase-Event beim Teststart](#phase-event-beim-teststart)). Damit kann
+die GUI SMT-Geschwister und NUMA-Knoten auch nachträglich, ohne Progress-Strom, über
+`per_worker[].id` zuordnen.
+
+- Optional im Schema (`$defs/cpu_binding` in `sb-result-1.schema.json`); sbench ab 1.3.1 gibt es
+  bei cpu/memory immer aus, sobald die Threads verteilt sind, also auch bei `partial: true`.
+  Es fehlt nur, wenn die Prozessor-Topologie nicht lesbar war.
+- `tests[].cpus[i].cpu` = `summary.cpus[i]` = `per_worker[i].cpu`; `numa_node` = `per_worker[i].node`.
+- Bei storage, net_client, net_server und hyperv_info ist `cpus` nicht erlaubt.
+- Beispiele: [`result-compute.json`](../schema/examples/result-compute.json),
+  [`result-partial.json`](../schema/examples/result-partial.json).
 
 ## Exit-Codes
 

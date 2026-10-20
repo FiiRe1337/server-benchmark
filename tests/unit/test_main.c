@@ -432,6 +432,45 @@ static void test_v13_phase_cpus(void) {
     cJSON_Delete(a);
 }
 
+/* Vertrag 1.3.1: tests[].cpus im Ergebnis = phase.cpus des ersten phase-Events */
+static cJSON *g_phase_cpus;
+static void cap_phase(void *ctx, int test, const char *name, double d, const cJSON *extra) {
+    (void)ctx; (void)test; (void)d;
+    if (!strcmp(name, "preparing") && extra && !g_phase_cpus)
+        g_phase_cpus = cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(extra, "cpus"), 1);
+}
+
+static void test_v131_result_cpus(void) {
+    sb_job j; sb_verrs e;
+    int rc = load("{\"schema\":\"sb-job/1\",\"name\":\"t\",\"tests\":[{\"type\":\"cpu\",\"workload\":\"int\","
+                  "\"threads\":2,\"warmup_s\":0,\"duration_s\":0.3}]}", &j, &e);
+    CHECK(rc == 0 && e.n == 0, "cpu-Job für tests[].cpus gültig (%d Fehler)", e.n);
+    if (rc == 0) {
+        sb_storage_opts o; memset(&o, 0, sizeof o);
+        sb_storage_cb cb; memset(&cb, 0, sizeof cb);
+        cb.phase = cap_phase;
+        sb_compute_result r;
+        g_phase_cpus = NULL;
+        int x = sb_compute_run(0, &j.tests[0], &o, &cb, &r);
+        CHECK(x == 0 && r.cpus_json && cJSON_GetArraySize(r.cpus_json) == r.nthreads && r.nthreads == 2,
+              "compute: cpus_json mit einem Eintrag je Thread (rc %d, %d Threads)", x, r.nthreads);
+        int same = r.cpus_json != NULL;
+        for (int i = 0; same && i < r.nthreads; i++) {
+            const cJSON *c = cJSON_GetArrayItem(r.cpus_json, i);
+            same = cJSON_GetObjectItemCaseSensitive(c, "id")->valueint == i &&
+                   (uint32_t)cJSON_GetObjectItemCaseSensitive(c, "cpu")->valuedouble == r.cpus[i];
+        }
+        CHECK(same, "tests[].cpus: id = Thread-id, cpu = summary.cpus");
+        CHECK(g_phase_cpus && r.cpus_json && cJSON_Compare(g_phase_cpus, r.cpus_json, 1), "tests[].cpus gleich phase.cpus");
+        cJSON_Delete(g_phase_cpus);
+        g_phase_cpus = NULL;
+        sb_compute_result_free(&r);
+        CHECK(r.cpus_json == NULL, "sb_compute_result_free gibt cpus_json frei");
+    }
+    sb_verrs_free(&e);
+    sb_job_free(&j);
+}
+
 static void test_v13_buffer_bytes(void) {
     CHECK(sb_mem_buffer_bytes(0, 256u << 20) == 256u << 20 && sb_mem_buffer_bytes(0, (1u << 20) + 100) == 1u << 20 &&
           sb_mem_buffer_bytes(0, 12000) == 8192 && sb_mem_buffer_bytes(0, 8192) == 8192,
@@ -575,6 +614,7 @@ int main(void) {
     test_topo_pick();
     test_v13_metric_score();
     test_v13_phase_cpus();
+    test_v131_result_cpus();
     test_v13_buffer_bytes();
     test_v13_export_partial();
     test_chase();
