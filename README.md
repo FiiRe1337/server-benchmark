@@ -1,84 +1,140 @@
-# server-benchmark
-Portable Windows-Server-Benchmark mit GUI: Storage-I/O wie Iometer, dazu CPU, RAM, Netzwerk und Hyper-V. Python + C, als fertige portable EXE.
+# sbench – Server-Benchmark für Windows
 
-## Projektziel
+Portables Benchmark-Werkzeug für Windows-Server: Storage-I/O wie Iometer (Dateien, Volumes, Disks,
+Worker, Queue Depth, gewichtete Access Specs, Latenz-Perzentile), mit grafischer Oberfläche und
+Kommandozeile. Diese Anleitung zeigt Schritt für Schritt, wie Sie einen Test anlegen, beobachten,
+vergleichen und uns die Ergebnisse schicken.
 
-Ein portables Werkzeug (keine Installation, eine EXE), mit dem sich Windows-Server
-schnell und reproduzierbar vermessen lassen:
+> Alle Bilder sind echte Aufnahmen der aktuellen GUI mit dem echten Messkern, aufgenommen in der
+> GitHub-Actions-CI auf `windows-2022` (einer Azure-VM). Die Messwerte stammen von diesem Runner,
+> nicht von Ihrem Server.
 
-- **Storage** wie Iometer: Dateien, Volumes und physische Disks, mehrere Worker,
-  Queue Depth, mehrere gewichtete Access-Specs (z. B. 60 % 4K random read +
-  40 % 64K sequential write), Latenz-Perzentile und Histogramm.
-- **CPU** (Integer, Gleitkomma, Krypto, gemischt), **Arbeitsspeicher** (Bandbreite,
-  Latenz), **Netzwerk** (TCP/UDP-Durchsatz, Jitter, Verlust, RTT; Client und Server).
-- **Hyper-V**: Erkennung von Host/Gast, Hypervisor-Informationen und
-  Leistungsindikatoren.
+**Inhalt:** [1. Herunterladen und starten](#1-herunterladen-und-starten) ·
+[2. Erster Start](#2-erster-start-und-system-übersicht) ·
+[3. Storage-Test anlegen](#3-storage-test-anlegen) ·
+[4. Live-Lauf](#4-live-lauf-beobachten-und-stoppen) ·
+[5. Vergleichen](#5-ergebnisse-vergleichen) ·
+[6. Support-Paket](#6-exportieren-und-support-paket-senden) ·
+[7. Kommandozeile / Server Core](#7-kommandozeile-und-server-core) ·
+[8. Kompatibilität](#8-kompatibilität)
 
-## Architektur
+## 1. Herunterladen und starten
+
+Laden Sie unter [Releases](../../releases) die Datei `sbench-gui-<version>-x64.zip` herunter, entpacken
+Sie `sbench-gui.exe` in einen beliebigen Ordner (z. B. `C:\Tools\sbench`) und starten Sie sie per
+Doppelklick. Eine Installation ist nicht nötig. Beim ersten Start legt die GUI daneben den Ordner
+`data\` für Ergebnisse, Logs und den Messkern an (ist der Ordner nicht beschreibbar, nimmt sie
+`%ProgramData%\sbench`). Administratorrechte brauchen Sie nur für Tests auf Volumes und physischen
+Disks; dann fragt die GUI nach und erhöht nur den Messkern, nicht sich selbst.
+
+![Ordner mit sbench-gui.exe und data\ nach dem ersten Start](docs/img/guide/01_download.png)
+
+Die Prüfsummen aller Downloads stehen in `SHA256SUMS.txt` beim Release.
+
+## 2. Erster Start und System-Übersicht
+
+Die Startseite **Übersicht** zeigt, was der Messkern über das System herausgefunden hat: CPU,
+Arbeitsspeicher, NUMA-Knoten, Datenträger, Netzwerkadapter und ob der Rechner physisch, ein
+Hyper-V-Host oder eine VM ist. Die Versionen von GUI und Kern stehen in der Titelleiste und unten in
+der Seitenleiste.
+
+![Übersicht nach dem ersten Start](docs/img/guide/02_start.png)
+
+## 3. Storage-Test anlegen
+
+Unter **Testprofile** legen Sie einen Test wie in Iometer an: oben die **Ziele** (Testdatei, Volume
+oder Disk), darunter die **Access Specifications** mit Gewicht, Blockgröße, Lese- und Zufallsanteil,
+rechts **Worker**, **Queue Depth** pro Worker, Cache-Modus, Warmup und Messdauer. **Validieren** lässt
+den Kern das Profil prüfen; **▶ Test starten** startet es.
+
+![Testprofil mit Ziel, Access Specs, Worker und Queue Depth](docs/img/guide/03_testprofil.png)
+
+Für eine Testdatei sind keine Administratorrechte nötig. Ohne Rechte legt der Kern die Datei nur
+langsamer an (Hinweis `W_NEEDS_ADMIN`); Sie können mit **Ohne Rechte starten** fortfahren. Testdateien,
+die sbench selbst angelegt hat, löscht es nach dem Test wieder.
+
+## 4. Live-Lauf beobachten und stoppen
+
+Während des Laufs zeigt **Live-Lauf** die Phasen (Vorbereitung → Warmup → Messung), IOPS, Durchsatz,
+Latenz (Ø, p50, p99) und CPU-Last, auf Wunsch getrennt nach Lesen und Schreiben, sowie die Werte je
+Worker. Gemessen wird nur in der Messphase; Warmup zählt nicht.
+
+![Live-Lauf während der Messung](docs/img/guide/04_live.png)
+
+Mit **■ Stoppen** beenden Sie einen Lauf vorzeitig. Das bisher Gemessene bleibt als Ergebnis erhalten
+und ist als „abgebrochen“ markiert.
+
+![Gestoppter Lauf](docs/img/guide/04b_gestoppt.png)
+
+## 5. Ergebnisse vergleichen
+
+Unter **Vergleich** haken Sie zwei oder drei Läufe an. Die GUI stellt gleichnamige Tests gegenüber
+(IOPS je Test, Latenz-Perzentile, Delta-Tabelle gegenüber dem ersten Lauf). Im Bild sind es zwei echte
+Läufe desselben Profils auf dem CI-Runner mit unterschiedlicher Last (2 Worker × QD 8 und
+1 Worker × QD 1). Host gegen VM funktioniert genauso: dasselbe Profil auf dem Hyper-V-Host und in der
+VM laufen lassen, die Ergebnisdatei der VM in den Ergebnisordner der GUI auf dem Host kopieren
+(`%LOCALAPPDATA%\sbench-gui\results`), die GUI neu starten und beide Läufe auswählen.
+
+![Vergleich zweier Läufe](docs/img/guide/05_vergleich.png)
+
+## 6. Exportieren und Support-Paket senden
+
+Unter **Export** speichern Sie Ergebnisse als JSON, CSV oder HTML-Bericht. Für den Support klicken Sie
+**Ergebnisse für Support exportieren** (auch unten in der Seitenleiste). Setzen Sie **Anonymisieren**,
+wenn Hostnamen, Benutzernamen, IP-/MAC-Adressen und Seriennummern nicht im Paket stehen sollen.
+
+![Export mit Option Anonymisieren](docs/img/guide/06_export.png)
+
+Im Dialog wählen Sie alle beendeten Läufe (`--all`) oder nur die ausgewählten, dazu GUI-Logs und
+Testprofile. **Speichern unter …** erzeugt eine ZIP-Datei mit `manifest.json` (SHA-256 je Datei).
+
+![Support-Dialog](docs/img/guide/06b_support_dialog.png)
+
+Schicken Sie uns die erzeugte `sbench-support.zip` (z. B. per E-Mail oder über Ihr Support-Ticket).
+Inhalte der Testziele sind nie enthalten.
+
+![Support-Paket erstellt](docs/img/guide/06c_support_fertig.png)
+
+## 7. Kommandozeile und Server Core
+
+**GUI erfordert Desktop Experience, auf Server Core die CLI nutzen.** Die CLI `sbench.exe` liegt
+im Release als `sbench-<version>-cli-x64.zip` (ARM64: `…-cli-arm64.zip`). Sie liest einen Job im
+Format `sb-job/1` (z. B. ein in der GUI gespeichertes Profil) und schreibt das Ergebnis als JSON.
+`--data-dir` legt fest, wo Logs, Laufdateien und Ergebnisse für `bundle --all` liegen.
 
 ```
-┌────────────────────────────┐   Job (JSON)  / Ergebnis (JSON)
-│ GUI (Python, PySide6)      │──────────────────────────────┐
-│ PyInstaller-EXE            │   Fortschritt (JSON Lines     │
-│ startet sbench als         │◄── über stdout/Named Pipe) ── │
-│ Unterprozess (ggf. runas)  │   Stop (benanntes Event)      │
-└────────────────────────────┘                               ▼
-                                          ┌──────────────────────────────┐
-                                          │ sbench.exe (CLI)             │
-                                          │  └─ C-Messkern (statische    │
-                                          │     Lib), zusätzlich als     │
-                                          │     sbcore.dll               │
-                                          └──────────────────────────────┘
+:: Systeminformationen (sb-info/1)
+sbench --data-dir C:\Tools\sbench\data info --json > info.json
+
+:: Test ausführen; Fortschritt als JSON Lines auf stdout, Exit-Code 0 = ok, 3 = gestoppt, 4 = Rechte fehlen
+sbench --data-dir C:\Tools\sbench\data run --job D:\sbench\job.json --out D:\sbench\ergebnis.json --progress stdout
+
+:: Support-Paket mit allen beendeten Läufen, anonymisiert
+sbench --data-dir C:\Tools\sbench\data bundle --out D:\sbench\support.zip --all --anonymize
 ```
 
-- **C-Messkern** als statische Bibliothek; daraus entstehen `sbench.exe` (CLI) und
-  `sbcore.dll` (für spätere direkte Einbindung).
-- **GUI** in PySide6 steuert ausschließlich die CLI als Unterprozess. Dadurch kann
-  der Messkern bei Bedarf erhöht (Administrator) laufen, während die GUI normal läuft.
-- Auslieferung der GUI als **PyInstaller-EXE**, die `sbench.exe` mitbringt.
-- **Build** per GitHub Actions auf `windows-latest`, nativ für x64 und ARM64 (ab Windows 10 1607 /
-  Server 2016, statische CRT); Details unter
-  [Build & Plattformen](docs/cli.md#build--plattformen).
+![sbench in der Konsole](docs/img/guide/07_cli.png)
 
-## Schnittstellen-Vertrag
+Weitere Befehle (`validate`, `stop`, `list --running`, `export --csv`) und alle Optionen:
+[docs/cli.md](docs/cli.md).
 
-- [`schema/`](schema/) – JSON Schemas (draft 2020-12) für Job, Ergebnis,
-  Fortschritts-Events, Systeminfo und Validierung, mit Beispielen in
-  [`schema/examples/`](schema/examples/).
-- [`docs/cli.md`](docs/cli.md) – Befehle, Optionen, Exit-Codes und Rechte von `sbench.exe`.
+## 8. Kompatibilität
 
-Beispiele prüfen:
+| System | GUI (`sbench-gui.exe`, x64) | CLI (`sbench.exe`) |
+|---|---|---|
+| Windows 11 | ja | ja (x64, ARM64) |
+| Windows 10 ab 1809 (22H2, LTSC 2019/2021) | ja | ja (ab 1607) |
+| Windows Server 2019, 2022, 2025 mit Desktop Experience | ja (2022/2025 in der CI geprüft) | ja |
+| Windows Server 2016 mit Desktop Experience | ungetestet (Qt 6.12 nur inoffiziell) | ja |
+| Windows Server Core, Hyper-V Server | nein, CLI nutzen | ja |
+| Virtuelle Maschinen (Hyper-V, Azure), auch per RDP | ja | ja |
 
-```
-pip install jsonschema
-python tools/validate_examples.py
-```
+Die CLI wird automatisch auf Server 2022 und 2025 (Azure-VMs), Windows 11 ARM64 und Server Core 2022
+(Container) geprüft, die GUI auf Server 2022 und 2025; alles Weitere prüfen wir manuell. Details: [docs/kompatibilitaet.md](docs/kompatibilitaet.md).
 
-Die Prüfung läuft automatisch per GitHub Actions bei Änderungen unter `schema/`.
+## Für Entwickler
 
-## GUI (Prototyp M1)
-
-Die GUI liegt unter [`gui/`](gui/) (PySide6 + pyqtgraph, steuert nur `sbench.exe`; ohne Kern läuft sie gegen einen Mock).
-Plan und Screens: [`docs/GUI_PLAN.md`](docs/GUI_PLAN.md) · Kompatibilität: [`docs/kompatibilitaet.md`](docs/kompatibilitaet.md).
-**GUI erfordert Desktop Experience, auf Server Core die CLI nutzen.**
-
-> **Mockup mit Beispieldaten:** Die folgenden Bilder zeigen den Prototyp gegen den Mock-Kern mit erfundenen Werten
-> (Host `SRV-HV01`, VMs `VM-BENCH01`/`VM-SAN02`). Es sind keine Messergebnisse. Echte Screenshots
-> rendert später `.github/workflows/screenshots.yml` aus dem Smoke-Artefakt `sbench-smoke-windows-2022-x64`.
-
-| | |
-|---|---|
-| ![Übersicht (Mockup mit Beispieldaten)](docs/img/01_dashboard.png)<br>Übersicht – *Mockup mit Beispieldaten* | ![Testprofil (Mockup mit Beispieldaten)](docs/img/02_profile_editor.png)<br>Testprofil mit gewichteten Access Specs – *Mockup mit Beispieldaten* |
-| ![Live-Lauf (Mockup mit Beispieldaten)](docs/img/03_live_run.png)<br>Live-Lauf – *Mockup mit Beispieldaten* | ![Vergleich (Mockup mit Beispieldaten)](docs/img/04_compare.png)<br>Vergleich Host/VM – *Mockup mit Beispieldaten* |
-| ![Destruktiver Schreibtest (Mockup mit Beispieldaten)](docs/img/02c_destructive_confirm.png)<br>Bestätigung destruktiver Schreibtest – *Mockup mit Beispieldaten* | ![Export (Mockup mit Beispieldaten)](docs/img/05_export.png)<br>Export und Support-Paket – *Mockup mit Beispieldaten* |
-
-Weitere Screens (Validierung, Rechte, ICF-Import, Re-Attach, Support-Dialog) in [`docs/img/`](docs/img/), RDP-Größe 1366×768 in [`docs/img/rdp1366/`](docs/img/rdp1366/) – alle *Mockup mit Beispieldaten*.
-
-## Meilensteine
-
-1. **Storage-Kern + Durchstich** – Storage-Test im C-Kern (Dateien, Volumes,
-   physische Disks, Worker, Queue Depth, gewichtete Access-Specs, Latenzstatistik),
-   `sbench run/stop/validate/info` gemäß Vertrag, minimale GUI, die einen Job startet,
-   Live-Werte anzeigt und das Ergebnis lädt; Build per GitHub Actions.
-2. **Weitere Tests und Komfort** – u. a. Import von Iometer-Konfigurationen
-   (`sbench import-icf`).
+Architektur und Schnittstellen: [docs/architektur.md](docs/architektur.md) · Entwicklung, CI und
+Screenshots: [docs/entwicklung.md](docs/entwicklung.md) · CLI: [docs/cli.md](docs/cli.md) ·
+Messkern: [docs/core.md](docs/core.md) · GUI: [gui/README.md](gui/README.md) · Releases:
+[docs/release.md](docs/release.md)
