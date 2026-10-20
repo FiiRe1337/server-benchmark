@@ -1,0 +1,27 @@
+{
+  "schema": "sb-validate/1",
+  "ok": true,
+  "errors": [],
+  "warnings": [
+    {
+      "path": "/tests/0/targets/1",
+      "code": "W_NEEDS_ADMIN",
+      "msg": "\\\\.\\PhysicalDrive2 erfordert Administratorrechte; 'sbench run' ohne Erhöhung endet mit Exit-Code 4."
+    },
+    {
+      "path": "/tests/0/targets/0/file_size",
+      "code": "W_NEEDS_ADMIN",
+      "msg": "Ohne Administratorrechte kein SetFileValidData; die Testdatei wird langsamer durch Schreiben angelegt."
+    },
+    {
+      "path": "/tests/0/targets/1",
+      "code": "W_DESTRUCTIVE",
+      "msg": "Schreibtest auf \\\\.\\PhysicalDrive2 zerstört alle Daten auf der Disk; 'sbench run --allow-destructive' erforderlich."
+    },
+    {
+      "path": "/tests/0/targets/0",
+      "code": "W_LOW_DISK_SPACE",
+      "msg": "Auf D: bleiben nach Anlegen der Testdatei nur 3 % frei."
+    }
+  ]
+}

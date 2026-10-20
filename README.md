@@ -36,7 +36,9 @@ schnell und reproduzierbar vermessen lassen:
 - **GUI** in PySide6 steuert ausschließlich die CLI als Unterprozess. Dadurch kann
   der Messkern bei Bedarf erhöht (Administrator) laufen, während die GUI normal läuft.
 - Auslieferung der GUI als **PyInstaller-EXE**, die `sbench.exe` mitbringt.
-- **Build** per GitHub Actions auf `windows-latest`.
+- **Build** per GitHub Actions auf `windows-latest`, nativ für x64 und ARM64 (ab Windows 10 1607 /
+  Server 2016, statische CRT); Details unter
+  [Build & Plattformen](docs/cli.md#build--plattformen).
 
 ## Schnittstellen-Vertrag
 
@@ -60,3 +62,5 @@ Die Prüfung läuft automatisch per GitHub Actions bei Änderungen unter `schema
    physische Disks, Worker, Queue Depth, gewichtete Access-Specs, Latenzstatistik),
    `sbench run/stop/validate/info` gemäß Vertrag, minimale GUI, die einen Job startet,
    Live-Werte anzeigt und das Ergebnis lädt; Build per GitHub Actions.
+2. **Weitere Tests und Komfort** – u. a. Import von Iometer-Konfigurationen
+   (`sbench import-icf`).

@@ -5,7 +5,8 @@ Prüft:
   * jedes Schema gegen das Metaschema (JSON Schema draft 2020-12),
   * jedes Beispiel gegen sein Schema (Zuordnung über den Dateinamen),
   * einige semantische Regeln, die JSON Schema nicht ausdrücken kann
-    (z. B. Summe der access_specs-Gewichte = 100).
+    (z. B. Summe der access_specs-Gewichte = 100, allow_destructive bei
+    Schreibtests auf volume/physical).
 
 Aufruf:  python tools/validate_examples.py      (Exit 0 = alles gültig, 1 = Fehler)
 Benötigt: pip install jsonschema
@@ -30,6 +31,7 @@ MAPPING = {
     "progress-": "sb-progress-1.schema.json",
     "info": "sb-info-1.schema.json",
     "validate-": "sb-validate-1.schema.json",
+    "runs": "sb-runs-1.schema.json",
 }
 
 
@@ -48,6 +50,11 @@ def semantic_checks(kind: str, doc) -> list[str]:
                 s = sum(spec["weight"] for spec in t["access_specs"])
                 if s != 100:
                     errs.append(f"{prefix}/{i}/access_specs: Summe der Gewichte {s} != 100 (E_WEIGHT_SUM)")
+                writes = any(spec["read_pct"] < 100 for spec in t["access_specs"])
+                for k, tg in enumerate(t["targets"]):
+                    if writes and tg["kind"] in ("volume", "physical") and not tg.get("allow_destructive", False):
+                        errs.append(f"{prefix}/{i}/targets/{k}/allow_destructive: Schreibtest auf {tg['kind']} "
+                                    "ohne allow_destructive: true (E_DESTRUCTIVE_NOT_ALLOWED)")
 
     if kind == "sb-job-1.schema.json":
         check_tests(doc["tests"], "/tests")

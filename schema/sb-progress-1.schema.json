@@ -47,12 +47,63 @@
             "measure",
             "cleanup"
           ]
+        },
+        "duration_s": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Geplante Dauer der Phase in Sekunden, falls bekannt."
         }
       },
       "required": [
         "ev",
         "test",
         "name"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "description": "Fortschritt während preparing/warmup, etwa einmal pro Sekunde.",
+      "properties": {
+        "ev": {
+          "const": "progress"
+        },
+        "test": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Testindex."
+        },
+        "phase": {
+          "enum": [
+            "preparing",
+            "warmup"
+          ]
+        },
+        "done": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Erledigte Menge."
+        },
+        "total": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Gesamtmenge."
+        },
+        "unit": {
+          "enum": [
+            "bytes",
+            "s"
+          ],
+          "description": "bytes = z. B. angelegte Testdatei, s = Sekunden."
+        }
+      },
+      "required": [
+        "ev",
+        "test",
+        "phase",
+        "done",
+        "total",
+        "unit"
       ],
       "additionalProperties": false
     },
@@ -111,10 +162,35 @@
           ],
           "additionalProperties": false
         },
+        "read_iops": {
+          "type": "number",
+          "minimum": 0
+        },
+        "write_iops": {
+          "type": "number",
+          "minimum": 0
+        },
+        "read_mbps": {
+          "type": "number",
+          "minimum": 0,
+          "description": "MB/s"
+        },
+        "write_mbps": {
+          "type": "number",
+          "minimum": 0,
+          "description": "MB/s"
+        },
         "cpu_pct": {
           "type": "number",
           "minimum": 0,
-          "maximum": 100
+          "maximum": 100,
+          "description": "Systemlast: alle logischen Prozessoren, 0-100 %."
+        },
+        "proc_cpu_pct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "CPU-Last des sbench-Prozesses in Prozent der gesamten Maschine (gleiche Skala wie cpu_pct, 100 = alle logischen Prozessoren voll)."
         },
         "ops_per_s": {
           "type": "number",
@@ -142,6 +218,24 @@
               "mbps": {
                 "type": "number",
                 "minimum": 0
+              },
+              "lat_us": {
+                "type": "object",
+                "properties": {
+                  "mean": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "p99": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "mean",
+                  "p99"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
