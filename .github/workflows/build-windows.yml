@@ -214,8 +214,28 @@ jobs:
         with:
           name: sbench-windows-x64
           path: art
+      - name: Docker-Dienst sicherstellen
+        # Auf einzelnen Runnern läuft der Docker-Dienst beim Jobstart noch nicht (npipe docker_engine fehlt)
+        shell: pwsh
+        run: |
+          for ($i = 1; $i -le 12; $i++) {
+            $svc = Get-Service docker -ErrorAction SilentlyContinue
+            if (-not $svc) { throw "Docker-Dienst nicht installiert" }
+            if ($svc.Status -ne "Running") { Write-Host "Docker-Dienst: $($svc.Status), starte ($i)"; Start-Service docker -ErrorAction SilentlyContinue }
+            docker version --format "{{.Server.Version}}" 2>$null
+            if ($LASTEXITCODE -eq 0) { Write-Host "Docker bereit"; exit 0 }
+            Start-Sleep -Seconds 10
+          }
+          throw "Docker-Daemon nicht erreichbar"
       - name: Image ziehen
-        run: docker pull mcr.microsoft.com/windows/servercore:ltsc2022
+        shell: pwsh
+        run: |
+          for ($i = 1; $i -le 3; $i++) {
+            docker pull mcr.microsoft.com/windows/servercore:ltsc2022
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            Start-Sleep -Seconds 20
+          }
+          exit 1
       - name: CLI-Smoke im Container (Prozessisolation)
         shell: pwsh
         run: |

@@ -102,7 +102,7 @@ jobs:
           Write-Host "OK: sbench $($j.version) ($($j.arch), $($j.commit.Substring(0,7)))"
 
   publish:
-    name: ${{ needs.meta.outputs.publish == 'true' && 'Veröffentlichen' || 'Vorschau (dry run)' }}
+    name: Veröffentlichen bzw. Vorschau
     needs: [meta, core, gui, verify]
     runs-on: ubuntu-latest
     permissions:
