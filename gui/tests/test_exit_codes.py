@@ -2,7 +2,7 @@
 import json, os, subprocess, sys, time
 
 
-from conftest import GUI, demo, profile
+from conftest import GUI, demo, local_job, profile
 from sbgui import sbench
 
 MOCK = os.path.join(GUI, "mock_sbench.py")
@@ -47,9 +47,9 @@ def test_version_and_info(mock_env):
 
 
 def test_validate_ok_and_invalid(mock_env):
-    ok = mock("validate", "--job", profile("four-corners.json"))
+    ok = mock("validate", "--job", local_job(profile("four-corners.json"), mock_env))
     assert ok.returncode == 0 and json.loads(ok.stdout)["errors"] == []
-    bad = mock("validate", "--job", profile("oltp-mixed.json"))
+    bad = mock("validate", "--job", local_job(profile("oltp-mixed.json"), mock_env))
     assert bad.returncode == 2
     assert "E_DESTRUCTIVE_NOT_ALLOWED" in {e["code"] for e in json.loads(bad.stdout)["errors"]}
 
@@ -60,40 +60,31 @@ def test_bad_args_exit_2(mock_env):
 
 
 def test_destructive_without_flag_exit_2(mock_env):
-    p = mock("run", "--job", demo("job-oltp.json"), "--out", str(mock_env / "r.json"), "--progress", "stdout")
-    assert p.returncode == 2
+    p = mock("run", "--job", local_job(demo("job-oltp.json"), mock_env), "--out", str(mock_env / "r.json"), "--progress", "stdout")
+    assert p.returncode == 2, p.stdout[-800:]
     evs = [json.loads(ln) for ln in p.stdout.splitlines() if ln.strip()]
     assert any(e.get("code") == "E_DESTRUCTIVE_NOT_ALLOWED" for e in evs if e["ev"] == "error")
 
 
 def test_raw_disk_without_admin_exit_4(mock_env):
-    p = mock("run", "--job", demo("job-oltp.json"), "--out", str(mock_env / "r.json"), "--progress", "stdout", "--allow-destructive")
-    assert p.returncode == 4
-
-
-def _small_job(tmp):
-    job = json.load(open(profile("four-corners.json"), encoding="utf-8"))
-    job["tests"] = job["tests"][:1]; job["tests"][0].update(warmup_s=0, duration_s=2)
-    path = tmp / "job.json"; path.write_text(json.dumps(job), encoding="utf-8")
-    return path
+    p = mock("run", "--job", local_job(demo("job-oltp.json"), mock_env), "--out", str(mock_env / "r.json"), "--progress", "stdout", "--allow-destructive")
+    assert p.returncode == 4, p.stdout[-800:]
 
 
 def test_run_ok_exit_0_result_valid(mock_env):
     from sb_contract import validators
     out = mock_env / "r.json"
-    p = mock("run", "--job", str(_small_job(mock_env)), "--out", str(out), "--progress", "stdout", "--tick-ms", "100")
-    assert p.returncode == 0, p.stderr
+    p = mock("run", "--job", local_job(profile("four-corners.json"), mock_env, tests=1, warmup_s=0, duration_s=2), "--out", str(out), "--progress", "stdout", "--tick-ms", "100")
+    assert p.returncode == 0, p.stdout[-800:] + p.stderr
     res = json.loads(out.read_text(encoding="utf-8"))
     assert not list(validators()["sb-result/1"].iter_errors(res)) and res["aborted"] is False
 
 
 def test_stop_exit_3_partial_result(mock_env, monkeypatch):
     monkeypatch.setenv("SBENCH_MOCK_SPEED", "1")
-    job = json.load(open(profile("four-corners.json"), encoding="utf-8"))
-    job["tests"] = job["tests"][:1]; job["tests"][0].update(warmup_s=0, duration_s=30)
-    jp = mock_env / "long.json"; jp.write_text(json.dumps(job), encoding="utf-8")
+    jp = local_job(profile("four-corners.json"), mock_env, tests=1, warmup_s=0, duration_s=30)
     out = mock_env / "r.json"
-    p = subprocess.Popen([sys.executable, MOCK, "run", "--job", str(jp), "--out", str(out), "--id", "stop-test", "--progress", "stdout", "--tick-ms", "100"],
+    p = subprocess.Popen([sys.executable, MOCK, "run", "--job", jp, "--out", str(out), "--id", "stop-test", "--progress", "stdout", "--tick-ms", "100"],
                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8")
     try:
         t0 = time.time()
