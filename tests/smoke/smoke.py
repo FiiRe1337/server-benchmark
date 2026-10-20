@@ -220,6 +220,38 @@ def main() -> int:
           "version listet Formatversionen inkl. sb-runs/1")
     kern_version = lines[0].split()[1]
 
+    print("\n== version --json ==")
+    p = run(sbench, "version", "--json")
+    vj = json.loads(p.stdout.decode("utf-8")) if p.returncode == 0 else {}
+    exe_hash = hashlib.sha256(sbench.read_bytes()).hexdigest()
+    exp_arch = "arm64" if os.environ.get("PROCESSOR_ARCHITECTURE", "").upper() == "ARM64" else "x64"
+    check(p.returncode == 0 and vj.get("version") == kern_version and vj.get("sha256") == exe_hash
+          and vj.get("arch") == exp_arch and isinstance(vj.get("commit"), str) and "sb-runs/1" in vj.get("formats", []),
+          f"version --json: {vj}")
+    SUMMARY.append(f"version --json: version={vj.get('version')} commit={str(vj.get('commit'))[:12]} arch={vj.get('arch')}")
+
+    print("\n== --data-dir ==")
+    dd1 = work / "dd-option"
+    os.environ["SBENCH_DATA_DIR"] = str(work / "dd-env")
+    p = run(sbench, "--data-dir", dd1, "info", "--json")
+    m1 = json.loads(p.stdout.decode("utf-8"))["meta"] if p.returncode == 0 else {}
+    check(str(m1.get("data_dir", "")).lower() == str(dd1).lower() and (dd1 / "runs").is_dir(),
+          f"--data-dir vor SBENCH_DATA_DIR: meta.data_dir = {m1.get('data_dir')}")
+    p = run(sbench, "info", "--json")
+    m2 = json.loads(p.stdout.decode("utf-8"))["meta"] if p.returncode == 0 else {}
+    check(str(m2.get("data_dir", "")).lower() == str(work / "dd-env").lower(), f"SBENCH_DATA_DIR ohne Option ({m2.get('data_dir')})")
+    os.environ.pop("SBENCH_DATA_DIR", None)
+    p = run(sbench, "info", "--json", "--data-dir", "dd-rel", cwd=work)
+    m3 = json.loads(p.stdout.decode("utf-8"))["meta"] if p.returncode == 0 else {}
+    check(str(m3.get("data_dir", "")).lower() == str(work / "dd-rel").lower(),
+          f"--data-dir nach dem Befehl, relativer Pfad ({m3.get('data_dir')})")
+    blocker = work / "keine-datei-als-ordner"
+    blocker.write_text("x", encoding="utf-8")
+    p = run(sbench, "--data-dir", blocker / "sub", "info")
+    check(p.returncode == 2 and b"E_ARGS" in p.stderr, "--data-dir nicht anlegbar: Exit 2, E_ARGS")
+    p = run(sbench, "--data-dir")
+    check(p.returncode == 2, "--data-dir ohne Pfad: Exit 2")
+
     print("\n== info --json ==")
     t0 = time.time()
     p = run(sbench, "info", "--json")
@@ -347,6 +379,22 @@ def main() -> int:
     logf = data_dir / "logs" / "smoke-run.log"
     check(logf.exists() and "Phase measure" in logf.read_text(encoding="utf-8"), f"Lauf-Log {logf}")
     check((data_dir / "jobs" / "smoke-run.json").exists(), "Job-Kopie unter data\\jobs")
+
+    print("\n== run mit --data-dir ==")
+    dd4 = work / "dd-run"
+    p = run(sbench, "run", "--data-dir", dd4, "--job", storage_job(work / "job-dd.json", "dd", testfile, 1, warmup=0),
+            "--id", "dd-run")
+    check(p.returncode == 0 and (dd4 / "results" / "dd-run.json").exists() and (dd4 / "logs" / "dd-run.log").exists()
+          and (dd4 / "runs" / "dd-run.jsonl").exists() and not (data_dir / "results" / "dd-run.json").exists(),
+          "run --data-dir: Ergebnis, Log und Fortschritt im angegebenen Verzeichnis")
+    if (dd4 / "results" / "dd-run.json").exists():
+        check(json.loads((dd4 / "results" / "dd-run.json").read_text(encoding="utf-8"))["meta"]["data_dir"].lower()
+              == str(dd4).lower(), "Ergebnis meta.data_dir = --data-dir")
+    p = run(sbench, "--data-dir", dd4, "bundle", "--all", "--out", work / "bundle-dd.zip")
+    if check(p.returncode == 0, "bundle mit --data-dir: Exit 0"):
+        with zipfile.ZipFile(work / "bundle-dd.zip") as z:
+            check("results/dd-run.json" in z.namelist() and "results/smoke-run.json" not in z.namelist(),
+                  "bundle --all nutzt das --data-dir-Verzeichnis")
 
     print("\n== run ohne --out (Standardablage results/<run_id>.json) + Named Pipe ==")
     pipe = r"\\.\pipe\sbench-smoke-pipe"

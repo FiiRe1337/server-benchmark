@@ -21,6 +21,7 @@
 
 const char *sb_version(void) { return SB_VERSION_STR; }
 const char *sb_data_directory(void) { return sb_data_dir(); }
+int sb_set_data_directory(const char *path) { return sb_set_data_dir(path); }
 void sb_free(void *p) { free(p); }
 
 static double rnd(double v, int digits) {

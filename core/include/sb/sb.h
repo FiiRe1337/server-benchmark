@@ -44,6 +44,8 @@ typedef struct sb_bundle_options {
 
 SB_API const char *sb_version(void);
 SB_API const char *sb_data_directory(void);
+/* --data-dir: vor allen anderen Regeln; vor jedem anderen Aufruf setzen. 0 = ok */
+SB_API int  sb_set_data_directory(const char *path);
 SB_API int  sb_run(const sb_run_options *o);
 SB_API int  sb_stop(const char *id, char *msg, size_t msglen);
 /* sb-validate/1 als JSON-Text (mit sb_free freigeben) */

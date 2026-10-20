@@ -56,14 +56,21 @@ bleiben daher unverändert. sbench ab Vertrag 1.1 gibt die neuen Felder `run_id`
 sbench legt Laufzeitdateien in einem Datenverzeichnis ab. Es wird in dieser Reihenfolge
 bestimmt:
 
-1. Umgebungsvariable `SBENCH_DATA_DIR`,
-2. `data\` neben `sbench.exe`, wenn beschreibbar (portabler Betrieb),
-3. `%ProgramData%\sbench`.
+1. globale Option `--data-dir <pfad>` (bei jedem Befehl, vor oder nach dem Befehlsnamen),
+2. Umgebungsvariable `SBENCH_DATA_DIR`,
+3. `data\` neben `sbench.exe`, wenn beschreibbar (portabler Betrieb),
+4. `%ProgramData%\sbench`.
+
+Relative Pfade (Regel 1 und 2) gelten relativ zum Arbeitsverzeichnis. Das Verzeichnis und
+die Unterordner `results\`, `jobs\`, `logs\`, `runs\` werden bei Bedarf angelegt. Ist
+der `--data-dir`-Pfad nicht anlegbar oder nicht beschreibbar, endet sbench mit Exit-Code
+**2** (`E_ARGS` auf stderr).
 
 Erhöhter und nicht erhöhter Prozess müssen dasselbe Verzeichnis nutzen. Ein per
 `runas` (ShellExecuteEx) gestarteter Prozess erbt die Umgebung der GUI nicht
-zuverlässig; im Normalfall ergibt sich das gemeinsame Verzeichnis daher über Regel 2
-oder 3, `SBENCH_DATA_DIR` ist für Sonderfälle (Tests, systemweit gesetzt). Die GUI
+zuverlässig. Die GUI übergibt deshalb `--data-dir` ausdrücklich auf der Kommandozeile;
+ohne die Option ergibt sich das gemeinsame Verzeichnis über Regel 3 oder 4,
+`SBENCH_DATA_DIR` ist für Sonderfälle (Tests, systemweit gesetzt). Die GUI
 ermittelt den Pfad über `sbench info --json`. Der tatsächlich verwendete Pfad
 steht in `meta.data_dir` (in `sb-result` bezogen auf den Zeitpunkt des Laufs, ebenso
 `meta.elevated`).
@@ -279,6 +286,25 @@ sb-validate/1
 sb-runs/1
 ```
 
+#### `sbench version --json`
+
+Maschinenlesbar, z. B. für die GUI oder einen Release-Workflow:
+
+```json
+{
+  "version": "0.1.0-beta.1",
+  "commit": "5670020c3d…",
+  "arch": "x64",
+  "sha256": "<SHA-256 von sbench.exe, hexadezimal klein>",
+  "formats": ["sb-job/1", "sb-result/1", "sb-progress/1", "sb-info/1", "sb-validate/1", "sb-runs/1", "sb-bundle/1"]
+}
+```
+
+`version` ist dieselbe SemVer wie in der ersten Zeile von `sbench version`, `commit` der
+Git-Commit des Builds (`unknown`, falls beim Bauen nicht bekannt), `arch` `x64` oder
+`arm64`, `sha256` der Hash der ausgeführten EXE-Datei. Exit-Code 0; 1, wenn die EXE nicht
+lesbar war (dann `sha256: null`).
+
 ## Exit-Codes
 
 | Code | Bedeutung |
@@ -323,6 +349,11 @@ Versionswechsel ergänzt werden, die GUI muss unbekannte Codes generisch anzeige
   (`GetProcAddress`) und nur bei Verfügbarkeit genutzt.
 - **Statische CRT** (`/MT`), damit keine VC-Redistributable nötig ist.
 - **x64 und ARM64** werden nativ gebaut (keine Emulation).
+- `.github/workflows/build-windows.yml` ist zusätzlich per `workflow_call` aufrufbar
+  (z. B. `uses: ./.github/workflows/build-windows.yml` mit `needs:`), optionaler Input
+  `version` (string). Outputs: `version`, `commit`, `cli_artifact_x64`, `cli_artifact_arm64`.
+  Die Artifacts `sbench-cli-x64` und `sbench-cli-arm64` (je genau eine `sbench.exe`) haben
+  stabile Namen.
 - Die CI lädt Smoke-Artifacts mit dem Namen `sbench-smoke-<runner>-<arch>` hoch,
   z. B. `sbench-smoke-windows-2022-x64`. Sie enthalten `result.json`,
   `progress.jsonl` und `info.json` eines kurzen Testlaufs und dienen als Daten für die
@@ -331,8 +362,8 @@ Versionswechsel ergänzt werden, die GUI muss unbekannte Codes generisch anzeige
 ## Beispiel: Aufruf aus der GUI
 
 ```
-sbench validate --job C:\Temp\job.json
-sbench run --job C:\Temp\job.json --out C:\Temp\result.json ^
+sbench --data-dir C:\ProgramData\sbench validate --job C:\Temp\job.json
+sbench --data-dir C:\ProgramData\sbench run --job C:\Temp\job.json --out C:\Temp\result.json ^
            --progress pipe:\\.\pipe\sbench-20261020-081502-a1b2 --tick-ms 250 ^
            --id 20261020-081502-a1b2
 sbench list --running --json
