@@ -23,7 +23,8 @@ typedef int (*sb_fill_cb)(void *ctx, uint64_t done, uint64_t total);
 
 /* Testdatei anlegen bzw. vergrößern. used_valid_data = 1, wenn SetFileValidData genutzt wurde,
  * filled = 1, wenn mit Zufallsdaten beschrieben wurde. */
-int sb_target_prepare_file(const sb_target *t, int *used_valid_data, int *filled, sb_fill_cb cb, void *cbctx,
+/* *created = 1, wenn die Datei vorher nicht existierte (auch bei Fehlerrückgabe gesetzt) */
+int sb_target_prepare_file(const sb_target *t, int *created, int *used_valid_data, int *filled, sb_fill_cb cb, void *cbctx,
                            char *err, size_t errlen);
 
 /* Öffnet ein Ziel für den Test (FILE_FLAG_OVERLAPPED + Cache-Flags) */

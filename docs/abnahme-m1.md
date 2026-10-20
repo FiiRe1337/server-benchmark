@@ -14,7 +14,7 @@ du von Hand prüfen kannst, steht in [kompatibilitaet.md](kompatibilitaet.md).
 | Was | Details |
 |---|---|
 | Betriebssystem | Windows 10/11 (ab 1607) oder Windows Server 2016 bis 2025, auch Server Core und Hyper-V Server. x64 oder ARM64. |
-| Rechte | **Administrator-Konsole** (Rechtsklick → „Als Administrator ausführen“). Ohne Adminrechte werden Testdateien langsamer angelegt (siehe Abschnitt 8). |
+| Rechte | **Administrator-Konsole** (Rechtsklick → „Als Administrator ausführen“). Ohne Adminrechte werden Testdateien langsamer angelegt (siehe Abschnitt 10). |
 | Testlaufwerk | Ein Laufwerk mit mindestens **20 GiB** frei, z. B. `D:`. Für Job 07 ein zweites Laufwerk `E:` (sonst Pfad anpassen, siehe 4.). |
 | DiskSpd | Version 2.2 oder neuer: <https://github.com/microsoft/diskspd/releases>. `amd64\diskspd.exe` bzw. `ARM64\diskspd.exe` nach `C:\Tools\diskspd\` kopieren. |
 | Iometer (optional) | Version 1.1.0: <https://www.iometer.org>. Nur x64 und nur mit Desktop-Oberfläche. |
@@ -82,18 +82,22 @@ Die Queue Depth gilt **pro Worker**, genau wie `-o` pro Thread bei DiskSpd.
 Für jeden Job: **erst sbench, dann DiskSpd, dann (optional) Iometer**, jeweils auf
 dieselbe Testdatei. Zwischen den Läufen ca. 30 s warten. Jeden Vergleich am besten
 **zweimal** laufen lassen: Weichen schon zwei sbench-Läufe untereinander um mehr als 5 %
-ab, ist das System zu unruhig für einen sinnvollen Vergleich (siehe Abschnitt 8).
+ab, ist das System zu unruhig für einen sinnvollen Vergleich (siehe Abschnitt 10).
 
 ### 5.1 sbench
 
 ```bat
-sbench run --job jobs\01-4k-random-read-qd1.json --progress stdout
+sbench run --job jobs\01-4k-random-read-qd1.json --progress stdout --keep-files
 ```
 
 - Ohne `--out` landet das Ergebnis in `data\results\<run_id>.json`. Die `run_id`
   steht im ersten Event (`"ev":"start"`).
 - Beim ersten Lauf wird die Testdatei angelegt (mit Adminrechten in Sekunden per
   `SetFileValidData`, sonst wird sie vollständig beschrieben).
+- `--keep-files` lässt die Testdatei nach dem Lauf liegen, damit DiskSpd und die
+  weiteren Jobs dieselbe Datei nutzen. Ohne die Option löscht sbench Testdateien, die es
+  selbst angelegt hat, nach dem Lauf wieder. Am Ende der Abnahme `D:\sbtest.dat` (und
+  `E:\sbtest2.dat`) von Hand löschen.
 - Abbrechen: `Strg+C` oder in einer zweiten Konsole `sbench stop --id <run_id>`.
 - Kennzahlen als CSV: `sbench export data\results\<run_id>.json --csv 01.csv --style flat`.
   Relevant sind in der Zeile `scope = total` die Spalten `iops`, `mbps`, `lat_mean_us`, `lat_p99_us`.
@@ -161,7 +165,83 @@ ein und notiere die Abweichung in Prozent: `(sbench − DiskSpd) / DiskSpd × 10
 3. Ein Vergleich Host ↔ VM ist kein Abnahmekriterium, zeigt aber den
    Virtualisierungsaufwand. Die ±5 % gelten immer **sbench ↔ DiskSpd auf demselben System**.
 
-## 8. Bundle erstellen und zurückschicken
+## 8. Zusatzprüfungen
+
+Diese Punkte prüft die CI nicht oder nicht vollständig. Ergebnis jeweils in deiner
+Vergleichstabelle bzw. im Ticket notieren.
+
+### 8.1 Testdateien aufräumen (Issue #5)
+
+```bat
+del D:\sbtest.dat
+sbench run --job jobs\04-64k-seq-read.json --out C:\Abnahme\cleanup.json
+dir D:\sbtest.dat
+```
+
+- Erwartet: `dir` findet die Datei **nicht** mehr. In `cleanup.json` steht unter
+  `tests[0].targets[0]` `"created": true, "deleted": true`.
+- Gegenprobe mit `--keep-files`: Datei bleibt, `"created": true, "deleted": false`.
+  Ein weiterer Lauf ohne Option auf die nun vorhandene Datei lässt sie stehen
+  (`"created": false, "deleted": false`).
+- Abbruch: Lauf ohne `--keep-files` starten und nach einigen Sekunden mit `Strg+C`
+  beenden (Exit 3). Auch dann ist die selbst angelegte Datei weg.
+
+### 8.2 Ohne Adminrechte: Exit 4 (Issue #6)
+
+In einer **nicht erhöhten** Konsole (normale Eingabeaufforderung, nicht „Als
+Administrator ausführen“), auf einem Konto mit Adminrechten also mit UAC-Filter:
+
+```bat
+sbench info --json | findstr elevated
+sbench validate --job jobs\abnahme-volume-read.json
+sbench run --job jobs\abnahme-volume-read.json --progress stdout
+echo Exit-Code: %ERRORLEVEL%
+```
+
+`jobs\abnahme-volume-read.json` legst du dafür einmalig an (nur Lesen, es wird nichts
+geschrieben):
+
+```json
+{"schema": "sb-job/1", "name": "volume lesen", "tests": [{"type": "storage",
+  "targets": [{"path": "\\\\.\\C:", "kind": "volume"}], "duration_s": 5, "warmup_s": 0,
+  "access_specs": [{"weight": 100, "block_size": "4KiB", "read_pct": 100, "random_pct": 100}]}]}
+```
+
+Erwartet:
+
+| Schritt | Ergebnis |
+|---|---|
+| `info --json` | `"elevated": false` |
+| `validate` | Exit 0, `"ok": true`, in `warnings` ein Eintrag `W_NEEDS_ADMIN` für `/tests/0/targets/0` |
+| `run` | **Exit 4**, `error`-Event mit `"code": "E_ACCESS_DENIED"` und Text „erfordert Administratorrechte“ auf stderr, kein Ergebnis unter `data\results\` |
+
+Danach denselben `run` in einer Konsole **als Administrator**: Exit 0 mit Messwerten.
+
+Hinweis: Der Fehlercode bei Exit 4 heißt laut Vertrag (`docs/cli.md`, Fehlercodes)
+`E_ACCESS_DENIED`; `W_NEEDS_ADMIN` ist die zugehörige Warnung von `validate`. Die CI
+prüft dasselbe automatisch mit einem eingeschränkten Token (Smoke-Test, Abschnitt
+„#6: ohne Adminrechte“). Die Prüfung von Hand bestätigt es unter echter UAC.
+
+### 8.3 Windows Server 2016 (Issue #7)
+
+Für die CI gibt es keinen Server-2016-Runner. Bitte auf **Server 2016 mit Desktop** und
+auf **Server 2016 Core** (Build 14393, beides als Administrator):
+
+```bat
+sbench version
+sbench info --json > info-2016.json
+sbench validate --job jobs\01-4k-random-read-qd1.json
+sbench run --job jobs\01-4k-random-read-qd1.json --progress stdout
+sbench bundle --all --out abnahme-m1-2016.zip
+```
+
+Erwartet: alle Befehle mit Exit 0; in `info-2016.json` `meta.os.build` beginnend mit
+`14393.` und plausible CPU-, RAM- und NUMA-Angaben; der Lauf liefert
+IOPS > 0 ohne `errors`. Auf Server Core gibt es keine GUI; die Befehle laufen in
+`cmd` bzw. PowerShell. Das Ergebnis (OS-Build, ok/Fehler) trägt der PM in
+`docs/kompatibilitaet.md` ein; dafür `info-2016.json` und das Bundle mitschicken.
+
+## 9. Bundle erstellen und zurückschicken
 
 Auf **jedem** getesteten System (Host und VM) zum Schluss:
 
@@ -180,16 +260,17 @@ sbench bundle --all --include C:\Abnahme --out abnahme-m1.zip
 
 Die ZIP-Dateien bitte an den PM schicken (oder im Ticket anhängen).
 
-## 9. Was tun bei Fehlern
+## 10. Was tun bei Fehlern
 
 | Symptom | Ursache / Abhilfe |
 |---|---|
-| Exit-Code **4**, „erfordert Administratorrechte“ | Konsole als Administrator starten. Gilt für `volume`/`physical`-Ziele. |
+| Exit-Code **4**, „erfordert Administratorrechte“ | Konsole als Administrator starten. Gilt für `volume`/`physical`-Ziele (siehe 8.2). |
+| Testdatei nach dem Lauf weg | Gewollt: sbench löscht selbst angelegte Testdateien. `--keep-files` angeben (Abschnitt 5.1). |
 | Exit-Code **2** und `errors` mit `path` | Job ungültig. `sbench validate --job <datei>` zeigt Fehler mit JSON-Pointer (z. B. `/tests/0/access_specs/0/block_size`). |
 | `E_DESTRUCTIVE_NOT_ALLOWED` | Schreibtest auf ein Volume oder eine ganze Disk. Für M1-Abnahme nicht nötig, alle Abnahme-Jobs nutzen Testdateien. |
 | `E_TARGET_NOT_FOUND` | Laufwerk oder Ordner existiert nicht: Pfad in der Job-Datei anpassen (Abschnitt 4). |
 | `E_BLOCK_ALIGN` | Blockgröße passt nicht zur Sektorgröße (4Kn-Disk mit 512-Byte-Blöcken). Abnahme-Jobs sind 4K-ausgerichtet. |
-| Anlegen der Testdatei dauert Minuten | Ohne Adminrechte bzw. ohne `SeManageVolumePrivilege` wird die Datei vollständig beschrieben. Einmalig abwarten (Fortschritt im Event `progress`), danach wird sie wiederverwendet. |
+| Anlegen der Testdatei dauert Minuten | Ohne Adminrechte bzw. ohne `SeManageVolumePrivilege` wird die Datei vollständig beschrieben. Einmalig abwarten (Fortschritt im Event `progress`). Mit `--keep-files` bleibt sie liegen und wird beim nächsten Lauf wiederverwendet. |
 | `W_LOW_DISK_SPACE` bei `validate` | Weniger als 1 GiB bzw. 5 % frei nach dem Anlegen. Anderes Laufwerk wählen oder Dateigröße verkleinern (dann auch bei DiskSpd `-c` anpassen). |
 | Windows SmartScreen / Defender blockiert `sbench.exe` | „Weitere Informationen → Trotzdem ausführen“ bzw. Datei-Eigenschaften → „Zulassen“. Die EXE ist (noch) nicht signiert. |
 | Lauf hängt / reagiert nicht | `sbench list --running` zeigt laufende Läufe, `sbench stop --id <run_id>` beendet sie sauber (Exit 3, Teilergebnis mit `aborted: true`). |

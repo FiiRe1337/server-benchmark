@@ -89,7 +89,7 @@ steht in `meta.data_dir` (in `sb-result` bezogen auf den Zeitpunkt des Laufs, eb
 ```
 sbench run --job <job.json> --out <result.json>
            [--progress stdout | pipe:\\.\pipe\sbench-<id> | file:<pfad.jsonl>]
-           [--tick-ms <ms>] [--id <id>] [--allow-destructive]
+           [--tick-ms <ms>] [--id <id>] [--allow-destructive] [--keep-files]
 ```
 
 | Option | Bedeutung |
@@ -99,6 +99,7 @@ sbench run --job <job.json> --out <result.json>
 | `--progress` | Ziel für Fortschritts-Events (`sb-progress/1`, JSON Lines). Ohne Angabe werden keine Events ausgegeben. |
 | `--tick-ms <ms>` | Intervall der `tick`-Events in Millisekunden. Standard **1000**, Minimum 100. |
 | `--allow-destructive` | Erlaubt Schreibtests (`read_pct` < 100) auf `volume`/`physical`-Targets, die zusätzlich `allow_destructive: true` tragen. Fehlt eines von beiden, endet `run` vor dem Start mit `E_DESTRUCTIVE_NOT_ALLOWED` und Exit-Code **2**. |
+| `--keep-files` | Von sbench angelegte Testdateien (`kind: file`) nach dem Test **nicht** löschen, z. B. um große Dateien in weiteren Läufen wiederzuverwenden. Ohne die Option löscht sbench jede Testdatei, die es selbst angelegt hat, nach dem Test – nach normalem Ende, nach `sbench stop` und nach Fehlern. Dateien, die vor dem Lauf schon existierten, bleiben immer unangetastet (auch wenn sbench sie vergrößert hat). Im Ergebnis steht pro Storage-Test `targets[]` mit `created` und `deleted`. |
 | `--id <id>` | Lauf-ID (`[A-Za-z0-9_-]{1,64}`), u. a. für `sbench stop`. Ohne Angabe erzeugt sbench eine ID und meldet sie im `start`-Event (`run_id`). |
 
 Progress-Ziele:
@@ -354,6 +355,9 @@ Versionswechsel ergänzt werden, die GUI muss unbekannte Codes generisch anzeige
   `version` (string). Outputs: `version`, `commit`, `cli_artifact_x64`, `cli_artifact_arm64`.
   Die Artifacts `sbench-cli-x64` und `sbench-cli-arm64` (je genau eine `sbench.exe`) haben
   stabile Namen.
+  Bei `push`/`pull_request` läuft er nur bei Änderungen an Kern-Pfaden (siehe `docs/release.md`).
+- Releases (Tag `v*`) baut und veröffentlicht `.github/workflows/release.yml`
+  (Kern + GUI, Versionsprüfung, `SHA256SUMS.txt`), siehe `docs/release.md`.
 - Die CI lädt Smoke-Artifacts mit dem Namen `sbench-smoke-<runner>-<arch>` hoch,
   z. B. `sbench-smoke-windows-2022-x64`. Sie enthalten `result.json`,
   `progress.jsonl` und `info.json` eines kurzen Testlaufs und dienen als Daten für die

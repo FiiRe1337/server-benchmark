@@ -129,6 +129,7 @@ void sb_storage_result_free(sb_storage_result *r) {
     free(r->worker_target);
     for (int i = 0; i < r->nticks; i++) { free(r->ticks[i].w_iops); free(r->ticks[i].w_mbps); free(r->ticks[i].w_lat_mean_us); free(r->ticks[i].w_lat_p99_us); }
     free(r->ticks); free(r->errs);
+    free(r->t_created); free(r->t_deleted);
     memset(r, 0, sizeof *r);
 }
 
@@ -427,6 +428,10 @@ static int wait_until(HANDLE stop, uint64_t deadline) {
 int sb_storage_run(int ti, const sb_test *t, const sb_storage_opts *o, const sb_storage_cb *cb, sb_storage_result *r) {
     memset(r, 0, sizeof *r);
     int nw = (int)t->workers, rc = 0;
+    r->ntargets = t->ntargets;
+    r->t_created = (int *)calloc((size_t)(t->ntargets ? t->ntargets : 1), sizeof(int));
+    r->t_deleted = (int *)calloc((size_t)(t->ntargets ? t->ntargets : 1), sizeof(int));
+    if (!r->t_created || !r->t_deleted) { add_err(r, "E_INTERNAL", -1, -1, 0, 1, "kein Speicher"); return 1; }
     if (alloc_result(r, nw, t->nspecs)) { add_err(r, "E_INTERNAL", -1, -1, 0, 1, "kein Speicher"); return 1; }
     engine E;
     memset(&E, 0, sizeof E);
@@ -451,10 +456,14 @@ int sb_storage_run(int ti, const sb_test *t, const sb_storage_opts *o, const sb_
     for (int k = 0; k < t->ntargets; k++) {
         const sb_target *T = &t->targets[k];
         if (T->type != SB_TGT_FILE) continue;
-        int vdl = 0, filled = 0;
+        int vdl = 0, filled = 0, created = 0;
         fillctx fc = {cb, o->stop_event, 0, T->path, ti, prep_base, prep_all, 0};
         logf_(cb, "INFO", "Testdatei %s vorbereiten (%llu Bytes)", T->path, (unsigned long long)T->file_size);
-        int pr = sb_target_prepare_file(T, &vdl, &filled, fill_cb, &fc, err, sizeof err);
+        int pr = sb_target_prepare_file(T, &created, &vdl, &filled, fill_cb, &fc, err, sizeof err);
+        if (created) {
+            /* gleicher Pfad mehrfach im Test: nur der erste Eintrag gilt als angelegt */
+            r->t_created[k] = 1;
+        }
         if (pr == SB_TERR_STOPPED) { r->aborted = 1; rc = 3; goto out; }
         if (pr != SB_TOK) {
             add_err(r, pr == SB_TERR_ACCESS ? "E_ACCESS_DENIED" : "E_IO", -1, k, 0, 1, "%s", err);
@@ -669,6 +678,18 @@ out:
     }
     CloseHandle(E.start_evt);
     free(E.w);
+    /* 6. Aufräumen: selbst angelegte Testdateien löschen (nach Ende, Stop und Fehler) */
+    for (int k = 0; k < t->ntargets; k++) {
+        if (!r->t_created[k]) continue;
+        const char *path = t->targets[k].path;
+        if (o->keep_files) { logf_(cb, "INFO", "Testdatei %s bleibt erhalten (--keep-files)", path); continue; }
+        wchar_t *wp = sb_u8_to_w(path);
+        BOOL ok = wp && DeleteFileW(wp);
+        DWORD de = GetLastError();
+        free(wp);
+        if (ok) { r->t_deleted[k] = 1; logf_(cb, "INFO", "Testdatei %s gelöscht (von sbench angelegt)", path); }
+        else logf_(cb, "WARN", "Testdatei %s konnte nicht gelöscht werden: %s", path, sb_errtext(de));
+    }
     if (rc == 0 && r->aborted) rc = 3;
     return rc;
 }

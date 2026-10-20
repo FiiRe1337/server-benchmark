@@ -128,16 +128,17 @@ def check_progress(events: list[dict], what: str, expect_aborted: bool | None = 
     check(prog_ok, f"{what}: progress-Events passen zur Phase, done <= total")
 
 
-def check_result(path: Path, what: str, expect_aborted: bool) -> dict | None:
+def check_result(path: Path, what: str, expect_aborted: bool, job: Path | None = None) -> dict | None:
     if not check(path.exists(), f"{what}: Ergebnisdatei {path.name} existiert"):
         return None
     doc = json.loads(path.read_text(encoding="utf-8"))
     validate(doc, "sb-result-1.schema.json", what)
     if semantic_checks:
-        extra = semantic_checks("sb-result-1.schema.json", doc)
+        jdoc = json.loads(job.read_text(encoding="utf-8")) if job and job.exists() else None
+        extra = semantic_checks("sb-result-1.schema.json", doc, jdoc)
         for m in extra:
             print("         " + m)
-        check(not extra, f"{what}: semantische Regeln (Histogramm-/Worker-/Spec-Summen = io_count)")
+        check(not extra, f"{what}: semantische Regeln (Summen = io_count, index steigend{' < Tests im Job' if jdoc else ''}, NUMA disjunkt)")
     check(doc["aborted"] is expect_aborted, f"{what}: aborted = {expect_aborted}")
     return doc
 
@@ -176,6 +177,89 @@ k32.ConnectNamedPipe.argtypes = [wintypes.HANDLE, wintypes.LPVOID]
 k32.ReadFile.argtypes = [wintypes.HANDLE, wintypes.LPVOID, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID]
 k32.CloseHandle.argtypes = [wintypes.HANDLE]
 INVALID_HANDLE = wintypes.HANDLE(-1).value
+
+
+def run_restricted(exe, *args, cwd: Path, timeout=120):
+    """Startet exe mit eingeschränktem Token (Administratoren nur 'deny only', LUA_TOKEN,
+    Integrität unverändert) wie aus einer nicht erhöhten Konsole. Rückgabe (exit_code, stdout,
+    stderr) oder None, wenn der Runner das nicht zulässt (dann wird der Test übersprungen)."""
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    adv = ctypes.WinDLL("advapi32", use_last_error=True)
+
+    class SA(ctypes.Structure):
+        _fields_ = [("Sid", ctypes.c_void_p), ("Attributes", wintypes.DWORD)]
+
+    class SI(ctypes.Structure):
+        _fields_ = [("cb", wintypes.DWORD), ("lpReserved", wintypes.LPWSTR), ("lpDesktop", wintypes.LPWSTR),
+                    ("lpTitle", wintypes.LPWSTR), ("dwX", wintypes.DWORD), ("dwY", wintypes.DWORD),
+                    ("dwXSize", wintypes.DWORD), ("dwYSize", wintypes.DWORD), ("dwXCountChars", wintypes.DWORD),
+                    ("dwYCountChars", wintypes.DWORD), ("dwFillAttribute", wintypes.DWORD), ("dwFlags", wintypes.DWORD),
+                    ("wShowWindow", wintypes.WORD), ("cbReserved2", wintypes.WORD), ("lpReserved2", ctypes.c_void_p),
+                    ("hStdInput", wintypes.HANDLE), ("hStdOutput", wintypes.HANDLE), ("hStdError", wintypes.HANDLE)]
+
+    class PI(ctypes.Structure):
+        _fields_ = [("hProcess", wintypes.HANDLE), ("hThread", wintypes.HANDLE),
+                    ("dwProcessId", wintypes.DWORD), ("dwThreadId", wintypes.DWORD)]
+
+    H, D, B, P = wintypes.HANDLE, wintypes.DWORD, wintypes.BOOL, ctypes.c_void_p
+    k32.GetCurrentProcess.restype = H
+    k32.GetCurrentProcess.argtypes = []
+    k32.WaitForSingleObject.argtypes = [H, D]
+    k32.WaitForSingleObject.restype = D
+    k32.GetExitCodeProcess.argtypes = [H, ctypes.POINTER(D)]
+    k32.CloseHandle.argtypes = [H]
+    adv.OpenProcessToken.argtypes = [H, D, ctypes.POINTER(H)]
+    adv.OpenProcessToken.restype = B
+    adv.CreateRestrictedToken.argtypes = [H, D, D, P, D, P, D, P, ctypes.POINTER(H)]
+    adv.CreateRestrictedToken.restype = B
+    adv.ConvertStringSidToSidW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(P)]
+    adv.ConvertStringSidToSidW.restype = B
+    adv.GetLengthSid.argtypes = [P]
+    adv.GetLengthSid.restype = D
+    adv.SetTokenInformation.argtypes = [H, ctypes.c_int, P, D]
+    adv.SetTokenInformation.restype = B
+    adv.CreateProcessAsUserW.argtypes = [H, wintypes.LPCWSTR, wintypes.LPWSTR, P, P, B, D, P, wintypes.LPCWSTR, P, P]
+    adv.CreateProcessAsUserW.restype = B
+    tok, rtok = wintypes.HANDLE(), wintypes.HANDLE()
+    # TOKEN_ASSIGN_PRIMARY|DUPLICATE|QUERY|ADJUST_DEFAULT|ADJUST_SESSIONID
+    if not adv.OpenProcessToken(k32.GetCurrentProcess(), 0x1 | 0x2 | 0x8 | 0x80 | 0x100, ctypes.byref(tok)):
+        print(f"  OpenProcessToken: Fehler {ctypes.get_last_error()}")
+        return None
+    # DISABLE_MAX_PRIVILEGE | LUA_TOKEN
+    if not adv.CreateRestrictedToken(tok, 0x1 | 0x4, 0, None, 0, None, 0, None, ctypes.byref(rtok)):
+        print(f"  CreateRestrictedToken: Fehler {ctypes.get_last_error()}")
+        return None
+    # Integritätsstufe bleibt High: mit Medium scheitert der Prozessstart im Dienst-Desktop
+    # des Runners (STATUS_DLL_INIT_FAILED). Für sbench zählt die Admin-Gruppe (deny only).
+    outp, errp = cwd / "restricted.out", cwd / "restricted.err"
+    with open(outp, "wb") as fo, open(errp, "wb") as fe:
+        import msvcrt
+        ho, he = msvcrt.get_osfhandle(fo.fileno()), msvcrt.get_osfhandle(fe.fileno())
+        os.set_handle_inheritable(ho, True)
+        os.set_handle_inheritable(he, True)
+        si = SI()
+        si.cb = ctypes.sizeof(si)
+        si.dwFlags = 0x100  # STARTF_USESTDHANDLES
+        si.hStdOutput, si.hStdError = H(ho), H(he)
+        pi = PI()
+        cmd = ctypes.create_unicode_buffer(subprocess.list2cmdline([str(exe), *map(str, args)]))
+        print("$ [eingeschränkt] " + cmd.value, flush=True)
+        ok = adv.CreateProcessAsUserW(rtok, None, cmd, None, None, True, 0x08000000, None, str(cwd),
+                                      ctypes.byref(si), ctypes.byref(pi))  # CREATE_NO_WINDOW
+        if not ok:
+            print(f"  CreateProcessAsUserW: Fehler {ctypes.get_last_error()}")
+            return None
+        k32.WaitForSingleObject(pi.hProcess, timeout * 1000)
+        code = wintypes.DWORD()
+        k32.GetExitCodeProcess(pi.hProcess, ctypes.byref(code))
+        k32.CloseHandle(pi.hThread)
+        k32.CloseHandle(pi.hProcess)
+    k32.CloseHandle(rtok)
+    k32.CloseHandle(tok)
+    err = errp.read_bytes()
+    if err:
+        print("  stderr: " + err.decode("utf-8", "replace").strip()[:2000])
+    return code.value, outp.read_bytes(), err
 
 
 def pipe_reader(name: str, out: list, ready: threading.Event, close_after: int = 0):
@@ -348,6 +432,10 @@ def main() -> int:
           "Ticks mit read/write-Aufteilung und proc_cpu_pct")
     check(all(abs(t["read_iops"] + t["write_iops"] - t["iops"]) <= 0.2 for t in ticks), "Tick: read_iops + write_iops = iops")
     check(all("lat_us" in w for t in ticks for w in t["workers"] if w["iops"] > 0), "Tick: workers[].lat_us")
+    sm = json.loads(out.read_text(encoding="utf-8")) if out.exists() else {"tests": [{}]}
+    tg = sm["tests"][0].get("targets", [])
+    check(tg == [{"index": 0, "path": str(testfile), "kind": "file", "created": True, "deleted": True}] and not testfile.exists(),
+          f"#5: angelegte Testdatei nach dem Lauf gelöscht, targets[] = {tg}")
     rj = runs_dir / "smoke-run.jsonl"
     check(rj.exists() and read_jsonl(rj) == events, "runs\\smoke-run.jsonl = Events des --progress-Ziels")
     check(not (runs_dir / "smoke-run.lock.json").exists(), "Lock-Datei nach Laufende gelöscht")
@@ -484,15 +572,42 @@ def main() -> int:
     if sres and sres["tests"]:
         s = sres["tests"][0]["summary"]
         check(s["io_count"] > 0, f"Teilergebnis enthält Messwerte ({s['io_count']} I/Os, {s['iops']:.0f} IOPS)")
+        tg = sres["tests"][0].get("targets", [])
+        check(len(tg) == 1 and tg[0]["created"] and tg[0]["deleted"] and not testfile.exists(),
+              f"#5: Testdatei auch nach stop gelöscht ({tg})")
     p = run(sbench, "stop", "--id", "gibt-es-nicht")
     check(p.returncode == 1, "stop ohne laufenden Lauf: Exit 1")
     p = run(sbench, "list", "--running", "--json")
     check(p.returncode == 0 and json.loads(p.stdout.decode("utf-8"))["runs"] == [], "list --running nach Stop leer")
 
+    print("\n== #5: --keep-files, vorhandene Dateien, Aufräumen nach Fehler ==")
+    kj = storage_job(work / "job-keep.json", "keep", testfile, 1, warmup=0)
+    p = run(sbench, "run", "--job", kj, "--out", work / "result-keep.json", "--keep-files")
+    kt = json.loads((work / "result-keep.json").read_text(encoding="utf-8"))["tests"][0].get("targets", []) if p.returncode == 0 else []
+    check(p.returncode == 0 and len(kt) == 1 and kt[0]["created"] and not kt[0]["deleted"] and testfile.exists(),
+          f"--keep-files: angelegt, nicht gelöscht ({kt})")
+    p = run(sbench, "run", "--job", kj, "--out", work / "result-pre.json")
+    kt = json.loads((work / "result-pre.json").read_text(encoding="utf-8"))["tests"][0].get("targets", []) if p.returncode == 0 else []
+    check(p.returncode == 0 and len(kt) == 1 and not kt[0]["created"] and not kt[0]["deleted"] and testfile.exists(),
+          f"vorhandene Datei bleibt unangetastet ({kt})")
+    huge = work / "sbtest-zu-gross.dat"
+    hj = json.loads(kj.read_text(encoding="utf-8"))
+    hj["tests"][0]["targets"][0].update({"path": str(huge), "file_size": 2**50})
+    hjp = work / "job-huge.json"
+    hjp.write_text(json.dumps(hj), encoding="utf-8")
+    p = run(sbench, "run", "--job", hjp, "--out", work / "result-huge.json", "--id", "cleanup-error")
+    hl = data_dir / "logs" / "cleanup-error.log"
+    check(p.returncode == 1 and not huge.exists() and hl.exists() and "gelöscht (von sbench angelegt)" in hl.read_text(encoding="utf-8"),
+          f"Fehler beim Anlegen (1 PiB): Exit 1 (ist {p.returncode}), angelegte Datei gelöscht")
+
     print("\n== nicht implementierte Testtypen ==")
     ni = storage_job(work / "job-ni.json", "ni", testfile, 1, warmup=0,
                      extra_tests=[{"type": "cpu", "duration_s": 1}, {"type": "memory", "mode": "latency", "buffer_size": "64MiB", "duration_s": 1},
                                   {"type": "net_client", "host": "127.0.0.1", "duration_s": 1}, {"type": "hyperv_info"}])
+    # Storage an Position 1 (cpu davor): echte Ergebnisse haben Lücken in tests[].index
+    nij = json.loads(ni.read_text(encoding="utf-8"))
+    nij["tests"].insert(1, nij["tests"].pop(0))
+    ni.write_text(json.dumps(nij), encoding="utf-8")
     nprog = work / "progress-ni.jsonl"
     nout = work / "result-ni.json"
     p = run(sbench, "run", "--job", ni, "--out", nout, "--progress", f"file:{nprog}")
@@ -500,10 +615,39 @@ def main() -> int:
     nevs = read_jsonl(nprog)
     check_progress(nevs, "Fortschritt (not implemented)", expect_aborted=False)
     nis = [e for e in nevs if e["ev"] == "error" and e["code"] == "E_NOT_IMPLEMENTED"]
-    check(sorted(e["test"] for e in nis) == [1, 2, 3, 4], "E_NOT_IMPLEMENTED für Tests 1-4")
-    nres = check_result(nout, "Ergebnis (not implemented)", expect_aborted=False)
+    check(sorted(e["test"] for e in nis) == [0, 2, 3, 4], "E_NOT_IMPLEMENTED für Tests 0, 2-4")
+    nres = check_result(nout, "Ergebnis (not implemented)", expect_aborted=False, job=ni)
     if nres:
-        check([t["index"] for t in nres["tests"]] == [0], "nur der Storage-Test im Ergebnis")
+        check([t["index"] for t in nres["tests"]] == [1], "nur der Storage-Test im Ergebnis, index = 1 (Lücke)")
+
+    print("\n== #6: ohne Adminrechte (eingeschränkter Token) ==")
+    rdd = work / "dd-restricted"
+    rjob = work / "job-nonadmin.json"
+    rjob.write_text(json.dumps({"schema": "sb-job/1", "name": "nonadmin", "tests": [{"type": "storage",
+                    "targets": [{"path": "\\\\.\\C:", "kind": "volume"}], "duration_s": 1, "warmup_s": 0,
+                    "access_specs": [{"weight": 100, "block_size": "4KiB", "read_pct": 100, "random_pct": 100}]}]}),
+                    encoding="utf-8")
+    rr = run_restricted(sbench, "--data-dir", rdd, "info", "--json", cwd=work)
+    if rr is not None and rr[0] >= 0xC0000000:
+        print(f"  Prozessstart mit eingeschränktem Token fehlgeschlagen (NTSTATUS 0x{rr[0]:08X})")
+        rr = None
+    if rr is None:
+        print("  [SKIP] eingeschränkter Token auf diesem Runner nicht möglich, Exit 4 manuell prüfen (docs/abnahme-m1.md)")
+        SUMMARY.append("#6 Exit 4: übersprungen (kein eingeschränkter Token)")
+    else:
+        el = json.loads(rr[1].decode("utf-8"))["meta"].get("elevated") if rr[0] == 0 else None
+        check(el is False, f"eingeschränkter Token: meta.elevated = false (ist {el})")
+        rr = run_restricted(sbench, "--data-dir", rdd, "validate", "--job", rjob, cwd=work)
+        vd = json.loads(rr[1].decode("utf-8")) if rr and rr[1] else {}
+        check(rr is not None and rr[0] == 0 and any(w["code"] == "W_NEEDS_ADMIN" for w in vd.get("warnings", [])),
+              f"validate ohne Admin: Exit 0 mit W_NEEDS_ADMIN ({vd.get('warnings')})")
+        rr = run_restricted(sbench, "--data-dir", rdd, "run", "--job", rjob, "--out", work / "result-nonadmin.json",
+                            "--progress", f"file:{work / 'progress-nonadmin.jsonl'}", "--id", "nonadmin", cwd=work)
+        pev = read_jsonl(work / "progress-nonadmin.jsonl") if (work / "progress-nonadmin.jsonl").exists() else []
+        check(rr is not None and rr[0] == 4 and not (work / "result-nonadmin.json").exists()
+              and any(e.get("ev") == "error" and e.get("code") == "E_ACCESS_DENIED" for e in pev),
+              f"run ohne Admin: Exit 4 (ist {rr and rr[0]}), E_ACCESS_DENIED, kein Ergebnis")
+        SUMMARY.append(f"#6 Exit 4 ohne Admin: {'ok' if rr and rr[0] == 4 else 'FEHLER'}")
 
     print("\n== export ==")
     for style in ("flat", "iometer"):
@@ -560,10 +704,19 @@ def main() -> int:
             bad_hash = [f["path"] for f in man["files"]
                         if hashlib.sha256(z.read(f["path"])).hexdigest() != f["sha256"] or len(z.read(f["path"])) != f["size_bytes"]]
             check(not bad_hash, f"{what}: sha256/size stimmen für {len(man['files'])} Dateien {bad_hash}")
-            validate(json.loads(z.read("info.json")), "sb-info-1.schema.json", f"{what}: info.json")
+            idoc = json.loads(z.read("info.json"))
+            validate(idoc, "sb-info-1.schema.json", f"{what}: info.json")
+            if semantic_checks:
+                ie = semantic_checks("sb-info-1.schema.json", idoc)
+                check(not ie, f"{what}: info.json NUMA-Knoten disjunkt {ie[:3]}")
             for n in sorted(names):
                 if n.startswith("results/"):
-                    validate(json.loads(z.read(n)), "sb-result-1.schema.json", f"{what}: {n}")
+                    rdoc = json.loads(z.read(n))
+                    validate(rdoc, "sb-result-1.schema.json", f"{what}: {n}")
+                    jn = "jobs/" + n[len("results/"):]
+                    if semantic_checks and jn in names:
+                        extra = semantic_checks("sb-result-1.schema.json", rdoc, json.loads(z.read(jn)))
+                        check(not extra, f"{what}: {n} semantisch gültig gegen {jn} {extra[:3]}")
                 if n.startswith("runs/"):
                     bad = sum(1 for l in z.read(n).decode("utf-8").splitlines()
                               if l.strip() and list(V["sb-progress-1.schema.json"].iter_errors(json.loads(l))))
