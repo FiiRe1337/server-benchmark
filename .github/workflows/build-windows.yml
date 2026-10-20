@@ -1,10 +1,31 @@
 name: Windows-Build (sbench)
 
 on:
+  # push/pull_request nur bei Kern-relevanten Änderungen. GUI-PRs bauen den Kern über
+  # gui-ci.yml per workflow_call; Tags v* baut und veröffentlicht release.yml.
   push:
     branches: [main]
-    # Tags v* baut und veröffentlicht release.yml (ruft diesen Workflow per workflow_call auf)
+    paths:
+      - "core/**"
+      - "cli/**"
+      - "tests/**"
+      - "third_party/**"
+      - "CMakeLists.txt"
+      - "schema/**"
+      - "jobs/**"
+      - "tools/validate_examples.py"
+      - ".github/workflows/build-windows.yml"
   pull_request:
+    paths:
+      - "core/**"
+      - "cli/**"
+      - "tests/**"
+      - "third_party/**"
+      - "CMakeLists.txt"
+      - "schema/**"
+      - "jobs/**"
+      - "tools/validate_examples.py"
+      - ".github/workflows/build-windows.yml"
   workflow_dispatch:
   # Aufruf aus anderen Workflows (z. B. gui-ci.yml, release.yml) per `uses:` + `needs:`.
   # Baut und testet den Kern aus demselben Commit. Stabile Artifact-Namen:

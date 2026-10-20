@@ -109,6 +109,7 @@ jobs:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
+      GUI_VERSION: ${{ needs.gui.outputs.version }}
       PUBLISH: ${{ needs.meta.outputs.publish }}
       VERSION: ${{ needs.core.outputs.version }}
       META_TAG: ${{ needs.meta.outputs.tag }}
@@ -124,9 +125,14 @@ jobs:
         run: |
           set -eu
           tag="${META_TAG:-v$VERSION}"
+          if [ "$GUI_VERSION" != "$VERSION" ]; then
+            echo "::error::GUI-Version '$GUI_VERSION' <> Kern-Version '$VERSION'"; exit 1
+          fi
           echo "TAG=$tag" >> "$GITHUB_ENV"
           ls -R art | head -50
-          test -f art/sbench-gui-x64/sbench-gui.exe || { echo "::error::sbench-gui-x64 enthält keine sbench-gui.exe"; exit 1; }
+          if [ "$(ls -A art/sbench-gui-x64)" != "sbench-gui.exe" ]; then
+            echo "::error::sbench-gui-x64 muss genau sbench-gui.exe enthalten"; exit 1
+          fi
           mkdir assets
           pack() { (cd "art/$1" && zip -q -r -X "$GITHUB_WORKSPACE/assets/$2" .); }
           for a in x64 arm64; do

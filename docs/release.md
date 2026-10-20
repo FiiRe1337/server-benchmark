@@ -10,7 +10,7 @@ Prüfsummen an. `build-windows.yml` veröffentlicht nichts mehr selbst.
 |---|---|
 | `meta` | Modus bestimmen: **veröffentlichen** bei Push eines Tags `v*` oder bei manuellem Start mit `dry_run = false` (nur von einem Tag aus), sonst **Vorschau**. |
 | `core` | `uses: ./.github/workflows/build-windows.yml` (Build x64/ARM64, Unit-Tests, Smoke-Tests auf allen Runnern, Server-Core-Container). Bei einem Tag wird die Version `<tag ohne v>` als Input übergeben. Outputs: `version`, `commit`, `cli_artifact_x64`, `cli_artifact_arm64`. |
-| `gui` | `needs: core`, `uses: ./.github/workflows/build-gui.yml` (von der GUI, Devfornt) mit `version: needs.core.outputs.version` und `core_artifact: needs.core.outputs.cli_artifact_x64` (= `sbench-cli-x64`). Erzeugt das Artifact `sbench-gui-x64` mit `sbench-gui.exe`. |
+| `gui` | `needs: core`, `uses: ./.github/workflows/build-gui.yml` (von der GUI, Devfornt) mit `version: needs.core.outputs.version` und `core_artifact: needs.core.outputs.cli_artifact_x64` (= `sbench-cli-x64`). Erzeugt das Artifact `sbench-gui-x64` mit genau einer Datei `sbench-gui.exe` (PyInstaller onefile, ca. 58 MiB, Kern eingebettet und per SHA-256 geprüft). Output `version` muss der Kern-Version entsprechen. |
 | `verify` | Auf `windows-latest` (x64) und `windows-11-arm` (ARM64): `sbench version --json` ausführen. `version` muss dem Tag ohne `v` und dem Output von `core` entsprechen, `commit` dem gebauten Commit, `arch` der Architektur, `sha256` dem Hash der Datei. |
 | `publish` | `needs: [core, gui, verify]`. Assets umbenennen, `SHA256SUMS.txt` erzeugen, Release-Notes bestimmen. Vorschau: alles als Artifact `release-preview`. Veröffentlichen: `gh release create`. |
 
@@ -22,7 +22,7 @@ Prüfsummen an. `build-windows.yml` veröffentlicht nichts mehr selbst.
 | `sbench-<tag>-windows-arm64.zip` | dasselbe für ARM64 |
 | `sbench-<tag>-cli-x64.zip` | nur `sbench.exe` (x64) |
 | `sbench-<tag>-cli-arm64.zip` | nur `sbench.exe` (ARM64) |
-| `sbench-gui-<tag>-x64.zip` | Inhalt des Artifacts `sbench-gui-x64` (`sbench-gui.exe`) |
+| `sbench-gui-<tag>-x64.zip` | Inhalt des Artifacts `sbench-gui-x64` (`sbench-gui.exe`, portabel, enthält den x64-Kern) |
 | `SHA256SUMS.txt` | SHA-256 aller ZIP-Dateien im Format von `sha256sum` (prüfen mit `sha256sum -c SHA256SUMS.txt` oder `Get-FileHash`) |
 
 Den Hash der entpackten `sbench.exe` liefert zusätzlich `sbench version --json` (`sha256`).
@@ -70,8 +70,20 @@ Den Hash der entpackten `sbench.exe` liefert zusätzlich `sbench version --json`
 | `version … passt nicht zum Tag` | Die eingebaute Version weicht vom Tag ab. Tag prüfen (Format `v<semver>`), ggf. löschen und neu setzen. |
 | `Veröffentlichen nur von einem Tag v* aus` | Manueller Start mit `dry_run = false` auf einem Branch. Nur Vorschau ist dort möglich. |
 | `Release … existiert bereits` | Das Release gibt es schon. Löschen (Release und Tag) oder eine neue Version taggen. |
-| Job `gui` schlägt mit „workflow not found“ fehl | `build-gui.yml` liegt noch nicht in diesem Commit. Er kommt mit dem GUI-Integrations-PR, vorher ist kein Release möglich. |
-| `sbench-gui-x64 enthält keine sbench-gui.exe` | `build-gui.yml` hat ein anderes Artifact geliefert. Vertrag: Artifact `sbench-gui-x64` mit `sbench-gui.exe`. |
+| `GUI-Version … <> Kern-Version` | `build-gui.yml` hat eine andere Version eingebettet als der Kern. Input `version` prüfen. |
+| `sbench-gui-x64 muss genau sbench-gui.exe enthalten` | `build-gui.yml` hat ein anderes Artifact geliefert. Vertrag: Artifact `sbench-gui-x64` mit `sbench-gui.exe`. |
+
+## Rechte und Trigger
+
+- `build-windows.yml` und `build-gui.yml` brauchen nur `contents: read`. GitHub prüft die
+  Rechte verschachtelter Jobs vor dem Start; da kein aufgerufener Job mehr Schreibrechte
+  anfordert, genügt `contents: read` auch in `gui-ci.yml`. Nur der Job `publish` in
+  `release.yml` hat `contents: write`.
+- `build-windows.yml` läuft bei `push` (main) und `pull_request` nur, wenn sich
+  Kern-relevante Pfade ändern (`core/`, `cli/`, `tests/`, `third_party/`,
+  `CMakeLists.txt`, `schema/`, `jobs/`, `tools/validate_examples.py`, der Workflow selbst).
+  GUI-PRs bauen den Kern über `gui-ci.yml` per `workflow_call`. `workflow_call` und
+  `workflow_dispatch` sind unbeschränkt.
 
 ## Versionen
 

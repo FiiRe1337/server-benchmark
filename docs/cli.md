@@ -355,6 +355,7 @@ Versionswechsel ergänzt werden, die GUI muss unbekannte Codes generisch anzeige
   `version` (string). Outputs: `version`, `commit`, `cli_artifact_x64`, `cli_artifact_arm64`.
   Die Artifacts `sbench-cli-x64` und `sbench-cli-arm64` (je genau eine `sbench.exe`) haben
   stabile Namen.
+  Bei `push`/`pull_request` läuft er nur bei Änderungen an Kern-Pfaden (siehe `docs/release.md`).
 - Releases (Tag `v*`) baut und veröffentlicht `.github/workflows/release.yml`
   (Kern + GUI, Versionsprüfung, `SHA256SUMS.txt`), siehe `docs/release.md`.
 - Die CI lädt Smoke-Artifacts mit dem Namen `sbench-smoke-<runner>-<arch>` hoch,
