@@ -36,7 +36,7 @@
     },
     {
       "type": "net_client",
-      "host": "10.0.0.20",
+      "host": "192.0.2.20",
       "port": 5201,
       "proto": "tcp",
       "streams": 4,
@@ -47,7 +47,7 @@
     },
     {
       "type": "net_client",
-      "host": "10.0.0.20",
+      "host": "192.0.2.20",
       "port": 5201,
       "proto": "udp",
       "streams": 1,
@@ -59,7 +59,7 @@
     },
     {
       "type": "net_client",
-      "host": "10.0.0.20",
+      "host": "192.0.2.20",
       "proto": "tcp",
       "duration_s": 15,
       "packet_size": 64,

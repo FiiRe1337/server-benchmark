@@ -4,8 +4,8 @@
   "tests": [
     {
       "type": "net_client",
-      "name": "Netz zu 10.0.0.20",
-      "host": "10.0.0.20",
+      "name": "Netz zu 192.0.2.20",
+      "host": "192.0.2.20",
       "duration_s": 30
     },
     {

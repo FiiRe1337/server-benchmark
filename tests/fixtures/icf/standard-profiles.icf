@@ -79,7 +79,7 @@ Version 1.1.0
 'END access specifications
 'MANAGER LIST ==================================================================
 'Manager ID, manager name
-	1,WIN-SRV01
+	1,DEMO-VM01
 'Manager network address
 	
 'Worker

@@ -3,7 +3,7 @@
   "schema": "sb-bundle/1",
   "kern_version": "0.1.0",
   "erstellt_utc": "2026-10-20T09:30:12.481Z",
-  "host": "SRV-HV01",
+  "host": "DEMO-HV01",
   "data_dir": "C:\\Tools\\sbench\\data",
   "anonymized": false,
   "includes": [

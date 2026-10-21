@@ -21,6 +21,6 @@ Version 1.1.0
 'END access specifications
 'MANAGER LIST ==================================================================
 'Manager ID, manager name
-	1,SRV-HV01
+	1,DEMO-HV01
 'END manager list
 End of configuration file

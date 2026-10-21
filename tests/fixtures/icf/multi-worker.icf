@@ -60,7 +60,7 @@ Version 1.1.0
 'END access specifications
 'MANAGER LIST ==================================================================
 'Manager ID, manager name
-	1,SRV-HV01
+	1,DEMO-HV01
 'Manager network address
 	
 'Worker
@@ -135,7 +135,7 @@ Version 1.1.0
 'End worker
 'End manager
 'Manager ID, manager name
-	2,SRV-HV02
+	2,DEMO-HV02
 'Manager network address
 	
 'Worker

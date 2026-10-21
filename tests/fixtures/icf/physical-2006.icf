@@ -51,7 +51,7 @@ Version 2006.07.27
 'END access specifications
 'MANAGER LIST ==================================================================
 'Manager ID, manager name
-	1,SRV-SQL01
+	1,DEMO-SQL01
 'Manager network address
 	
 'Worker
