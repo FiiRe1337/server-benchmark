@@ -1,10 +1,12 @@
-import json, os
+import json, logging, os, shutil
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QListWidgetItem,
-                               QCheckBox, QLineEdit, QTextBrowser)
+                               QCheckBox, QLineEdit, QTextBrowser, QFileDialog, QMessageBox)
 from ..widgets import Card, label, chip, listw, Responsive
 from ..model import host_label, check_schema
 from ..report import build_html
+
+log = logging.getLogger("sbench-gui")
 
 
 class ExportPage(QWidget):
@@ -35,8 +37,9 @@ class ExportPage(QWidget):
         fmts = (("JSON", "sb-result/1 unverändert", True), ("CSV flat", "sbench export --style flat", True),
                 ("CSV Iometer", "sbench export --style iometer", False), ("HTML-Bericht", "eigenständig, Diagramme als PNG", True),
                 ("PDF-Bericht", "A4 aus demselben HTML", False))
+        self.fmt = {}
         for i, (n, d, on) in enumerate(fmts):
-            cb = QCheckBox(n); cb.setChecked(on); g.addWidget(cb, i, 0); g.addWidget(label(d, "dim"), i, 1)
+            cb = QCheckBox(n); cb.setChecked(on); g.addWidget(cb, i, 0); g.addWidget(label(d, "dim"), i, 1); self.fmt[n] = cb
         g.setColumnStretch(1, 1)
         fc.add(g); mid.addWidget(fc)
         oc = Card("Optionen")
@@ -48,9 +51,9 @@ class ExportPage(QWidget):
                 cb.setToolTip("Hostnamen, Benutzer in Pfaden, IP-/MAC-Adressen, Seriennummern im Bericht durch Pseudonyme ersetzen")
         oc.add(g2)
         row = QHBoxLayout(); row.addWidget(label("Zielordner", "muted")); self.out = QLineEdit(out_dir); row.addWidget(self.out, 1)
-        row.addWidget(QPushButton("…")); oc.add(row)
-        row2 = QHBoxLayout(); row2.addWidget(label("Dateiname", "muted")); n = QLineEdit("{host}_{run_id}_{datum}"); row2.addWidget(n, 1)
-        row2.addStretch(0); b = QPushButton("Exportieren"); b.setObjectName("primary"); b.setMinimumWidth(140); row2.addWidget(b)
+        bdir = QPushButton("…"); bdir.setToolTip("Zielordner wählen"); bdir.clicked.connect(self.choose_dir); row.addWidget(bdir); oc.add(row)
+        row2 = QHBoxLayout(); row2.addWidget(label("Dateiname", "muted")); self.name_tpl = n = QLineEdit("{host}_{run_id}_{datum}"); row2.addWidget(n, 1)
+        row2.addStretch(0); b = QPushButton("Exportieren"); b.setObjectName("primary"); b.setMinimumWidth(140); b.clicked.connect(self.export); row2.addWidget(b)
         oc.add(row2); mid.addWidget(oc)
 
         sc = Card("Support-Paket", "Alles, was der Support zur Analyse braucht, in einer ZIP-Datei")
@@ -72,6 +75,60 @@ class ExportPage(QWidget):
         inner = Responsive([(mid_w, 1, None), (pc, 0, 330)], breakpoint=880)
         v.addWidget(Responsive([(left, 0, 220), (inner, 1, None)], breakpoint=860), 1)
         self._preview()
+
+    def choose_dir(self):
+        d = QFileDialog.getExistingDirectory(self, "Zielordner für den Export", self.out.text().strip() or os.path.expanduser("~"))
+        if d:
+            self.out.setText(os.path.normpath(d))
+        return d
+
+    def _name(self, f, r):
+        import re
+        m = r.get("meta", {})
+        vals = {"host": m.get("host", "host"), "run_id": r.get("run_id") or os.path.splitext(os.path.basename(f))[0],
+                "datum": (r.get("started_utc") or "")[:10] or "datum"}
+        try:
+            n = self.name_tpl.text().strip().format(**vals) or vals["run_id"]
+        except (KeyError, ValueError, IndexError):
+            n = "{host}_{run_id}_{datum}".format(**vals)
+        return re.sub(r'[\\/:*?"<>|]+', "-", n)
+
+    def export(self):
+        """JSON copy, CSV via `sbench export`, HTML/PDF report from report.build_html; result always shown in a message."""
+        sel = [(f, r) for i, (f, r) in enumerate(self.results) if self.list.item(i).checkState() == Qt.Checked]
+        fmts = [n for n, cb in self.fmt.items() if cb.isChecked()]
+        if not sel or not fmts:
+            QMessageBox.information(self, "Export", "Bitte links mindestens ein Ergebnis und oben mindestens ein Format auswählen.")
+            return []
+        out = self.out.text().strip()
+        try:
+            os.makedirs(out, exist_ok=True)
+        except OSError as e:
+            QMessageBox.critical(self, "Export", f"Zielordner {out} nicht verwendbar: {e}"); return []
+        done, failed = [], []
+        from .. import sbench
+        for f, r in sel:
+            base = os.path.join(out, self._name(f, r))
+            for n in fmts:
+                try:
+                    if n == "JSON":
+                        shutil.copyfile(f, base + ".json"); done.append(base + ".json")
+                    elif n.startswith("CSV"):
+                        style = "iometer" if "Iometer" in n else "flat"; dst = f"{base}_{style}.csv"
+                        code, _out = sbench.run_sync(["export", f, "--csv", dst, "--style", style], 30000)
+                        (done.append(dst) if code == 0 and os.path.exists(dst) else failed.append(f"{os.path.basename(dst)}: sbench export Exit {code}"))
+                    elif n == "HTML-Bericht":
+                        with open(base + ".html", "w", encoding="utf-8") as fh:
+                            fh.write(build_html([r])); done.append(base + ".html")
+                    elif n == "PDF-Bericht":
+                        from PySide6.QtGui import QPdfWriter, QTextDocument, QPageSize
+                        doc = QTextDocument(); doc.setHtml(build_html([r]))
+                        w = QPdfWriter(base + ".pdf"); w.setPageSize(QPageSize(QPageSize.A4)); doc.print_(w); del w; done.append(base + ".pdf")
+                except Exception as e:  # noqa: BLE001 -- one failing file must not hide the others
+                    log.error("export %s %s: %s", n, f, e); failed.append(f"{os.path.basename(base)} ({n}): {type(e).__name__}: {e}")
+        msg = f"{len(done)} Datei(en) nach {out} geschrieben." + (("\n\nFehlgeschlagen:\n" + "\n".join(failed)) if failed else "")
+        (QMessageBox.warning if failed else QMessageBox.information)(self, "Export", msg)
+        return done
 
     def selected_files(self):
         return [self.results[i][0] for i in range(self.list.count()) if self.list.item(i).checkState() == Qt.Checked]
