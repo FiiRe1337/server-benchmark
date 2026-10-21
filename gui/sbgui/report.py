@@ -1,7 +1,8 @@
 """HTML/PDF report from sb-result/1 (GUI-side; CSV comes from `sbench export`)."""
 import html
 from .model import (test_label, host_label, human_bytes, storage_tests, compute_tests, fmt_metric, numa_placement, short_size,
-                    RAM_METHOD_TXT, sval, partial_text, fatal_errors, error_text, leftover_targets)
+                    RAM_METHOD_TXT, sval, partial_text, fatal_errors, error_text, leftover_targets, run_outcome,
+                    OUTCOME_TXT)
 
 
 def _n(v, spec=",.0f"):
@@ -14,7 +15,8 @@ def _name(t, res):
     return test_label(t["config"]) + (f" ({p})" if p else "")
 
 
-def build_html(results, compact=False):
+def build_html(results, compact=False, exit_codes=None):
+    """exit_codes: optional {run_id: exit_code}; decides '(abgebrochen)' vs '(Laufzeitfehler)' in the heading."""
     css = """body{font-family:'Inter','Segoe UI',sans-serif;color:#1d2733;font-size:10pt}
 h1{font-size:16pt;margin:0 0 2px 0;color:#0b7285} h2{font-size:11pt;margin:14px 0 4px 0;color:#0b7285}
 .m{color:#6b7785;font-size:8.5pt} table{border-collapse:collapse;width:100%;margin-top:4px}
@@ -25,7 +27,8 @@ td{border-bottom:1px solid #e3e8ee;padding:3px 6px;font-size:8.5pt} td.n{text-al
            f"<div class='m'>{len(results)} Lauf/Läufe · erzeugt von sbench-gui · Formate sb-result/1</div>"]
     for r in results:
         m = r["meta"]
-        out.append(f"<h2>{html.escape(host_label(m))}{' (aborted)' if r['aborted'] else ''}</h2>")
+        oc = run_outcome(r, (exit_codes or {}).get(r.get("run_id")))
+        out.append(f"<h2>{html.escape(host_label(m))}{f' ({OUTCOME_TXT[oc]})' if oc != 'ok' else ''}</h2>")
         out.append(f"<div class='m'>{html.escape(m['os']['name'])} {m['os']['build']} · {html.escape(m['cpu']['model'])} "
                    f"({m['cpu']['cores']}C/{m['cpu']['threads']}T) · {human_bytes(m['ram_bytes'])} RAM · Kern {r['kern_version']} · "
                    f"{r['started_utc'][:16].replace('T', ' ')} UTC</div>")

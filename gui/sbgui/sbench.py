@@ -231,7 +231,12 @@ class TailSession(EventSource):
                     return int(e["exit_code"])
         except (OSError, ValueError, KeyError):
             pass
-        return 3 if self.done.get("aborted") else 0
+        # no index entry yet: derive from the result (1.3 core writes aborted: true on runtime errors too -> errors[] => 1)
+        try:
+            from .model import fallback_exit_code
+            return fallback_exit_code(json.load(open(self.done.get("result") or self.out_path, encoding="utf-8")))
+        except (OSError, ValueError, TypeError):
+            return 3 if self.done.get("aborted") else 0
 
     def stop(self):
         stop_run(self.run_id)

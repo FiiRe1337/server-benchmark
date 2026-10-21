@@ -664,3 +664,84 @@ def test_check_mock_storage_histogram_required():
     assert not _doc_errs(r)
     del r["tests"][0]["histogram"]
     assert any("histogram" in e for e in _doc_errs(r))
+
+
+# ------------------------------------------------------------------ abort vs. failure via exit code (1.3 / 1.3.1)
+ICF_CODES_19 = {"W_ICF_RUN_TIME", "W_ICF_DISK_SIZE", "W_ICF_ALIGN", "W_ICF_REPLY", "W_ICF_CYCLING", "W_ICF_QD_MIXED", "W_ICF_SPEC_MIXED",
+                "W_ICF_WORKER_SPLIT", "W_ICF_TARGET_LAYOUT", "W_ICF_MANAGERS", "W_ICF_NETWORK_WORKER", "W_ICF_DATA_PATTERN", "W_ICF_SECTOR",
+                "W_ICF_ZERO_WEIGHT", "W_ICF_NO_TARGET", "W_ICF_NO_WORKERS", "W_ICF_NO_ASSIGNMENT", "W_ICF_UNSUPPORTED", "W_ICF_VALIDATE"}
+
+
+def test_icf_texts_cover_all_19():
+    """docs/cli.md (#15) and core agree on 19 W_ICF_* codes; every one has a German text."""
+    assert {c for c in model.WARN_TXT if c.startswith("W_ICF_")} == ICF_CODES_19
+    assert all(model.WARN_TXT[c].strip() for c in ICF_CODES_19)
+
+
+def _outcome_run(tmp, env, name):
+    st = [{"type": "storage", "name": "4K", "targets": [{"kind": "file", "path": str(tmp / f"{name}.dat"), "file_size": "64MiB"}],
+           "access_specs": [{"block_size": "4KiB", "read_pct": 70, "random_pct": 100, "weight": 100}], "workers": 2, "warmup_s": 0, "duration_s": 3},
+          {"type": "cpu", "threads": 1, "workload": "int", "warmup_s": 0, "duration_s": 1}]
+    jp = write_job(tmp, st, name=name); out = tmp / f"{name}.json"
+    p = mock("run", "--job", jp, "--out", str(out), "--tick-ms", "250", "--id", name, env=env)
+    res = json.loads(out.read_text(encoding="utf-8"))
+    return p.returncode, res
+
+
+@pytest.mark.parametrize("variant,env,exit_code,aborted,outcome", [
+    ("v131", {"SBENCH_MOCK_FAIL_AT": "0:E_IO:3:2"}, 1, False, "failed"),                                    # 1.3.1 / mock default
+    ("v13", {"SBENCH_MOCK_FAIL_AT": "0:E_IO:3:2", "SBENCH_MOCK_ABORT_ON_ERROR": "1"}, 1, True, "failed"),   # real 1.3 core
+    ("stop", {"SBENCH_MOCK_STOP_AT": "0:measure:3"}, 3, True, "aborted"),
+    ("ok", {}, 0, False, "ok"),
+])
+def test_run_outcome_exit_code_based(qapp, mock_env, variant, env, exit_code, aborted, outcome):
+    from sbgui.pages.results import ResultsPage
+    from sbgui.report import build_html
+    code, res = _outcome_run(mock_env, env, variant)
+    assert code == exit_code and res["aborted"] is aborted and not _doc_errs(res)
+    idx = model.read_run_index(str(mock_env / "data" / "runs" / "index.jsonl"))
+    assert idx[variant] == exit_code
+    assert model.run_outcome(res, idx[variant]) == outcome          # exit code
+    assert model.run_outcome(res) == outcome                         # heuristic fallback (errors[] beat aborted: true)
+    assert model.fallback_exit_code(res) == exit_code
+    f = str(mock_env / f"{variant}.json")
+    for codes in (idx, None):                                        # with run index and without (heuristic)
+        rp = ResultsPage([f], codes); rp.show(); rp.select_file(f)
+        want = {"failed": "Laufzeitfehler · Teilergebnis", "aborted": "abgebrochen · Teilergebnis", "ok": "vollständig"}[outcome]
+        assert rp.state.text() == want and rp.outcome == outcome
+        assert rp.state.toolTip().startswith("Exit-Code") is (codes is not None)
+        if outcome != "ok":
+            assert "Nachfolgende Tests" in rp.partial_note.text()
+        rp.close()
+    h = build_html([res], exit_codes=idx)
+    head = h.split("<h2>")[1].split("</h2>")[0]
+    assert head.endswith({"failed": "(Laufzeitfehler)", "aborted": "(abgebrochen)", "ok": "(Host)"}[outcome]) and "(aborted)" not in h
+
+
+def test_exit_code_beats_result_flags(qapp):
+    """1.3 core on a runtime error: aborted: true -> the index exit code 1 makes it 'Laufzeitfehler'; exit 3 stays 'abgebrochen'
+    even when a test carries errors[]."""
+    from sbgui.pages.results import ResultsPage
+    f = demo("result-m2-partial.json")
+    r = json.load(open(f, encoding="utf-8"))
+    for code, want in ((1, "Laufzeitfehler · Teilergebnis"), (3, "abgebrochen · Teilergebnis"), (None, "abgebrochen · Teilergebnis")):
+        rp = ResultsPage([f], (lambda c=code: {r["run_id"]: c} if c is not None else {})); rp.show(); rp.select_file(f)
+        assert rp.state.text() == want, (code, rp.state.text())
+        rp.close()
+    assert model.run_outcome({"aborted": True, "tests": []}, 2) == "invalid" and model.run_outcome({"tests": []}, 4) == "privileges"
+
+
+def test_tail_session_exit_code_fallback(qapp, tmp_path):
+    """Re-attach without an index.jsonl entry: exit code from the result (1.3: aborted + errors[] -> 1, not 3)."""
+    from sbgui.sbench import TailSession
+    res = {"aborted": True, "tests": [{"index": 0, "type": "storage", "partial": True, "stopped_in": "measure",
+                                       "errors": [{"code": "E_IO", "msg": "x"}], "summary": {}}]}
+    rp = tmp_path / "r.json"; rp.write_text(json.dumps(res), encoding="utf-8")
+    (tmp_path / "runs").mkdir(); prog = tmp_path / "runs" / "x.jsonl"; prog.write_text("", encoding="utf-8")
+    ts = TailSession({"run_id": "x", "progress_file": str(prog), "out": str(rp)})
+    ts.done = {"ev": "done", "result": str(rp), "aborted": True}
+    assert ts._exit_code() == 1
+    res["tests"][0]["errors"] = []; rp.write_text(json.dumps(res), encoding="utf-8")
+    assert ts._exit_code() == 3
+    (tmp_path / "runs" / "index.jsonl").write_text(json.dumps({"run_id": "x", "exit_code": 1}) + "\n", encoding="utf-8")
+    assert ts._exit_code() == 1                                       # index entry wins

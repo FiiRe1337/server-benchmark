@@ -1,5 +1,5 @@
 """Pure helpers on sb-*/1 documents (no Qt). Unknown major versions are rejected (docs/cli.md)."""
-import re
+import json, re
 
 SUPPORTED = {"sb-job/1", "sb-result/1", "sb-info/1", "sb-validate/1", "sb-runs/1", "sb-bundle/1"}
 UNITS = {"KiB": 1024, "MiB": 1024**2, "GiB": 1024**3}
@@ -184,6 +184,57 @@ def sval(d, *path):
             return None
         d = d.get(k)
     return d
+
+
+# Run outcome. The exit code is authoritative (Devend): 0 ok, 1 runtime error, 2 invalid job, 3 stopped (sbench stop /
+# Ctrl+C), 4 missing privileges. `aborted` alone is ambiguous: the 1.3 core writes aborted: true on a runtime error too,
+# 1.3.1 (#17) only on stop. Sources: done.exit_code / <data_dir>/runs/index.jsonl {run_id, exit_code}.
+EXIT_OUTCOME = {0: "ok", 1: "failed", 2: "invalid", 3: "aborted", 4: "privileges"}
+OUTCOME_EXIT = {v: k for k, v in EXIT_OUTCOME.items()}
+OUTCOME_TXT = {"ok": "vollständig", "failed": "Laufzeitfehler", "aborted": "abgebrochen", "invalid": "ungültiger Job",
+               "privileges": "fehlende Rechte"}
+
+
+def _has_run_error(res):
+    """Heuristic without exit code: a test carries a fatal errors[] entry (1.3.1 fatal: true), or a partial test has errors[]
+    (1.3: the test that ended the run). Plain storage I/O errors of a complete test do not make the run 'failed'."""
+    for t in (res or {}).get("tests") or []:
+        errs = [e for e in (t.get("errors") or []) if isinstance(e, dict)]
+        if any(e.get("fatal") for e in errs) or (errs and is_partial(t, res)):
+            return True
+    return False
+
+
+def run_outcome(res, exit_code=None):
+    """'ok' | 'aborted' | 'failed' | 'invalid' | 'privileges'. Prefers the exit code; falls back to the result:
+    errors => failed (even with aborted: true, 1.3 core), aborted => aborted, else ok."""
+    if exit_code is not None and int(exit_code) in EXIT_OUTCOME:
+        return EXIT_OUTCOME[int(exit_code)]
+    if _has_run_error(res):
+        return "failed"
+    return "aborted" if (res or {}).get("aborted") else "ok"
+
+
+def fallback_exit_code(res):
+    """Exit code when index.jsonl has none (e.g. re-attach before the core wrote it): 1 / 3 / 0 from run_outcome."""
+    return OUTCOME_EXIT[run_outcome(res)]
+
+
+def read_run_index(path):
+    """{run_id: exit_code} from <data_dir>/runs/index.jsonl (last entry per run wins); {} if missing/unreadable."""
+    out = {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            for ln in f:
+                try:
+                    e = json.loads(ln)
+                except ValueError:
+                    continue
+                if isinstance(e, dict) and e.get("run_id") and isinstance(e.get("exit_code"), int):
+                    out[e["run_id"]] = e["exit_code"]
+    except OSError:
+        pass
+    return out
 
 
 def is_partial(t, res=None):

@@ -12,7 +12,8 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QFra
 from ..widgets import Card, label, chip, table, add_row, plot, fmt_num, Responsive, WrapLabel
 from ..model import (check_schema, host_label, human_bytes, numa_cpus, storage_tests, test_label, summary_metric, fmt_metric,
                      compute_details, numa_placement, RAM_METHOD_TXT, METRIC_TXT, short_size, sval, is_partial, partial_text,
-                     has_values, TYPE_TXT, fatal_errors, error_text, test_cpus, leftover_targets, worker_score)
+                     has_values, TYPE_TXT, fatal_errors, error_text, test_cpus, leftover_targets, worker_score, run_outcome,
+                     OUTCOME_TXT)
 from .. import theme as T
 
 
@@ -22,8 +23,11 @@ def _local(utc):
 
 
 class ResultsPage(QWidget):
-    def __init__(self, result_files):
+    def __init__(self, result_files, exit_codes=None):
+        """exit_codes: {run_id: exit_code} or a callable returning it (MainWindow: <data_dir>/runs/index.jsonl). The exit
+        code decides 'abgebrochen' (3) vs 'Laufzeitfehler' (1); without one the result is classified heuristically."""
         super().__init__(); self.setObjectName("page")
+        self.exit_codes = exit_codes
         self.results = []
         for f in result_files:
             try:
@@ -104,6 +108,11 @@ class ResultsPage(QWidget):
         self.box.addItem(f"{host_label(r['meta'])} · {_local(r['started_utc'])} · {os.path.basename(path)}", path)
         return True
 
+    def exit_code_for(self, r):
+        """Exit code of this result's run from the run index, None if unknown (demo files, other machines)."""
+        src = self.exit_codes() if callable(self.exit_codes) else (self.exit_codes or {})
+        return src.get(r.get("run_id"))
+
     def select_file(self, path):
         for i in range(self.box.count()):
             if os.path.normcase(os.path.abspath(self.box.itemData(i))) == os.path.normcase(os.path.abspath(path)):
@@ -123,21 +132,24 @@ class ResultsPage(QWidget):
             self.state.setText("kein Ergebnis"); return
         m = r["meta"]
         self.sub.setText(f"{host_label(m)} · Kern {r['kern_version']} · Lauf {r.get('run_id', '–')} · {_local(r['started_utc'])}")
-        aborted = r.get("aborted")
         parts = [t for t in r["tests"] if is_partial(t, r)]
         failed = [t for t in parts if fatal_errors(t)]
-        self.state.setText("Laufzeitfehler · Teilergebnis" if failed else ("abgebrochen · Teilergebnis" if aborted else "vollständig"))
-        self.state.setObjectName("chipWarn" if aborted or parts else "chipOk")
+        code = self.exit_code_for(r)
+        self.outcome = outcome = run_outcome(r, code)
+        ended = outcome in ("aborted", "failed")
+        self.state.setText(OUTCOME_TXT[outcome] + (" · Teilergebnis" if ended else "") if outcome != "ok" or not parts else "Teilergebnis")
+        self.state.setToolTip(f"Exit-Code {code} (runs/index.jsonl)" if code is not None else
+                              "ohne Exit-Code: aus dem Ergebnis abgeleitet (errors[] → Laufzeitfehler, aborted → abgebrochen)")
+        self.state.setObjectName("chipErr" if outcome in ("failed", "invalid", "privileges") else ("chipWarn" if ended or parts else "chipOk"))
         if parts:
             lines = []
             for t in parts:
                 lines.append(f"Test {t['index'] + 1} ({TYPE_TXT.get(t['type'], 'Storage')}) „{test_label(t['config'])}“: {partial_text(t, r)}"
                              + (" · Laufzeitfehler (siehe unten)" if fatal_errors(t) else ""))
-            if aborted or failed:
+            if ended:
                 lines.append("Nachfolgende Tests des Jobs wurden nicht gestartet und fehlen im Ergebnis.")
             self.partial_note.setText("\n".join(lines)); self.partial_note.setVisible(True)
         self._errors(failed)
-        self.state.setObjectName("chipErr" if failed else self.state.objectName())
         self.state.style().unpolish(self.state); self.state.style().polish(self.state)
         cpu = m["cpu"]
         self.sys_line.setText(f"{cpu['model']} · {cpu['sockets']} Sockel · {cpu['cores']}C/{cpu['threads']}T · {human_bytes(m['ram_bytes'])} RAM"

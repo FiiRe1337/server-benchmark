@@ -29,6 +29,7 @@ ack now and then -> 0 in that tick, recounted next), SBENCH_MOCK_STOP_AT=<test>:
 SBENCH_MOCK_FAIL_AT=<test>:<E_CODE>[:<ticks>[:<entries>]] (runtime error after <ticks> measure ticks, 0 = in preparing;
 the test becomes partial, errors[] gets <entries> entries, later tests are absent, exit 1), SBENCH_MOCK_CONTRACT=1.3.1
 (cpus[] per test + errors[].fatal; not schema-valid yet), run --keep-files (storage targets[] deleted=false),
+SBENCH_MOCK_ABORT_ON_ERROR=1 (runtime error like the real 1.3 core: aborted: true, exit 1; default = 1.3.1: aborted: false),
 SBENCH_MOCK_ALL_TYPES=1 (additionally simulate net_*/hyperv_info), SBENCH_DATA_DIR,
 SBENCH_SCHEMA_DIR.
 Stop: real core uses the named event Global\sbench-stop-<id> (fallback Local\); the mock uses a marker file.
@@ -73,6 +74,7 @@ V13 = CONTRACT in ("1.3", "1.3.1")
 # test in the result (same objects as phase.cpus) and errors[].fatal
 V131 = CONTRACT == "1.3.1"
 LAG = os.environ.get("SBENCH_MOCK_LAG") == "1"
+ABORT_ON_ERROR = os.environ.get("SBENCH_MOCK_ABORT_ON_ERROR") == "1"   # emulate the real 1.3 core: aborted: true on runtime error
 IMPLEMENTED = {"storage"} | ({"cpu", "memory"} if M2 else set()) | ({"cpu", "memory", "net_client", "net_server", "hyperv_info"} if ALL_TYPES else set())
 EXIT_OK, EXIT_ERR, EXIT_INVALID, EXIT_ABORTED, EXIT_PRIV = 0, 1, 2, 3, 4
 UNITS = {"KiB": 1024, "MiB": 1024**2, "GiB": 1024**3}
@@ -974,7 +976,9 @@ def run(a):
                 results.append(r)
             if _stop:
                 break
-        user_stop = _stop and not _fail          # runtime error: run ends, but not 'aborted' (that is sbench stop / Ctrl+C)
+        # runtime error: 1.3.1 (#17, default here) aborted: false, exit 1; the real 1.3 core writes aborted: true (exit 1) ->
+        # SBENCH_MOCK_ABORT_ON_ERROR=1. Exit code (index.jsonl) is the unambiguous signal in both versions.
+        user_stop = _stop and (not _fail or ABORT_ON_ERROR)
         res = {"schema": "sb-result/1", "kern_version": VERSION, "run_id": rid, "started_utc": started, "ended_utc": utc_now(),
                "aborted": user_stop, **({"tick_ms": a.tick_ms} if V13 else {}), "meta": meta, "tests": results}
         tmp = a.out + ".tmp"  # write <out>.tmp, then atomic rename

@@ -53,6 +53,7 @@ Mock: `SBENCH_MOCK_ELEVATED=1` simuliert Administratorrechte, `SBENCH_MOCK_SPEED
 
 **Vertrag 1.3 – Antworten von Devend / Vorschau 1.3.1:**
 - SMT in den Ergebnissen aus `cpus[]` je Test (1.3.1, Zuordnung über Worker-`id`); ohne `cpus[]` nur live markiert.
+- Abbruch vs. Fehler über den Exit-Code (`runs/index.jsonl`, `model.run_outcome`): 3 = abgebrochen, 1 = Laufzeitfehler – eindeutig für den 1.3-Kern (`aborted: true` auch bei Fehlern) und 1.3.1 (#17); ohne Exit-Code entscheidet `errors[]` vor `aborted`. Mock: `SBENCH_MOCK_ABORT_ON_ERROR=1` = Verhalten des 1.3-Kerns.
 - Laufzeitfehler: alle `fatal`-Einträge in `errors[]` (ohne `fatal`-Feld alle Einträge), der erste hervorgehoben, weitere aufklappbar; feste Texte nur für `E_ACCESS_DENIED` („Adminrechte nötig“) und `E_OUT_OF_MEMORY` („Nicht genug Arbeitsspeicher“), sonst Code + Meldung.
 - Storage-Worker ohne `lat_us` im Intervall: „–“; fehlt `lat_us` im Tick, bricht die Latenzlinie dort ab (NaN-Lücke, keine Interpolation).
 - Score je Thread = ops/s ÷ Referenz × 1000 mit Referenz aus `meta.cpu_score` (live in der Thread-Tabelle, in den Ergebnissen als Balken).

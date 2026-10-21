@@ -95,7 +95,7 @@ class MainWindow(QMainWindow):
             "profiles": ProfileEditor([os.path.join(ROOT, "profiles"), os.path.join(gd, "profiles")], elevated=self.elevated,
                                       numa_nodes=((info or {}).get("meta") or {}).get("numa_nodes")),
             "live": LiveView(),
-            "results": ResultsPage(result_files),
+            "results": ResultsPage(result_files, self.run_exit_codes),
             "compare": Compare(result_files),
             "export": ExportPage(result_files, os.path.join(gd, "export")),
         }
@@ -114,6 +114,11 @@ class MainWindow(QMainWindow):
         self.pages["live"].elevate_requested.connect(self.offer_elevation)
         self._connect_result_pages()
 
+    def run_exit_codes(self):
+        """{run_id: exit_code} from <data_dir>/runs/index.jsonl (abort vs. failure is decided by the exit code)."""
+        from .model import read_run_index
+        return read_run_index(os.path.join(self.data_dir, "runs", "index.jsonl")) if self.data_dir else {}
+
     def _connect_result_pages(self):
         self.pages["compare"].export_selected.connect(self.support_bundle)
         self.pages["export"].support_requested.connect(self.support_bundle)
@@ -131,7 +136,7 @@ class MainWindow(QMainWindow):
             except (OSError, ValueError):
                 pass
         keys = [k for k, _ in NAV]
-        for key, page in (("results", lambda: ResultsPage(files)), ("compare", lambda: Compare(files)), ("export", lambda: ExportPage(files, os.path.join(sbench.gui_dir(), "export")))):
+        for key, page in (("results", lambda: ResultsPage(files, self.run_exit_codes)), ("compare", lambda: Compare(files)), ("export", lambda: ExportPage(files, os.path.join(sbench.gui_dir(), "export")))):
             i = keys.index(key); old = self.stack.widget(i); cur = self.stack.currentIndex()
             self.pages[key] = page(); self.stack.removeWidget(old); self.stack.insertWidget(i, scroll(self.pages[key])); old.deleteLater()
             self.stack.setCurrentIndex(cur)
@@ -196,7 +201,8 @@ class MainWindow(QMainWindow):
     def _attach(self, session, job, rid, tick_ms=250, reattached=False):
         self.pages["live"].attach(session, job, tick_ms=tick_ms, reattached=reattached)
         session.finished.connect(lambda c, t: self.run_mini.setText(f"letzter Lauf: {t}"))
-        session.finished.connect(lambda c, t: c in (0, 3) and self.reload_results())
+        # exit 1 (runtime error) also writes a (partial) result
+        session.finished.connect(lambda c, t: c in (0, 1, 3) and self.reload_results())
         session.start(); self.run_mini.setText(f"● läuft · {rid}"); self.run_mini.setObjectName("chipAccent")
         self.run_mini.style().polish(self.run_mini)
         self.show_page("live")
