@@ -7,6 +7,7 @@ import pytest
 import sb_contract
 from conftest import GUI, demo, profile
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QLabel
 
 MOCK = os.path.join(GUI, "mock_sbench.py")
 sys.path.insert(0, os.path.join(GUI, "tools"))
@@ -745,3 +746,129 @@ def test_tail_session_exit_code_fallback(qapp, tmp_path):
     assert ts._exit_code() == 3
     (tmp_path / "runs" / "index.jsonl").write_text(json.dumps({"run_id": "x", "exit_code": 1}) + "\n", encoding="utf-8")
     assert ts._exit_code() == 1                                       # index entry wins
+
+
+# ------------------------------------------------------------------ contract 1.3.1 (PR #17, c4b9d69) fixtures
+FIX131 = os.path.join(os.path.dirname(__file__), "fixtures", "contract-1.3.1")
+
+
+@pytest.fixture
+def V131(monkeypatch):
+    """Validators for the #17 schema (only while building them; the mock keeps main's schema/examples)."""
+    import sb_contract
+    with monkeypatch.context() as m:
+        m.setenv("SBENCH_SCHEMA_DIR", os.path.join(FIX131, "schema"))
+        assert sb_contract.base_dir() == os.path.abspath(os.path.join(FIX131, "schema"))
+        return sb_contract.validators()
+
+
+def _errs(v, doc):
+    return [e.message for e in v.iter_errors(doc)]
+
+
+def test_contract_131_fixtures_valid(V131):
+    """The #17 examples are valid against the #17 schema; our 1.3.1 demo result too. The announced done.exit_code is NOT
+    allowed by the #17 schema yet (done: additionalProperties false) -> contract question, see README."""
+    res = json.load(open(os.path.join(FIX131, "result-fatal.json"), encoding="utf-8"))
+    assert not _errs(V131["sb-result/1"], res)
+    evs = [json.loads(l) for l in open(os.path.join(FIX131, "progress-fatal.jsonl"), encoding="utf-8") if l.strip()]
+    assert all(not _errs(V131["sb-progress/1"], e) for e in evs)
+    assert "exit_code" not in evs[-1] and _errs(V131["sb-progress/1"], dict(evs[-1], exit_code=1))
+    assert not _errs(V131["sb-result/1"], json.load(open(os.path.join(GUI, "demo", "contract-1.3.1", "result-m2-smt.json"), encoding="utf-8")))
+
+
+def test_result_fatal_fixture_parsing(qapp):
+    """result-fatal.json: aborted false, one fatal E_INTERNAL in the last (partial) test -> Laufzeitfehler, exit 1."""
+    from sbgui.pages.results import ResultsPage
+    from sbgui.report import build_html
+    f = os.path.join(FIX131, "result-fatal.json")
+    res = json.load(open(f, encoding="utf-8"))
+    assert res["aborted"] is False
+    assert model.run_outcome(res) == "failed" and model.fallback_exit_code(res) == 1
+    assert model.run_outcome(res, 1) == "failed"
+    last = res["tests"][-1]
+    fe = model.fatal_errors(last)
+    assert len(fe) == 1 and fe[0]["code"] == "E_INTERNAL" and model.error_text(fe[0]).startswith("E_INTERNAL: Thread 3")
+    cp = model.test_cpus(last)
+    assert len(cp) == 8 and cp[0]["cpu"] == 64 and all(c["numa_node"] == 1 for c in cp.values())
+    assert len(model.test_cpus(res["tests"][0])) == 1
+    for codes in ({res["run_id"]: 1}, None):
+        rp = ResultsPage([f], codes); rp.show(); rp.select_file(f)
+        assert rp.outcome == "failed" and rp.state.text() == "Laufzeitfehler · Teilergebnis"
+        assert not rp.err_box.isHidden()
+        txt = " ".join(w.text() for w in rp.err_box.findChildren(QLabel))
+        assert "E_INTERNAL" in txt and "Thread 3" in txt
+        rp.close()
+    head = build_html([res]).split("<h2>")[1].split("</h2>")[0]
+    assert head.endswith("(Laufzeitfehler)")
+
+
+def test_progress_fatal_fixture_replay(qapp):
+    """progress-fatal.jsonl through the live view: phase threads/cpus, ticks with score, the fatal error event, done."""
+    from sbgui.pages.live import LiveView
+    from sbgui.sbench import Replay
+    job = {"schema": "sb-job/1", "name": "fatal", "tests": [
+        {"type": "cpu", "threads": 1, "workload": "int", "warmup_s": 1, "duration_s": 5},
+        {"type": "cpu", "threads": 8, "workload": "mixed", "duration_s": 5, "numa_node": 1},
+        {"type": "cpu", "threads": 8, "workload": "int", "duration_s": 5},
+        {"type": "cpu", "threads": 8, "workload": "float", "duration_s": 5}]}
+    live = LiveView(); live.resize(1300, 700); live.show()
+    got = []; live.result_ready.connect(got.append)
+    rep = Replay(os.path.join(FIX131, "progress-fatal.jsonl")); live.attach(rep, job, tick_ms=1000)
+    rep.feed_until(lambda e: e.get("ev") == "tick" and e["t"] >= 5); live.refresh()
+    assert live.mode == "ops_per_s" and live.k_mbps.title_lbl.text().lower() == "score"
+    rep.feed_until(lambda e: e.get("ev") == "error"); live.refresh()
+    assert live.test_threads[1] == 8
+    assert live.run_chip.objectName() == "chipErr" and "E_INTERNAL" in live.run_chip.text() + live.run_chip.toolTip()
+    rep.feed(); live.refresh(); live.timer.stop()
+    assert got and got[0].endswith("20261020-152000-a7b8.json")
+    live.close()
+
+
+def test_mock_131_one_fatal_and_done_exit_code(mock_env, V131):
+    """Mock in 1.3.1 mode: exit 1, aborted false, exactly one fatal: true (first entry of the last, partial test),
+    done.exit_code = 1. Valid against the #17 schema except done.exit_code (not in #17 yet)."""
+    st = [{"type": "cpu", "threads": 1, "workload": "int", "warmup_s": 0, "duration_s": 1},
+          {"type": "cpu", "threads": 2, "workload": "int", "warmup_s": 0, "duration_s": 3},
+          {"type": "cpu", "threads": 1, "workload": "float", "warmup_s": 0, "duration_s": 1}]
+    jp = write_job(mock_env, st, name="f131"); out = mock_env / "f131.json"; prog = mock_env / "f131.jsonl"
+    p = mock("run", "--job", jp, "--out", str(out), "--progress", f"file:{prog}", "--tick-ms", "250",
+             env={"SBENCH_MOCK_CONTRACT": "1.3.1", "SBENCH_MOCK_FAIL_AT": "1:E_INTERNAL:2:3"})
+    res = json.loads(out.read_text(encoding="utf-8"))
+    assert p.returncode == 1 and res["aborted"] is False
+    assert not _errs(V131["sb-result/1"], res)
+    last = res["tests"][-1]
+    assert last["index"] == 1 and last["partial"] is True
+    fat = [(t["index"], e) for t in res["tests"] for e in (t.get("errors") or []) if e.get("fatal")]
+    assert len(fat) == 1 and fat[0][0] == 1 and last["errors"][0]["fatal"] is True
+    assert all("fatal" not in e for e in last["errors"][1:])
+    evs = [json.loads(l) for l in prog.read_text(encoding="utf-8").splitlines() if l.strip()]
+    done = evs[-1]
+    assert done["ev"] == "done" and done["exit_code"] == 1 and done["aborted"] is False
+    assert all(not _errs(V131["sb-progress/1"], e) for e in evs[:-1])
+    assert not _errs(V131["sb-progress/1"], {k: v for k, v in done.items() if k != "exit_code"})
+    assert model.run_outcome(res, done["exit_code"]) == "failed" and model.fallback_exit_code(res) == 1
+
+
+def test_tail_session_exit_code_order(qapp, tmp_path):
+    """index.jsonl exit_code > done.exit_code > fallback from the result (fatal -> 1, 1.3 errors in partial -> 1, aborted -> 3)."""
+    from sbgui.sbench import TailSession
+    res = json.load(open(os.path.join(FIX131, "result-fatal.json"), encoding="utf-8"))
+    rp = tmp_path / "r.json"; rp.write_text(json.dumps(res), encoding="utf-8")
+    (tmp_path / "runs").mkdir(); prog = tmp_path / "runs" / "x.jsonl"; prog.write_text("", encoding="utf-8")
+    ts = TailSession({"run_id": "x", "progress_file": str(prog), "out": str(rp)})
+    ts.done = {"ev": "done", "result": str(rp), "aborted": False}
+    assert ts._exit_code() == 1                                       # fallback: fatal entry
+    ts.done["exit_code"] = 4
+    assert ts._exit_code() == 4                                       # done.exit_code beats the result
+    (tmp_path / "runs" / "index.jsonl").write_text(json.dumps({"run_id": "x", "exit_code": 3}) + "\n", encoding="utf-8")
+    assert ts._exit_code() == 3                                       # index entry beats done.exit_code
+    # fallback variants without index/done.exit_code
+    (tmp_path / "runs" / "index.jsonl").unlink(); del ts.done["exit_code"]
+    for r, want in (({"aborted": True, "tests": [{"partial": True, "errors": [{"code": "E_IO", "msg": "x"}]}]}, 1),   # 1.3 core
+                    ({"aborted": True, "tests": [{"partial": True, "errors": []}]}, 3),
+                    ({"aborted": False, "tests": [{"partial": False, "errors": [{"code": "E_IO", "msg": "x"}]}]}, 0),
+                    ({"aborted": True, "tests": [{"partial": True, "errors": [{"code": "E_IO", "msg": "x"}]},
+                                                 {"partial": True, "errors": [{"code": "E_IO", "msg": "y", "fatal": True}]}]}, 1)):
+        rp.write_text(json.dumps(r), encoding="utf-8")
+        assert ts._exit_code() == want, r

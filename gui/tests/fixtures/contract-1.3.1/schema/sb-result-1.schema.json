@@ -1,0 +1,1713 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/FiiRe1337/server-benchmark/raw/main/schema/sb-result-1.schema.json",
+  "title": "sbench Ergebnis (sb-result/1)",
+  "description": "Ergebnisdatei von 'sbench run --out'. Wird auch bei Abbruch (aborted = true) mit Teilergebnissen geschrieben.",
+  "type": "object",
+  "properties": {
+    "_example": {
+      "type": "boolean",
+      "description": "Nur in Beispieldateien: true = erfundene Beispieldaten."
+    },
+    "schema": {
+      "const": "sb-result/1"
+    },
+    "kern_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+([-+].*)?$",
+      "description": "Version des Messkerns (SemVer)."
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$",
+      "description": "Lauf-ID (wie --id bzw. erzeugt). Identisch mit logs/<run_id>.log, runs/<run_id>.jsonl und dem Eintrag in runs/index.jsonl. Im Schema optional, sbench gibt es immer aus."
+    },
+    "started_utc": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$",
+      "description": "UTC-Zeitstempel (RFC 3339, Endung Z)."
+    },
+    "ended_utc": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$",
+      "description": "UTC-Zeitstempel (RFC 3339, Endung Z)."
+    },
+    "aborted": {
+      "type": "boolean",
+      "description": "true nur, wenn der Lauf gestoppt wurde (sbench stop/Strg+C, Exit 3). Ab Vertrag 1.3.1 bei einem Laufzeitfehler (Exit 1) false; der betroffene Test hat partial: true und einen errors[]-Eintrag mit fatal: true, folgende Tests fehlen."
+    },
+    "tick_ms": {
+      "type": "integer",
+      "minimum": 100,
+      "description": "Vertrag 1.3: Tick-Intervall des Laufs (--tick-ms) in ms; gilt auch für tests[].timeseries."
+    },
+    "meta": {
+      "$ref": "#/$defs/meta"
+    },
+    "tests": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/test_result"
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "kern_version",
+    "started_utc",
+    "ended_utc",
+    "aborted",
+    "meta",
+    "tests"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "lat_us": {
+      "type": "object",
+      "description": "Latenzstatistik in Mikrosekunden (p99_9 = 99,9 %, p99_99 = 99,99 %).",
+      "properties": {
+        "min": {
+          "type": "number",
+          "minimum": 0,
+          "description": "min in Mikrosekunden."
+        },
+        "mean": {
+          "type": "number",
+          "minimum": 0,
+          "description": "mean in Mikrosekunden."
+        },
+        "max": {
+          "type": "number",
+          "minimum": 0,
+          "description": "max in Mikrosekunden."
+        },
+        "stddev": {
+          "type": "number",
+          "minimum": 0,
+          "description": "stddev in Mikrosekunden."
+        },
+        "p50": {
+          "type": "number",
+          "minimum": 0,
+          "description": "p50 in Mikrosekunden."
+        },
+        "p90": {
+          "type": "number",
+          "minimum": 0,
+          "description": "p90 in Mikrosekunden."
+        },
+        "p95": {
+          "type": "number",
+          "minimum": 0,
+          "description": "p95 in Mikrosekunden."
+        },
+        "p99": {
+          "type": "number",
+          "minimum": 0,
+          "description": "p99 in Mikrosekunden."
+        },
+        "p99_9": {
+          "type": "number",
+          "minimum": 0,
+          "description": "p99_9 in Mikrosekunden."
+        },
+        "p99_99": {
+          "type": "number",
+          "minimum": 0,
+          "description": "p99_99 in Mikrosekunden."
+        }
+      },
+      "required": [
+        "min",
+        "mean",
+        "max",
+        "stddev",
+        "p50",
+        "p90",
+        "p95",
+        "p99",
+        "p99_9",
+        "p99_99"
+      ],
+      "additionalProperties": false
+    },
+    "rtt_ms": {
+      "type": "object",
+      "description": "Round-Trip-Time in Millisekunden.",
+      "properties": {
+        "min": {
+          "type": "number",
+          "minimum": 0,
+          "description": "min in Millisekunden."
+        },
+        "mean": {
+          "type": "number",
+          "minimum": 0,
+          "description": "mean in Millisekunden."
+        },
+        "max": {
+          "type": "number",
+          "minimum": 0,
+          "description": "max in Millisekunden."
+        },
+        "p50": {
+          "type": "number",
+          "minimum": 0,
+          "description": "p50 in Millisekunden."
+        },
+        "p90": {
+          "type": "number",
+          "minimum": 0,
+          "description": "p90 in Millisekunden."
+        },
+        "p99": {
+          "type": "number",
+          "minimum": 0,
+          "description": "p99 in Millisekunden."
+        }
+      },
+      "required": [
+        "min",
+        "mean",
+        "max",
+        "p50",
+        "p90",
+        "p99"
+      ],
+      "additionalProperties": false
+    },
+    "physical_disk": {
+      "type": "object",
+      "description": "Physische Disk.",
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^\\\\\\\\\\.\\\\PhysicalDrive[0-9]+$"
+        },
+        "model": {
+          "type": "string"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Größe in Bytes."
+        },
+        "bus": {
+          "type": "string",
+          "description": "Bustyp, z. B. NVMe, SAS, SATA, iSCSI, Virtual."
+        },
+        "sector_logical": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Logische Sektorgröße in Bytes."
+        },
+        "sector_physical": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Physische Sektorgröße in Bytes."
+        }
+      },
+      "required": [
+        "path",
+        "model",
+        "size_bytes"
+      ],
+      "additionalProperties": false
+    },
+    "nic": {
+      "type": "object",
+      "description": "Netzwerkadapter.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "ipv4": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "ipv6": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "link_mbps": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "Linkgeschwindigkeit in Mbit/s; null = unbekannt/getrennt."
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "numa_node": {
+      "type": "object",
+      "description": "NUMA-Knoten.",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "NUMA-Knoten-Nummer."
+        },
+        "cpus": {
+          "type": "array",
+          "description": "Logische Prozessoren des Knotens als globale Indizes: Prozessorgruppe × 64 + Bitnummer in der Gruppenmaske (wie GROUP_AFFINITY). Aufsteigend sortiert.",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "uniqueItems": true
+        },
+        "ram_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Arbeitsspeicher des Knotens in Bytes; Quelle in ram_method."
+        },
+        "ram_free_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Freier Arbeitsspeicher des Knotens in Bytes."
+        },
+        "ram_method": {
+          "enum": [
+            "total",
+            "srat",
+            "estimate"
+          ],
+          "description": "Herkunft von ram_bytes: total = nur ein Knoten, gesamter physischer RAM; srat = Speicherbereiche des Knotens aus der ACPI-SRAT-Tabelle (aktiv, ohne Hotplug/nichtflüchtig); estimate = SRAT nicht lesbar, Aufteilung des Gesamt-RAM im Verhältnis des freien Speichers (ungenau). Seit Vertrag 1.2 (Issue #8)."
+        }
+      },
+      "required": [
+        "id",
+        "cpus",
+        "ram_bytes",
+        "ram_free_bytes"
+      ],
+      "additionalProperties": false
+    },
+    "meta": {
+      "type": "object",
+      "description": "Systeminformationen. ram_free_bytes, numa_nodes, elevated und data_dir sind seit Vertrag 1.1 vorhanden (optional im Schema, sbench gibt sie immer aus).",
+      "properties": {
+        "host": {
+          "type": "string",
+          "description": "Rechnername."
+        },
+        "os": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            },
+            "build": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "version",
+            "build"
+          ],
+          "additionalProperties": false
+        },
+        "cpu": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "type": "string"
+            },
+            "sockets": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "cores": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Physische Kerne gesamt."
+            },
+            "threads": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Logische Prozessoren gesamt."
+            },
+            "base_mhz": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Basistakt in MHz."
+            }
+          },
+          "required": [
+            "model",
+            "sockets",
+            "cores",
+            "threads",
+            "base_mhz"
+          ],
+          "additionalProperties": false
+        },
+        "ram_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Installierter Arbeitsspeicher in Bytes."
+        },
+        "hypervisor": {
+          "type": "object",
+          "properties": {
+            "present": {
+              "type": "boolean"
+            },
+            "vendor": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "CPUID-Hypervisor-Vendor, z. B. \"Microsoft Hv\"."
+            },
+            "role": {
+              "enum": [
+                "none",
+                "host",
+                "guest"
+              ],
+              "description": "host = Hyper-V-Root-Partition, guest = VM."
+            },
+            "partition_info": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "description": "Zusätzliche Partitionsinfos (frei erweiterbar).",
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "present",
+            "vendor",
+            "role"
+          ],
+          "additionalProperties": false
+        },
+        "drives": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/physical_disk"
+          }
+        },
+        "nics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nic"
+          }
+        },
+        "ram_free_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Freier Arbeitsspeicher in Bytes zum Erfassungszeitpunkt."
+        },
+        "numa_nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/numa_node"
+          }
+        },
+        "elevated": {
+          "type": "boolean",
+          "description": "sbench lief mit Administratorrechten (erhöhtes Token). Im Ergebnis: zum Zeitpunkt des Laufs."
+        },
+        "data_dir": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Datenverzeichnis von sbench (runs/, logs/). Im Ergebnis: zum Zeitpunkt des Laufs."
+        },
+        "cpu_score": {
+          "type": "object",
+          "description": "Vertrag 1.3 (sbench gibt es immer aus, auch in sb-info): Score-Formel und Referenzwerte der cpu-Tests (docs/core.md).",
+          "properties": {
+            "formula": {
+              "type": "string",
+              "description": "Lesbare Formel, z. B. score = ops_per_s / ref_ops_per_s[workload] * 1000."
+            },
+            "points": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Punkte für einen Thread der Referenzmaschine (1000)."
+            },
+            "reference_threads": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Threads, auf die sich ref_ops_per_s bezieht (1)."
+            },
+            "reference_system": {
+              "type": "string"
+            },
+            "ref_ops_per_s": {
+              "type": "object",
+              "properties": {
+                "int": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "float": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "crypto": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "mixed": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              },
+              "required": [
+                "int",
+                "float",
+                "crypto",
+                "mixed"
+              ],
+              "additionalProperties": false,
+              "description": "Referenz-Rate eines Threads je workload (ops/s)."
+            }
+          },
+          "required": [
+            "formula",
+            "points",
+            "ref_ops_per_s"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "host",
+        "os",
+        "cpu",
+        "ram_bytes",
+        "hypervisor",
+        "drives",
+        "nics"
+      ],
+      "additionalProperties": false
+    },
+    "summary_storage": {
+      "type": "object",
+      "properties": {
+        "iops": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "I/Os pro Sekunde gesamt. Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
+        },
+        "mbps": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "Durchsatz in MB/s (10^6 Bytes/s, wie Iometer 'MBps (Decimal)'). Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
+        },
+        "read_iops": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
+        },
+        "write_iops": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
+        },
+        "read_mbps": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "MB/s Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
+        },
+        "write_mbps": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "MB/s Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
+        },
+        "lat_us": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/lat_us"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Latenz der Messphase. Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
+        },
+        "errors": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "Anzahl fehlgeschlagener I/Os. Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
+        },
+        "io_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "Anzahl abgeschlossener I/Os in der Messphase. Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
+        },
+        "cpu_pct": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Vertrag 1.3: mittlere Systemlast in der Messphase. Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
+        },
+        "proc_cpu_pct": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Vertrag 1.3: mittlere CPU-Last des sbench-Prozesses in der Messphase (Skala wie cpu_pct: 100 = alle logischen Prozessoren). Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
+        }
+      },
+      "required": [
+        "iops",
+        "mbps",
+        "read_iops",
+        "write_iops",
+        "read_mbps",
+        "write_mbps",
+        "lat_us",
+        "errors",
+        "io_count"
+      ],
+      "additionalProperties": false
+    },
+    "summary_cpu": {
+      "type": "object",
+      "properties": {
+        "workload": {
+          "enum": [
+            "int",
+            "float",
+            "crypto",
+            "mixed"
+          ]
+        },
+        "threads": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Tatsächlich genutzte Threads."
+        },
+        "ops_per_s": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "Operationen pro Sekunde, Summe aller Threads (Definition je workload in docs/core.md). Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
+        },
+        "score": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "ops_per_s geteilt durch die Referenz-Rate eines Threads (docs/core.md) mal 1000: 1000 ≈ ein Thread der Referenzmaschine. Höher = besser. Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
+        },
+        "ops": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "Operationen in der Messphase gesamt. Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
+        },
+        "numa_node": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Genutzter NUMA-Knoten, falls im Job gesetzt."
+        },
+        "cpus": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "description": "Logische Prozessoren der Threads in Thread-Reihenfolge (globale Indizes wie meta.numa_nodes[].cpus)."
+        },
+        "cpu_pct": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Mittlere Systemlast in der Messphase. Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
+        },
+        "proc_cpu_pct": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Vertrag 1.3: mittlere CPU-Last des sbench-Prozesses in der Messphase (Skala wie cpu_pct: 100 = alle logischen Prozessoren). Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
+        },
+        "score_reference": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Vertrag 1.3: Referenz-Rate eines Threads für diesen workload (ops/s, = meta.cpu_score.ref_ops_per_s[workload]); score = ops_per_s / score_reference × 1000."
+        }
+      },
+      "required": [
+        "workload",
+        "threads",
+        "ops_per_s",
+        "score"
+      ],
+      "additionalProperties": false
+    },
+    "summary_memory": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "enum": [
+            "bandwidth",
+            "latency"
+          ]
+        },
+        "op": {
+          "enum": [
+            "read",
+            "write",
+            "copy"
+          ]
+        },
+        "threads": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "buffer_size_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Tatsächliche Puffergröße pro Thread (auf 8 KiB bzw. bei latency auf 64 Byte abgerundet)."
+        },
+        "gbps": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "Bandbreite in GB/s (10^9 Bytes/s), Summe aller Threads, bei mode = bandwidth. copy zählt gelesene plus geschriebene Bytes (wie STREAM). Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
+        },
+        "latency_ns": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "Mittlere Latenz eines abhängigen Ladezugriffs (Pointer Chasing über zufällig verkettete 64-Byte-Zeilen) in Nanosekunden, bei mode = latency. Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
+        },
+        "simd": {
+          "enum": [
+            "scalar",
+            "sse2",
+            "avx2",
+            "avx512",
+            "neon"
+          ],
+          "description": "Tatsächlich genutzter Befehlssatz (bandwidth)."
+        },
+        "nontemporal": {
+          "type": "boolean",
+          "description": "Ob Non-temporal Stores tatsächlich genutzt wurden (bandwidth)."
+        },
+        "bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "Übertragene Bytes in der Messphase (bandwidth). Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
+        },
+        "loads": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "Abhängige Ladezugriffe in der Messphase (latency). Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
+        },
+        "numa_node": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "NUMA-Knoten der Threads, falls im Job gesetzt."
+        },
+        "mem_node": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "NUMA-Knoten der Puffer, falls im Job gesetzt."
+        },
+        "cpus": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "description": "Logische Prozessoren der Threads in Thread-Reihenfolge (globale Indizes wie meta.numa_nodes[].cpus)."
+        },
+        "cpu_pct": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Mittlere Systemlast in der Messphase. Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
+        },
+        "proc_cpu_pct": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Vertrag 1.3: mittlere CPU-Last des sbench-Prozesses in der Messphase (Skala wie cpu_pct: 100 = alle logischen Prozessoren). Vertrag 1.3: null, wenn der Test vor der Messphase endete (partial: true, stopped_in preparing/warmup)."
+        }
+      },
+      "required": [
+        "mode",
+        "threads",
+        "buffer_size_bytes"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "bandwidth"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "op",
+              "gbps"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "latency"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "latency_ns"
+            ]
+          }
+        }
+      ]
+    },
+    "summary_net_client": {
+      "type": "object",
+      "properties": {
+        "proto": {
+          "enum": [
+            "tcp",
+            "udp"
+          ]
+        },
+        "mode": {
+          "enum": [
+            "throughput",
+            "latency"
+          ]
+        },
+        "streams": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "reverse": {
+          "type": "boolean"
+        },
+        "mbps": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Durchsatz in Mbit/s (10^6 Bit/s)."
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Übertragene Nutzdaten in Bytes."
+        },
+        "retransmits": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "TCP-Retransmits (falls ermittelbar)."
+        },
+        "jitter_ms": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Jitter in Millisekunden (UDP)."
+        },
+        "loss_pct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Paketverlust in Prozent (UDP)."
+        },
+        "packets_sent": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "packets_lost": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rtt_ms": {
+          "$ref": "#/$defs/rtt_ms"
+        }
+      },
+      "required": [
+        "proto",
+        "mode",
+        "streams",
+        "reverse"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "throughput"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "mbps",
+              "bytes"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "latency"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "rtt_ms"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "proto": {
+                "const": "udp"
+              },
+              "mode": {
+                "const": "throughput"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "jitter_ms",
+              "loss_pct"
+            ]
+          }
+        }
+      ]
+    },
+    "summary_net_server": {
+      "type": "object",
+      "properties": {
+        "proto": {
+          "enum": [
+            "tcp",
+            "udp"
+          ]
+        },
+        "clients": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Anzahl bedienter Client-Läufe."
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Empfangene/gesendete Nutzdaten in Bytes."
+        },
+        "mbps": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Mittlerer Durchsatz in Mbit/s."
+        }
+      },
+      "required": [
+        "proto",
+        "clients",
+        "bytes"
+      ],
+      "additionalProperties": false
+    },
+    "summary_hyperv_info": {
+      "type": "object",
+      "properties": {
+        "hypervisor": {
+          "$ref": "#/$defs/meta/properties/hypervisor"
+        },
+        "vm_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "Anzahl VMs (nur role = host, sonst null)."
+        },
+        "perfcounters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "PDH-Zählerpfad, z. B. \\Hyper-V Hypervisor Logical Processor(_Total)\\% Total Run Time."
+              },
+              "min": {
+                "type": "number"
+              },
+              "mean": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              },
+              "samples": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "path",
+              "mean",
+              "samples"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "hypervisor"
+      ],
+      "additionalProperties": false
+    },
+    "worker": {
+      "type": "object",
+      "description": "Kennzahlen eines Workers/Threads/Streams.",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Worker-/Thread-Index (0-basiert)."
+        },
+        "target": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Index in config.targets (nur storage)."
+        },
+        "iops": {
+          "type": "number",
+          "minimum": 0
+        },
+        "mbps": {
+          "type": "number",
+          "minimum": 0
+        },
+        "read_iops": {
+          "type": "number",
+          "minimum": 0
+        },
+        "write_iops": {
+          "type": "number",
+          "minimum": 0
+        },
+        "lat_us": {
+          "$ref": "#/$defs/lat_us"
+        },
+        "io_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "errors": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ops_per_s": {
+          "type": "number",
+          "minimum": 0,
+          "description": "CPU: Operationen pro Sekunde."
+        },
+        "gbps": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Memory: GB/s."
+        },
+        "cpu": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "cpu/memory: logischer Prozessor, auf den der Thread gepinnt ist (globaler Index)."
+        },
+        "node": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "cpu/memory: NUMA-Knoten dieses Prozessors."
+        },
+        "mem_node": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "memory: NUMA-Knoten, auf dem der Puffer dieses Threads angelegt wurde."
+        },
+        "latency_ns": {
+          "type": "number",
+          "minimum": 0,
+          "description": "memory latency: ns pro Zugriff."
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "cpu_binding": {
+      "description": "Vertrag 1.3.1: gebundener logischer Prozessor eines Threads, gleiches Format wie phase.cpus[] in sb-progress/1.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Thread-Index."
+        },
+        "cpu": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Globaler Index (Prozessorgruppe × 64 + number) wie meta.numa_nodes[].cpus."
+        },
+        "group": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Prozessorgruppe."
+        },
+        "number": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 63,
+          "description": "Nummer innerhalb der Prozessorgruppe."
+        },
+        "numa_node": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "NUMA-Knoten des Prozessors."
+        },
+        "core": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Laufende Nummer des physischen Kerns (gleicher Wert = SMT-Geschwister), gültig innerhalb des Laufs."
+        },
+        "smt_sibling_of": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "Globaler Index des ersten logischen Prozessors desselben Kerns, null für diesen selbst (bzw. ohne SMT)."
+        }
+      },
+      "required": [
+        "id",
+        "cpu",
+        "group",
+        "number",
+        "numa_node",
+        "core",
+        "smt_sibling_of"
+      ],
+      "additionalProperties": false
+    },
+    "spec_result": {
+      "type": "object",
+      "description": "Kennzahlen pro Access-Spec (storage).",
+      "properties": {
+        "spec": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Index in config.access_specs."
+        },
+        "weight": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "block_size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "read_pct": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "random_pct": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "iops": {
+          "type": "number",
+          "minimum": 0
+        },
+        "mbps": {
+          "type": "number",
+          "minimum": 0
+        },
+        "lat_us": {
+          "$ref": "#/$defs/lat_us"
+        },
+        "io_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "spec",
+        "iops",
+        "mbps",
+        "lat_us",
+        "io_count"
+      ],
+      "additionalProperties": false
+    },
+    "histogram": {
+      "type": "array",
+      "description": "Logarithmisches Latenzhistogramm (nicht kumulativ). Bucket enthält Werte <= le_us und > le_us des vorherigen Buckets; le_us = null ist der Überlauf-Bucket.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "le_us": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "exclusiveMinimum": 0
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "le_us",
+          "count"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "timeseries": {
+      "type": "array",
+      "description": "Zeitreihe der Messphase; t = Sekunden seit Beginn der Messphase (Ende des Intervalls). Ein Punkt je tick-Event, also im Takt --tick-ms (Vertrag 1.3: tick_ms im Ergebnis), nicht fest 1 s.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "t": {
+            "type": "number",
+            "minimum": 0
+          },
+          "iops": {
+            "type": "number",
+            "minimum": 0
+          },
+          "mbps": {
+            "type": "number",
+            "minimum": 0
+          },
+          "lat_us": {
+            "type": "object",
+            "properties": {
+              "mean": {
+                "type": "number",
+                "minimum": 0
+              },
+              "p99": {
+                "type": "number",
+                "minimum": 0
+              },
+              "max": {
+                "type": "number",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "mean",
+              "p99",
+              "max"
+            ],
+            "additionalProperties": false
+          },
+          "cpu_pct": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Gesamt-CPU-Last des Systems in Prozent."
+          },
+          "ops_per_s": {
+            "type": "number",
+            "minimum": 0,
+            "description": "cpu"
+          },
+          "gbps": {
+            "type": "number",
+            "minimum": 0,
+            "description": "memory bandwidth"
+          },
+          "latency_ns": {
+            "type": "number",
+            "minimum": 0,
+            "description": "memory latency"
+          },
+          "proc_cpu_pct": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Vertrag 1.3: CPU-Last des sbench-Prozesses (Skala wie cpu_pct)."
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Vertrag 1.3, nur cpu: Score des Intervalls."
+          }
+        },
+        "required": [
+          "t"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "run_error": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^E_[A-Z0-9_]+$"
+        },
+        "msg": {
+          "type": "string"
+        },
+        "t": {
+          "type": "number",
+          "description": "Zeitpunkt (s seit Beginn der Messphase)."
+        },
+        "worker": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "target": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Anzahl gleichartiger Fehler (zusammengefasst)."
+        },
+        "fatal": {
+          "type": "boolean",
+          "const": true,
+          "description": "Vertrag 1.3.1, optional: true an genau dem Eintrag, der den Test (und damit den Lauf) beendet hat (Laufzeitfehler, Exit 1). Fehlt = false; nicht abbrechende Fehler (z. B. einzelne I/O-Fehler) haben kein fatal."
+        }
+      },
+      "required": [
+        "code",
+        "msg"
+      ],
+      "additionalProperties": false
+    },
+    "test_result": {
+      "type": "object",
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Index des Tests im Job (Position in job.tests). Streng steigend, aber nicht lückenlos: Tests, die nicht ausgeführt wurden (z. B. E_NOT_IMPLEMENTED), fehlen in tests[]."
+        },
+        "type": {
+          "enum": [
+            "storage",
+            "cpu",
+            "memory",
+            "net_client",
+            "net_server",
+            "hyperv_info"
+          ]
+        },
+        "partial": {
+          "type": "boolean",
+          "description": "Vertrag 1.3 (sbench gibt es immer aus): true = der Test endete vorzeitig (sbench stop/Strg+C oder Laufzeitfehler, Ursache in errors[]). Phase in stopped_in; bei preparing/warmup sind alle Messwerte der summary null und per_worker/per_spec/histogram/timeseries leer, bei measure enthalten sie die bis dahin gemessenen Werte."
+        },
+        "stopped_in": {
+          "enum": [
+            "preparing",
+            "warmup",
+            "measure"
+          ],
+          "description": "Vertrag 1.3, nur bei partial: true: Phase, in der der Test endete (Namen wie im phase-Event)."
+        },
+        "config": {
+          "$ref": "sb-job-1.schema.json#/$defs/test",
+          "description": "Kopie des Testobjekts aus dem Job (mit unveränderten Werten)."
+        },
+        "summary": {
+          "type": "object"
+        },
+        "cpus": {
+          "type": "array",
+          "description": "Vertrag 1.3.1, optional, nur cpu/memory: gebundener logischer Prozessor je Thread mit SMT-Zuordnung, Reihenfolge = Thread-id (= per_worker[].id, tick.workers[].id). Gleicher Inhalt wie phase.cpus im ersten phase-Event des Tests; damit lässt sich SMT auch nachträglich aus dem Ergebnis zuordnen. Auch bei partial: true vorhanden, sobald die Threads verteilt sind. Fehlt bei storage, net_client, net_server und hyperv_info.",
+          "items": {
+            "$ref": "#/$defs/cpu_binding"
+          }
+        },
+        "targets": {
+          "type": "array",
+          "description": "Nur storage, optional (seit Issue #5): Ziele mit created/deleted.",
+          "items": {
+            "$ref": "#/$defs/target_state"
+          }
+        },
+        "per_worker": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/worker"
+          }
+        },
+        "per_spec": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/spec_result"
+          }
+        },
+        "histogram": {
+          "$ref": "#/$defs/histogram"
+        },
+        "timeseries": {
+          "$ref": "#/$defs/timeseries"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/run_error"
+          }
+        }
+      },
+      "required": [
+        "index",
+        "type",
+        "config",
+        "summary",
+        "errors"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "storage"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "properties": {
+                  "type": {
+                    "const": "storage"
+                  }
+                }
+              },
+              "summary": {
+                "$ref": "#/$defs/summary_storage"
+              }
+            },
+            "required": [
+              "per_worker",
+              "per_spec",
+              "histogram",
+              "timeseries"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "cpu"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "properties": {
+                  "type": {
+                    "const": "cpu"
+                  }
+                }
+              },
+              "summary": {
+                "$ref": "#/$defs/summary_cpu"
+              }
+            },
+            "not": {
+              "required": [
+                "per_spec"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "memory"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "properties": {
+                  "type": {
+                    "const": "memory"
+                  }
+                }
+              },
+              "summary": {
+                "$ref": "#/$defs/summary_memory"
+              }
+            },
+            "not": {
+              "required": [
+                "per_spec"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "net_client"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "properties": {
+                  "type": {
+                    "const": "net_client"
+                  }
+                }
+              },
+              "summary": {
+                "$ref": "#/$defs/summary_net_client"
+              }
+            },
+            "not": {
+              "required": [
+                "per_spec"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "net_server"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "properties": {
+                  "type": {
+                    "const": "net_server"
+                  }
+                }
+              },
+              "summary": {
+                "$ref": "#/$defs/summary_net_server"
+              }
+            },
+            "not": {
+              "required": [
+                "per_spec"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "hyperv_info"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "properties": {
+                  "type": {
+                    "const": "hyperv_info"
+                  }
+                }
+              },
+              "summary": {
+                "$ref": "#/$defs/summary_hyperv_info"
+              }
+            },
+            "not": {
+              "required": [
+                "per_spec"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "partial": {
+                "const": true
+              }
+            },
+            "required": [
+              "partial"
+            ]
+          },
+          "then": {
+            "required": [
+              "stopped_in"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "stopped_in"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "enum": [
+                  "storage",
+                  "net_client",
+                  "net_server",
+                  "hyperv_info"
+                ]
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "cpus"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "target_state": {
+      "type": "object",
+      "description": "Ziel eines Storage-Tests mit Aufräum-Status.",
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Index in config.targets."
+        },
+        "path": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "file",
+            "volume",
+            "physical"
+          ]
+        },
+        "created": {
+          "type": "boolean",
+          "description": "true = sbench hat die Testdatei für diesen Test angelegt (sie existierte vorher nicht). Bei volume/physical immer false."
+        },
+        "deleted": {
+          "type": "boolean",
+          "description": "true = sbench hat die selbst angelegte Testdatei nach dem Test gelöscht (nach Ende, Stop oder Fehler). false bei --keep-files, bei vorher vorhandenen Dateien und wenn das Löschen fehlschlug (Warnung im Log)."
+        }
+      },
+      "required": [
+        "index",
+        "path",
+        "kind",
+        "created",
+        "deleted"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

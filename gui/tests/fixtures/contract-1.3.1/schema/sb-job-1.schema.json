@@ -1,0 +1,633 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/FiiRe1337/server-benchmark/raw/main/schema/sb-job-1.schema.json",
+  "title": "sbench Job (sb-job/1)",
+  "description": "Job-Datei für 'sbench run --job'. Tests werden in der angegebenen Reihenfolge nacheinander ausgeführt.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "sb-job/1"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Anzeigename des Jobs."
+    },
+    "tests": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/test"
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "name",
+    "tests"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "size": {
+      "description": "Größenangabe: Integer in Bytes oder String mit binärer Einheit (KiB = 1024, MiB = 1024², GiB = 1024³), z. B. \"4KiB\", \"64 KiB\", \"16GiB\".",
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 1
+        },
+        {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*\\s?(KiB|MiB|GiB)$"
+        }
+      ]
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535,
+      "description": "TCP/UDP-Port."
+    },
+    "proto": {
+      "enum": [
+        "tcp",
+        "udp"
+      ],
+      "default": "tcp",
+      "description": "Transportprotokoll."
+    },
+    "target": {
+      "type": "object",
+      "description": "Ein Storage-Ziel. Worker werden reihum auf die Targets verteilt (Worker i -> Target i mod Anzahl Targets).",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Datei (z. B. D:\\sbench\\test.dat), Volume (\\\\.\\D:) oder physische Disk (\\\\.\\PhysicalDrive1)."
+        },
+        "kind": {
+          "enum": [
+            "file",
+            "volume",
+            "physical"
+          ],
+          "description": "Art des Ziels. volume/physical benötigen Administratorrechte; Schreibtests darauf zerstören Daten."
+        },
+        "file_size": {
+          "$ref": "#/$defs/size",
+          "description": "Größe der Testdatei (nur und verpflichtend bei kind = file). Die Datei wird bei Bedarf angelegt bzw. vergrößert."
+        },
+        "allow_destructive": {
+          "type": "boolean",
+          "default": false,
+          "description": "Erlaubt Schreibzugriffe (read_pct < 100) auf kind = volume/physical. Zusätzlich muss 'sbench run --allow-destructive' gesetzt sein, sonst E_DESTRUCTIVE_NOT_ALLOWED (Exit 2). Bei kind = file ohne Wirkung."
+        }
+      },
+      "required": [
+        "path",
+        "kind"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "file"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "file_size"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "file_size"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "volume"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "path": {
+                "pattern": "^\\\\\\\\\\.\\\\[A-Za-z]:$"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "physical"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "path": {
+                "pattern": "^\\\\\\\\\\.\\\\PhysicalDrive[0-9]+$"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "access_spec": {
+      "type": "object",
+      "description": "Zugriffsmuster (wie Iometer Access Specification). Die Gewichte aller Specs eines Tests müssen in Summe 100 ergeben (semantische Regel, geprüft von 'sbench validate', Fehlercode E_WEIGHT_SUM).",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optionaler Anzeigename der Access-Spec."
+        },
+        "weight": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Anteil an allen I/Os in Prozent."
+        },
+        "block_size": {
+          "$ref": "#/$defs/size",
+          "description": "Transfergröße pro I/O. Bei cache = unbuffered Vielfaches der logischen Sektorgröße."
+        },
+        "read_pct": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Anteil Lesezugriffe in Prozent (Rest: Schreiben)."
+        },
+        "random_pct": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Anteil zufälliger Zugriffe in Prozent (Rest: sequenziell)."
+        },
+        "align": {
+          "$ref": "#/$defs/size",
+          "description": "Ausrichtung zufälliger Offsets. Standard: block_size."
+        },
+        "burst_len": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1,
+          "description": "Anzahl I/Os pro Burst."
+        },
+        "delay_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Pause zwischen Bursts in Millisekunden."
+        }
+      },
+      "required": [
+        "weight",
+        "block_size",
+        "read_pct",
+        "random_pct"
+      ],
+      "additionalProperties": false
+    },
+    "test_storage": {
+      "type": "object",
+      "description": "Storage-I/O-Test (Iometer-artig).",
+      "properties": {
+        "type": {
+          "const": "storage"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optionaler Anzeigename des Tests."
+        },
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "workers": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1,
+          "description": "Anzahl Worker-Threads."
+        },
+        "queue_depth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024,
+          "default": 1,
+          "description": "Ausstehende I/Os pro Worker."
+        },
+        "warmup_s": {
+          "type": "number",
+          "minimum": 0,
+          "default": 0,
+          "description": "Aufwärmzeit in Sekunden; wird nicht gemessen."
+        },
+        "duration_s": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Messdauer in Sekunden (ohne Warmup)."
+        },
+        "cache": {
+          "enum": [
+            "unbuffered",
+            "buffered",
+            "writethrough"
+          ],
+          "default": "unbuffered",
+          "description": "unbuffered = FILE_FLAG_NO_BUFFERING, buffered = Windows-Cache, writethrough = FILE_FLAG_WRITE_THROUGH."
+        },
+        "access_specs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/access_spec"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "targets",
+        "duration_s",
+        "access_specs"
+      ],
+      "additionalProperties": false
+    },
+    "test_cpu": {
+      "type": "object",
+      "description": "CPU-Test.",
+      "properties": {
+        "type": {
+          "const": "cpu"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optionaler Anzeigename des Tests."
+        },
+        "threads": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Anzahl Threads; 0 = alle logischen Prozessoren (bzw. alle des Knotens bei numa_node). Jeder Thread wird fest auf einen logischen Prozessor gepinnt, auch über Prozessorgruppen hinweg."
+        },
+        "workload": {
+          "enum": [
+            "int",
+            "float",
+            "crypto",
+            "mixed"
+          ],
+          "default": "mixed",
+          "description": "Art der Rechenlast: int = Ganzzahl (Multiplikation, Rotation, Tabellenzugriff), float = Gleitkomma doppelter Genauigkeit (4 Ketten mit Division), crypto = SHA-256 (eine Operation = ein 64-Byte-Block), mixed = 16 int + 16 float + 1 crypto pro Operation. Siehe docs/core.md."
+        },
+        "warmup_s": {
+          "type": "number",
+          "minimum": 0,
+          "default": 1,
+          "description": "Aufwärmzeit in Sekunden vor der Messung (Takt hochfahren, Caches/TLB füllen). Seit Vertrag 1.2."
+        },
+        "duration_s": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Messdauer in Sekunden (ohne Warmup)."
+        },
+        "numa_node": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1023,
+          "description": "Nur logische Prozessoren dieses NUMA-Knotens nutzen (meta.numa_nodes[].id). Fehlt das Feld, werden alle Knoten genutzt (erst ein Thread pro Kern, Knoten reihum, dann SMT-Geschwister). Seit Vertrag 1.2."
+        }
+      },
+      "required": [
+        "type",
+        "duration_s"
+      ],
+      "additionalProperties": false
+    },
+    "test_memory": {
+      "type": "object",
+      "description": "Arbeitsspeicher-Test.",
+      "properties": {
+        "type": {
+          "const": "memory"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optionaler Anzeigename des Tests."
+        },
+        "mode": {
+          "enum": [
+            "bandwidth",
+            "latency"
+          ],
+          "description": "bandwidth = Durchsatz, latency = Pointer-Chasing-Latenz."
+        },
+        "op": {
+          "enum": [
+            "read",
+            "write",
+            "copy"
+          ],
+          "default": "read",
+          "description": "Operation (nur bei mode = bandwidth relevant; latency misst immer Lesezugriffe)."
+        },
+        "threads": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Anzahl Threads; 0 = alle logischen Prozessoren (bzw. alle des Knotens bei numa_node). Bei mode = latency immer 1 (sonst Warnung W_THREADS_IGNORED)."
+        },
+        "buffer_size": {
+          "$ref": "#/$defs/size",
+          "description": "Puffergröße pro Thread (mindestens 8 KiB). Bei copy wird der Puffer halbiert: erste Hälfte Quelle, zweite Hälfte Ziel. Für RAM- statt Cache-Messung deutlich größer als der L3-Cache wählen (z. B. 256 MiB-1 GiB)."
+        },
+        "warmup_s": {
+          "type": "number",
+          "minimum": 0,
+          "default": 1,
+          "description": "Aufwärmzeit in Sekunden vor der Messung (Takt hochfahren, Caches/TLB füllen). Seit Vertrag 1.2."
+        },
+        "duration_s": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Messdauer in Sekunden (ohne Warmup)."
+        },
+        "numa_node": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1023,
+          "description": "Nur logische Prozessoren dieses NUMA-Knotens nutzen (meta.numa_nodes[].id). Fehlt das Feld, werden alle Knoten genutzt (erst ein Thread pro Kern, Knoten reihum, dann SMT-Geschwister). Seit Vertrag 1.2."
+        },
+        "mem_node": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1023,
+          "description": "Puffer auf diesem NUMA-Knoten anlegen (VirtualAllocExNuma + First Touch). Fehlt das Feld, liegt der Puffer auf dem Knoten des jeweiligen Threads (lokal). numa_node ≠ mem_node misst Zugriffe über Knotengrenzen (remote). Seit Vertrag 1.2."
+        },
+        "nontemporal": {
+          "type": "boolean",
+          "default": false,
+          "description": "Non-temporal Stores (Streaming Stores an den Caches vorbei) für write und copy. Wirkt nur bei mode = bandwidth und op = write/copy und nur auf x64; sonst Warnung und normale Stores. Seit Vertrag 1.2."
+        },
+        "simd": {
+          "enum": [
+            "auto",
+            "scalar",
+            "sse2",
+            "avx2",
+            "avx512",
+            "neon"
+          ],
+          "default": "auto",
+          "description": "Befehlssatz der Bandbreiten-Kernel. auto = avx2, falls vorhanden, sonst sse2 (x64) bzw. neon (ARM64); avx512 nur auf ausdrückliche Anforderung. Nicht unterstützte Werte ergeben E_SIMD_UNSUPPORTED. Seit Vertrag 1.2."
+        }
+      },
+      "required": [
+        "type",
+        "mode",
+        "buffer_size",
+        "duration_s"
+      ],
+      "additionalProperties": false
+    },
+    "test_net_client": {
+      "type": "object",
+      "description": "Netzwerk-Client.",
+      "properties": {
+        "type": {
+          "const": "net_client"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optionaler Anzeigename des Tests."
+        },
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Hostname oder IP-Adresse der Gegenstelle (sbench mit net_server)."
+        },
+        "port": {
+          "$ref": "#/$defs/port",
+          "default": 5201
+        },
+        "proto": {
+          "$ref": "#/$defs/proto"
+        },
+        "streams": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 128,
+          "default": 1,
+          "description": "Parallele Verbindungen/Streams."
+        },
+        "duration_s": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Messdauer in Sekunden (ohne Warmup)."
+        },
+        "udp_rate_mbps": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Ziel-Senderate bei UDP in Mbit/s (gesamt)."
+        },
+        "packet_size": {
+          "$ref": "#/$defs/size",
+          "description": "Nutzlast pro Paket bzw. Schreibaufruf."
+        },
+        "mode": {
+          "enum": [
+            "throughput",
+            "latency"
+          ],
+          "default": "throughput",
+          "description": "throughput = Durchsatz, latency = Ping-Pong-RTT."
+        },
+        "reverse": {
+          "type": "boolean",
+          "default": false,
+          "description": "true = Server sendet, Client empfängt."
+        }
+      },
+      "required": [
+        "type",
+        "host",
+        "duration_s"
+      ],
+      "additionalProperties": false
+    },
+    "test_net_server": {
+      "type": "object",
+      "description": "Netzwerk-Gegenstelle für net_client.",
+      "properties": {
+        "type": {
+          "const": "net_server"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optionaler Anzeigename des Tests."
+        },
+        "bind": {
+          "type": "string",
+          "default": "0.0.0.0",
+          "description": "Lokale Adresse (0.0.0.0 bzw. :: = alle)."
+        },
+        "port": {
+          "$ref": "#/$defs/port",
+          "default": 5201
+        },
+        "proto": {
+          "$ref": "#/$defs/proto"
+        },
+        "once": {
+          "type": "boolean",
+          "default": false,
+          "description": "true = nach dem ersten Client-Lauf beenden; false = bis 'sbench stop'."
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    "test_hyperv_info": {
+      "type": "object",
+      "description": "Hyper-V-/Hypervisor-Informationen.",
+      "properties": {
+        "type": {
+          "const": "hyperv_info"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optionaler Anzeigename des Tests."
+        },
+        "include_perfcounters": {
+          "type": "boolean",
+          "default": false,
+          "description": "Hyper-V-Leistungsindikatoren mit erfassen."
+        },
+        "sample_s": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 5,
+          "description": "Erfassungsdauer der Leistungsindikatoren in Sekunden."
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    "test": {
+      "description": "Ein Test; Auswahl über das Feld type.",
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "storage",
+            "cpu",
+            "memory",
+            "net_client",
+            "net_server",
+            "hyperv_info"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "storage"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/test_storage"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "cpu"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/test_cpu"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "memory"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/test_memory"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "net_client"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/test_net_client"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "net_server"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/test_net_server"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "hyperv_info"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/test_hyperv_info"
+          }
+        }
+      ]
+    }
+  }
+}

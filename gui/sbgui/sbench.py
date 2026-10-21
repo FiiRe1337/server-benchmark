@@ -231,7 +231,10 @@ class TailSession(EventSource):
                     return int(e["exit_code"])
         except (OSError, ValueError, KeyError):
             pass
-        # no index entry yet: derive from the result (1.3 core writes aborted: true on runtime errors too -> errors[] => 1)
+        # 2. done.exit_code (announced for 1.3.1); 3. derive from the result: fatal / errors[] in a partial test => 1 (also
+        # for the 1.3 core that writes aborted: true on runtime errors), aborted => 3, else 0
+        if isinstance(self.done.get("exit_code"), int):
+            return self.done["exit_code"]
         try:
             from .model import fallback_exit_code
             return fallback_exit_code(json.load(open(self.done.get("result") or self.out_path, encoding="utf-8")))

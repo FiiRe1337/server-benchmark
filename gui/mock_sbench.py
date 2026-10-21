@@ -28,7 +28,8 @@ E_NOT_IMPLEMENTED + skipped, no ram_method, 14 CSV columns), SBENCH_MOCK_LAG=1 (
 ack now and then -> 0 in that tick, recounted next), SBENCH_MOCK_STOP_AT=<test>:<phase>[:<n>] (deterministic stop),
 SBENCH_MOCK_FAIL_AT=<test>:<E_CODE>[:<ticks>[:<entries>]] (runtime error after <ticks> measure ticks, 0 = in preparing;
 the test becomes partial, errors[] gets <entries> entries, later tests are absent, exit 1), SBENCH_MOCK_CONTRACT=1.3.1
-(cpus[] per test + errors[].fatal; not schema-valid yet), run --keep-files (storage targets[] deleted=false),
+(cpus[] per test + one errors[].fatal + done.exit_code; valid against the #17 schema in
+gui/tests/fixtures/contract-1.3.1 except done.exit_code), run --keep-files (storage targets[] deleted=false),
 SBENCH_MOCK_ABORT_ON_ERROR=1 (runtime error like the real 1.3 core: aborted: true, exit 1; default = 1.3.1: aborted: false),
 SBENCH_MOCK_ALL_TYPES=1 (additionally simulate net_*/hyperv_info), SBENCH_DATA_DIR,
 SBENCH_SCHEMA_DIR.
@@ -70,8 +71,9 @@ if CONTRACT not in ("1.1", "1.2", "1.3", "1.3.1"):
     raise SystemExit(f"SBENCH_MOCK_CONTRACT={CONTRACT!r}: 1.1, 1.2, 1.3 oder 1.3.1")
 M2 = CONTRACT in ("1.2", "1.3", "1.3.1")
 V13 = CONTRACT in ("1.3", "1.3.1")
-# 1.3.1 (announced by Devend, not on main yet -> output does NOT validate against the 1.3 schema): cpus[] per cpu/memory
-# test in the result (same objects as phase.cpus) and errors[].fatal
+# 1.3.1 (PR #17 c4b9d69, not on main yet -> output does NOT validate against main's 1.3 schema, but against
+# gui/tests/fixtures/contract-1.3.1/schema): cpus[] per cpu/memory test, errors[].fatal on exactly one entry of the last
+# (partial) test, aborted: false + exit 1 on a runtime error; plus done.exit_code (announced, not yet in the #17 schema)
 V131 = CONTRACT == "1.3.1"
 LAG = os.environ.get("SBENCH_MOCK_LAG") == "1"
 ABORT_ON_ERROR = os.environ.get("SBENCH_MOCK_ABORT_ON_ERROR") == "1"   # emulate the real 1.3 core: aborted: true on runtime error
@@ -448,9 +450,8 @@ def _fail_errors():
     for j in range(1, _fail["entries"]):
         out.append({"code": "E_IO" if j % 2 else "E_TIMEOUT", "msg": f"Folgefehler {j}: I/O von Worker {j} nicht abgeschlossen",
                     "worker": j, "count": 1 + j})
-    if V131:
-        for j, e in enumerate(out):
-            e["fatal"] = True
+    if V131:          # 1.3.1 (#17): fatal: true on exactly the one entry that ended the test (and the run); absent = false
+        e0["fatal"] = True
     return out
 
 
@@ -985,8 +986,10 @@ def run(a):
         with open(tmp, "w", encoding="utf-8", newline="\n") as f:
             json.dump(res, f, indent=1, ensure_ascii=False)
         os.replace(tmp, a.out)
-        emit({"ev": "done", "result": os.path.abspath(a.out), "aborted": user_stop})
         rc = EXIT_ERR if _fail else (EXIT_ABORTED if _stop else EXIT_OK)
+        # done.exit_code: announced by Devend for 1.3.1, but the #17 schema (c4b9d69) still has done additionalProperties:
+        # false without exit_code -> only in SBENCH_MOCK_CONTRACT=1.3.1 mode (GUI reads it when present)
+        emit({"ev": "done", "result": os.path.abspath(a.out), "aborted": user_stop, **({"exit_code": rc} if V131 else {})})
         return rc
     finally:
         with open(os.path.join(DATA, "runs", "index.jsonl"), "a", encoding="utf-8", newline="\n") as f:

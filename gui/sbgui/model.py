@@ -196,13 +196,14 @@ OUTCOME_TXT = {"ok": "vollständig", "failed": "Laufzeitfehler", "aborted": "abg
 
 
 def _has_run_error(res):
-    """Heuristic without exit code: a test carries a fatal errors[] entry (1.3.1 fatal: true), or a partial test has errors[]
-    (1.3: the test that ended the run). Plain storage I/O errors of a complete test do not make the run 'failed'."""
-    for t in (res or {}).get("tests") or []:
-        errs = [e for e in (t.get("errors") or []) if isinstance(e, dict)]
-        if any(e.get("fatal") for e in errs) or (errs and is_partial(t, res)):
-            return True
-    return False
+    """Heuristic without exit code. 1.3.1 (#17): an errors[] entry with fatal: true (at most one, in the last, partial test).
+    1.3 core (no fatal flag; aborted: true on errors too): errors[] in a partial test = the error that ended the run.
+    Plain storage I/O errors of a complete test do not make the run 'failed'."""
+    tests = (res or {}).get("tests") or []
+    errs = [(t, e) for t in tests for e in (t.get("errors") or []) if isinstance(e, dict)]
+    if any(e.get("fatal") for _, e in errs):
+        return True
+    return any(is_partial(t, res) for t, _ in errs)
 
 
 def run_outcome(res, exit_code=None):

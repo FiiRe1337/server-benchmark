@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/FiiRe1337/server-benchmark/raw/main/schema/sb-runs-1.schema.json",
+  "title": "sbench laufende Läufe (sb-runs/1)",
+  "description": "Ausgabe von 'sbench list --running --json'. Grundlage sind die Lock-Dateien <data_dir>/runs/<run_id>.lock.json.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "sb-runs/1"
+    },
+    "runs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
+          },
+          "job_name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Name des Jobs: job.name, sonst Dateiname der Job-Datei ohne Endung."
+          },
+          "pid": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Prozess-ID von sbench run."
+          },
+          "started_utc": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$",
+            "description": "UTC-Zeitstempel (RFC 3339, Endung Z)."
+          },
+          "out": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Pfad der künftigen Ergebnisdatei (--out)."
+          },
+          "progress_file": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Pfad der Fortschrittsdatei <data_dir>/runs/<run_id>.jsonl."
+          }
+        },
+        "required": [
+          "run_id",
+          "job_name",
+          "pid",
+          "started_utc",
+          "out",
+          "progress_file"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "runs"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "lock_file": {
+      "type": "object",
+      "description": "Inhalt von <data_dir>/runs/<run_id>.lock.json (wird beim Ende des Laufs gelöscht).",
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,64}$"
+        },
+        "job_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Name des Jobs (job.name, sonst Dateiname ohne Endung). Optional, damit ältere Lock-Dateien gültig bleiben."
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "started_utc": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$",
+          "description": "UTC-Zeitstempel (RFC 3339, Endung Z)."
+        },
+        "job": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Pfad der Job-Datei."
+        },
+        "out": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "run_id",
+        "pid",
+        "started_utc",
+        "job",
+        "out"
+      ],
+      "additionalProperties": false
+    }
+  }
+}
