@@ -70,7 +70,7 @@ def main():
                "--keep-files"], dict(base, SBENCH_MOCK_FAIL_AT="1:E_IO:3:3"))
     assert cp.returncode == 1, (cp.returncode, cp.stderr)
     fix(o, tmp)
-    # contract 1.3.1 (announced, not on main): cpus[] per test in the result -> SMT in the results view. Own folder: the
+    # contract 1.3.1 (#17): cpus[] per test in the result -> SMT in the results view. Own folder: the
     # file does not validate against the 1.3 schema (CI checks demo/*.json)
     d131 = os.path.join(DEMO, "contract-1.3.1"); os.makedirs(d131, exist_ok=True)
     o = os.path.join(d131, "result-m2-smt.json")

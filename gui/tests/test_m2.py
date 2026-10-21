@@ -749,17 +749,15 @@ def test_tail_session_exit_code_fallback(qapp, tmp_path):
 
 
 # ------------------------------------------------------------------ contract 1.3.1 (PR #17, c4b9d69) fixtures
-FIX131 = os.path.join(os.path.dirname(__file__), "fixtures", "contract-1.3.1")
+FIX131 = os.path.join(GUI, "..", "schema", "examples")     # contract 1.3.1 (#17) is on main
 
 
 @pytest.fixture
 def V131(monkeypatch):
-    """Validators for the #17 schema (only while building them; the mock keeps main's schema/examples)."""
+    """Validators for main's schema (contract 1.3.1 since #17)."""
     import sb_contract
-    with monkeypatch.context() as m:
-        m.setenv("SBENCH_SCHEMA_DIR", os.path.join(FIX131, "schema"))
-        assert sb_contract.base_dir() == os.path.abspath(os.path.join(FIX131, "schema"))
-        return sb_contract.validators()
+    monkeypatch.delenv("SBENCH_SCHEMA_DIR", raising=False)
+    return sb_contract.validators()
 
 
 def _errs(v, doc):
