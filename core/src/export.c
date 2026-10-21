@@ -38,10 +38,20 @@ static void put_num(sbuf *b, const cJSON *o, const char *key, double scale) {
     put_field(b, t, 0);
 }
 
+/* Wie put_num, aber mit mehr Stellen (z. B. ops_per_s ~ 1e9) */
+static void put_num_p(sbuf *b, const cJSON *o, const char *key) {
+    const cJSON *c = o ? cJSON_GetObjectItemCaseSensitive(o, key) : NULL;
+    char t[64] = "";
+    if (cJSON_IsNumber(c)) snprintf(t, sizeof t, "%.12g", c->valuedouble);
+    put_field(b, t, 0);
+}
+
 static const cJSON *get(const cJSON *o, const char *k) { return o ? cJSON_GetObjectItemCaseSensitive(o, k) : NULL; }
 
+/* Leeres Feld = Wert nicht vorhanden (Spalte gilt nicht für diesen Testtyp/scope oder Messwert
+ * null bei einem Teilergebnis); 0 ist immer ein gemessener Wert. */
 static void flat_row(sbuf *b, int test, const char *type, const char *scope, const char *id, const cJSON *x,
-                     int has_rw_mbps) {
+                     int has_rw_mbps, const cJSON *tst) {
     char t[32];
     snprintf(t, sizeof t, "%d", test);
     put_field(b, t, 1);
@@ -63,28 +73,37 @@ static void flat_row(sbuf *b, int test, const char *type, const char *scope, con
     if (cJSON_IsNumber(e)) snprintf(es, sizeof es, "%.0f", e->valuedouble);
     else if (cJSON_IsArray(e)) snprintf(es, sizeof es, "%d", cJSON_GetArraySize(e));
     put_field(b, es, 0);
+    /* cpu/memory (Vertrag 1.2), angehängt, damit bisherige Spaltenpositionen gleich bleiben */
+    put_num_p(b, x, "ops_per_s");
+    put_num_p(b, x, "gbps");
+    put_num_p(b, x, "latency_ns");
+    put_num_p(b, x, "score");
+    /* Vertrag 1.3: Teilergebnis je Test (auf allen Zeilen des Tests), angehängt */
+    const cJSON *pa = get(tst, "partial"), *si = get(tst, "stopped_in");
+    put_field(b, cJSON_IsBool(pa) ? (cJSON_IsTrue(pa) ? "true" : "false") : "", 0);
+    put_field(b, cJSON_IsString(si) ? si->valuestring : "", 0);
     sb_put(b, "\r\n");
 }
 
 static void export_flat(sbuf *b, const cJSON *tests) {
-    sb_put(b, "test,type,scope,id,iops,mbps,read_iops,write_iops,read_mbps,write_mbps,lat_mean_us,lat_p99_us,lat_max_us,errors\r\n");
+    sb_put(b, "test,type,scope,id,iops,mbps,read_iops,write_iops,read_mbps,write_mbps,lat_mean_us,lat_p99_us,lat_max_us,errors,ops_per_s,gbps,latency_ns,score,partial,stopped_in\r\n");
     const cJSON *t;
     cJSON_ArrayForEach(t, tests) {
         const cJSON *ix = get(t, "index"), *ty = get(t, "type");
         int idx = cJSON_IsNumber(ix) ? ix->valueint : 0;
         const char *type = cJSON_IsString(ty) ? ty->valuestring : "";
-        flat_row(b, idx, type, "total", "", get(t, "summary"), 1);
+        flat_row(b, idx, type, "total", "", get(t, "summary"), 1, t);
         const cJSON *w;
         cJSON_ArrayForEach(w, get(t, "per_worker")) {
             char id[16];
             snprintf(id, sizeof id, "%d", get(w, "id") ? get(w, "id")->valueint : 0);
-            flat_row(b, idx, type, "worker", id, w, 0);
+            flat_row(b, idx, type, "worker", id, w, 0, t);
         }
         const cJSON *s;
         cJSON_ArrayForEach(s, get(t, "per_spec")) {
             char id[16];
             snprintf(id, sizeof id, "%d", get(s, "spec") ? get(s, "spec")->valueint : 0);
-            flat_row(b, idx, type, "spec", id, s, 0);
+            flat_row(b, idx, type, "spec", id, s, 0, t);
         }
     }
 }

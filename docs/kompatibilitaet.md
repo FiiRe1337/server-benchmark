@@ -1,4 +1,4 @@
-# Kompatibilität von sbench (Meilenstein 1)
+# Kompatibilität von sbench (Meilensteine 1 und 2)
 
 sbench ist ein reines Win32-Programm (Kommandozeile, keine GUI-Abhängigkeiten) mit
 statischer C-Laufzeit (`/MT`). Es braucht keine VC-Redistributable, kein .NET und keine
@@ -15,8 +15,11 @@ Server 2016**. `RtlGetVersion` (ntdll) wird per `GetProcAddress` geladen.
 |---|---|---|
 | I/O | `CreateFileW` (`FILE_FLAG_NO_BUFFERING`, `WRITE_THROUGH`, `OVERLAPPED`), `CreateIoCompletionPort`, `GetQueuedCompletionStatusEx`, `CancelIoEx`, `SetFileValidData` | Vista / XP |
 | Zeit | `QueryPerformanceCounter`, `GetSystemTimes`, `GetProcessTimes`, `GetTickCount64` | XP / Vista |
-| CPU/NUMA | `GetLogicalProcessorInformationEx`, `GetActiveProcessorCount`, `GetNumaHighestNodeNumber`, `GetNumaNodeProcessorMaskEx`, `GetNumaAvailableMemoryNodeEx`, CPUID (nur x64) | Windows 7 |
-| Speicher | `GlobalMemoryStatusEx`, `GetPhysicallyInstalledSystemMemory`, `VirtualAlloc` | Vista SP1 |
+| CPU/NUMA | `GetLogicalProcessorInformationEx` (`RelationNumaNodeEx` ab Windows 11/Server 2022, sonst Rückfall auf `RelationNumaNode`), `GetActiveProcessorCount`, `GetNumaHighestNodeNumber`, `GetNumaAvailableMemoryNodeEx`, `GetNumaProximityNodeEx`, CPUID/XGETBV (nur x64) | Windows 7 |
+| Threads (M2) | `SetThreadGroupAffinity`, `SetThreadIdealProcessorEx` (Prozessorgruppen, > 64 logische Prozessoren) | Windows 7 |
+| Speicher | `GlobalMemoryStatusEx`, `GetPhysicallyInstalledSystemMemory`, `VirtualAlloc`, `VirtualAllocExNuma` (M2) | Vista SP1 |
+| Firmware (M2, #8) | `GetSystemFirmwareTable('ACPI', 'SRAT')` für RAM pro NUMA-Knoten, ohne Adminrechte | Vista |
+| SIMD (M2) | SSE2, AVX2, AVX-512F per Intrinsics mit Laufzeiterkennung (CPUID + XGETBV), NEON auf ARM64 | – (CPU-abhängig) |
 | Hypervisor | `IsProcessorFeaturePresent(PF_VIRT_FIRMWARE_ENABLED)`, Registry `Guest\Parameters`, Dienst `vmms`, WMI `Win32_ComputerSystem` | Windows 8 |
 | Netzwerk/Info | `GetAdaptersAddresses`, `DeviceIoControl` (`IOCTL_STORAGE_QUERY_PROPERTY`, `IOCTL_DISK_GET_LENGTH_INFO`) | XP / Vista |
 | Sicherheit | `AdjustTokenPrivileges`, `CheckTokenMembership`, SDDL-Stop-Event | XP |
@@ -53,8 +56,8 @@ bzw. Hyper-V Server. sbench selbst ist immer eine Konsolenanwendung.
 | Job | Inhalt |
 |---|---|
 | Build x64 / ARM64 (`windows-latest`) | MSVC, `/MT`, `/guard:cf`; `dumpbin /dependents` prüft, dass nur System-DLLs (kein `VCRUNTIME*.dll`, kein `ucrtbase.dll`) gebunden sind; Artefakte `sbench-windows-<arch>`, `sbench-cli-<arch>` |
-| Test `windows-2022` x64, `windows-2025` x64, `windows-11-arm` arm64 | Unit-Tests; Smoke-Test: info/validate gegen Schema, Storage-Lauf (256 MiB, 4K random 70/30, QD8, 2 Worker, 5 s), Pipe, Pipe-Fehler/-Abbruch, Stop (Exit 3), `list --running`, nicht implementierte Testtypen, Export, Bundle (`--all`, `--results`, `--include`, `--anonymize`), Volume-Lesetest auf `\\.\C:`; Artefakt `sbench-smoke-<runner>-<arch>` |
-| Container `servercore:ltsc2022` (auf `windows-2022`) | Server Core ohne Python: version, info, validate, run, export, list, bundle; Schema-Prüfung der Ausgaben danach auf dem Host |
+| Test `windows-2022` x64, `windows-2025` x64, `windows-11-arm` arm64 | Unit-Tests; Smoke-Test: info/validate gegen Schema, Storage-Lauf (256 MiB, 4K random 70/30, QD8, 2 Worker, 5 s), Pipe, Pipe-Fehler/-Abbruch, Stop (Exit 3), `list --running`, nicht implementierte Testtypen, Export, Bundle (`--all`, `--results`, `--include`, `--anonymize`), Volume-Lesetest auf `\\.\C:`; **M2** (`tests/smoke/smoke_m2.py`): NUMA/`ram_method`, Validierungsfehler und -warnungen, cpu int/float/crypto/mixed mit 1 und allen Threads, memory read/write/copy (auch NT), jede unterstützte SIMD-Stufe, Latenz L1 vs. RAM, Stop während cpu, CSV-Spalten; Artefakt `sbench-smoke-<runner>-<arch>` |
+| Container `servercore:ltsc2022` (auf `windows-2022`) | Server Core ohne Python: version, info, validate, run (storage und M2: cpu mixed, memory copy, Latenz), export, list, bundle; Schema-Prüfung der Ausgaben danach auf dem Host |
 | Container `servercore:ltsc2019` (Hyper-V-Isolation) | wie oben, Kernel 17763; Fehlschlag blockiert den PR nicht |
 
 ### Hinweise
@@ -75,6 +78,12 @@ bzw. Hyper-V Server. sbench selbst ist immer eine Konsolenanwendung.
 - **ARM64:** Kein CPUID. Die Hypervisor-Rolle kommt aus Registry (`Guest\Parameters`),
   Dienst `vmms`, `IsProcessorFeaturePresent` und WMI; `partition_info.role_source` nennt
   die verwendete Quelle, `provisional: true` kennzeichnet eine Einschätzung ohne CPUID.
+- **M2 auf ARM64:** Bandbreiten-Kernel `scalar` und `neon`; `sse2`/`avx2`/`avx512` ergeben
+  `E_SIMD_UNSUPPORTED`, `nontemporal` wird ignoriert (`W_NONTEMPORAL_UNSUPPORTED`).
+- **M2 und NUMA in der CI:** Alle Runner haben einen NUMA-Knoten und ≤ 64 logische
+  Prozessoren. Mehrere Knoten, Prozessorgruppen und `ram_method = srat` prüft die CI nur
+  per Unit-Test (synthetische SRAT, Auswahlreihenfolge über zwei Gruppen); auf echter
+  Hardware manuell nach [abnahme-m2.md](abnahme-m2.md), Abschnitte 3 und 6.
 - **Iometer** gibt es nur für x64 mit Desktop-Oberfläche. Auf Core-Systemen und ARM64 nur
   mit DiskSpd vergleichen.
 

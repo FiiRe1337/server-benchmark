@@ -5,6 +5,8 @@
 #include "sb/hist.h"
 #include "sb/util.h"
 
+struct sb_ctick;
+
 typedef struct sb_io_counts {
     uint64_t ops_r, ops_w, bytes_r, bytes_w, errors;
 } sb_io_counts;
@@ -27,6 +29,7 @@ typedef struct sb_run_error {
     double   t;
     int      worker, target;    /* -1 = keine Angabe */
     uint64_t count;
+    int      fatal;             /* Vertrag 1.3.1: dieser Eintrag hat den Test (und damit den Lauf) beendet */
 } sb_run_error;
 
 typedef struct sb_storage_result {
@@ -40,6 +43,8 @@ typedef struct sb_storage_result {
     sb_hist     *hist;              /* gesamt */
     double       measured_s;        /* tatsächliche Dauer der Messphase */
     double       cpu_pct;           /* Mittel über die Messphase */
+    double       proc_cpu_pct;      /* sbench-Prozess, Mittel über die Messphase (Vertrag 1.3) */
+    int          stop_phase;        /* SB_STOP_* (sb/vertrag.h): Phase eines vorzeitigen Endes, 0 = vollständig */
     sb_tick_sample *ticks; int nticks, cap_ticks;
     sb_run_error *errs; int nerrs, cap_errs;
     int          aborted;           /* Stop-Event während des Tests */
@@ -52,13 +57,16 @@ typedef struct sb_storage_result {
 /* Callbacks in den Lauf-Kontext (Progress, Log) */
 typedef struct sb_storage_cb {
     void *ctx;
-    /* duration_s < 0: keine Dauer bekannt */
-    void (*phase)(void *ctx, int test, const char *name, double duration_s);
+    /* duration_s < 0: keine Dauer bekannt. extra: zusätzliche Felder des Events (Vertrag 1.3:
+     * threads, cpus beim ersten phase-Event eines Tests) oder NULL; bleibt Eigentum des Aufrufers. */
+    void (*phase)(void *ctx, int test, const char *name, double duration_s, const cJSON *extra);
     /* Fortschritt in preparing (unit "bytes") und warmup (unit "s") */
     void (*progress)(void *ctx, int test, const char *phase, double done, double total, const char *unit);
     void (*tick)(void *ctx, int test, const sb_tick_sample *s);
     void (*error)(void *ctx, int test, const char *code, const char *msg);
     void (*log)(void *ctx, const char *level, const char *msg);
+    /* cpu/memory (compute.h): kind = sb_compute_kind, s = const sb_ctick * */
+    void (*ctick)(void *ctx, int test, int kind, const struct sb_ctick *s);
 } sb_storage_cb;
 
 typedef struct sb_storage_opts {

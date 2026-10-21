@@ -8,9 +8,9 @@ in [`schema/`](../schema/) definiert, Beispiele liegen in [`schema/examples/`](.
 
 | Format | Schema | Beispiel |
 |---|---|---|
-| Job-Datei | [`sb-job-1.schema.json`](../schema/sb-job-1.schema.json) | [`job-storage-mix.json`](../schema/examples/job-storage-mix.json), [`job-full.json`](../schema/examples/job-full.json) |
-| Ergebnis | [`sb-result-1.schema.json`](../schema/sb-result-1.schema.json) | [`result-storage.json`](../schema/examples/result-storage.json) |
-| Fortschritt (JSON Lines) | [`sb-progress-1.schema.json`](../schema/sb-progress-1.schema.json) | [`progress-storage.jsonl`](../schema/examples/progress-storage.jsonl) |
+| Job-Datei | [`sb-job-1.schema.json`](../schema/sb-job-1.schema.json) | [`job-storage-mix.json`](../schema/examples/job-storage-mix.json), [`job-full.json`](../schema/examples/job-full.json), [`job-compute.json`](../schema/examples/job-compute.json) |
+| Ergebnis | [`sb-result-1.schema.json`](../schema/sb-result-1.schema.json) | [`result-storage.json`](../schema/examples/result-storage.json), [`result-compute.json`](../schema/examples/result-compute.json) |
+| Fortschritt (JSON Lines) | [`sb-progress-1.schema.json`](../schema/sb-progress-1.schema.json) | [`progress-storage.jsonl`](../schema/examples/progress-storage.jsonl), [`progress-compute.jsonl`](../schema/examples/progress-compute.jsonl) |
 | Systeminfo | [`sb-info-1.schema.json`](../schema/sb-info-1.schema.json) | [`info.json`](../schema/examples/info.json) |
 | Validierung | [`sb-validate-1.schema.json`](../schema/sb-validate-1.schema.json) | [`validate-error.json`](../schema/examples/validate-error.json), [`validate-warnings.json`](../schema/examples/validate-warnings.json) |
 | Laufende Läufe | [`sb-runs-1.schema.json`](../schema/sb-runs-1.schema.json) | [`runs.json`](../schema/examples/runs.json) |
@@ -22,6 +22,30 @@ bleiben daher unverändert. sbench ab Vertrag 1.1 gibt die neuen Felder `run_id`
 `meta.data_dir`, `meta.ram_free_bytes`, `meta.numa_nodes` und `warnings` immer aus.
 `numa_nodes[].cpus` ist eine Liste globaler logischer Prozessor-Indizes
 (Prozessorgruppe × 64 + Bitnummer); `sb-runs/1` nennt je Lauf zusätzlich `job_name`.
+
+**Vertragsstand 1.2 (Meilenstein 2).** Die Testtypen `cpu` und `memory` sind implementiert
+(Abschnitt [Testtypen `cpu` und `memory`](#testtypen-cpu-und-memory-vertrag-12)). Neu sind
+nur optionale Felder: im Job `warmup_s`, `numa_node`, `mem_node`, `nontemporal`, `simd`; im
+Ergebnis weitere `summary`-, `per_worker`- und `timeseries`-Felder sowie
+`meta.numa_nodes[].ram_method` (Issue #8); im Tick `latency_ns`. Die Formatversionen bleiben
+unverändert. `net_client`, `net_server` und `hyperv_info` melden weiterhin `E_NOT_IMPLEMENTED`.
+
+**Vertragsstand 1.3.** Nur zusätzliche, optionale Felder; Formatversionen unverändert
+(Abschnitt [Vertrag 1.3](#vertrag-13-metric-threadscpus-teilergebnisse-score)). sbench ab 1.3
+gibt sie immer aus: `tick.metric`, `tick.score` (cpu), im ersten `phase`-Event eines Tests
+`threads` und (cpu/memory) `cpus` mit SMT-Geschwistern, je Test `partial` und `stopped_in`,
+`meta.cpu_score` (Score-Formel und Referenzwerte, auch in `sb-info`), `summary.score_reference`
+(cpu), `summary.proc_cpu_pct` (alle Typen), `summary.cpu_pct` (storage),
+`timeseries[].proc_cpu_pct`, `timeseries[].score` (cpu), `tick_ms` im Ergebnis und die
+CSV-Spalten `partial,stopped_in`. **Einzige Lockerung:** Messwerte der `summary` dürfen `null`
+sein, aber nur bei `partial: true` mit `stopped_in` `preparing`/`warmup` (Test vor der
+Messphase beendet); vorher stand dort 0.
+
+**Vertragsstand 1.3.1.** Drei zusätzliche, optionale Felder: `tests[].cpus` im Ergebnis
+(cpu/memory), gleiches Format wie `phase.cpus`, `errors[].fatal` und `done.exit_code`. Geändert: `aborted`
+(Ergebnis und `done`) ist nur noch bei einem Stopp (Exit 3) `true`, bei einem Laufzeitfehler
+(Exit 1) `false` (Abschnitt [Vertrag 1.3.1](#vertrag-131-cpus-im-ergebnis-aborted-und-fatal)).
+Formatversionen unverändert.
 
 ## Allgemeines
 
@@ -144,7 +168,9 @@ Phasen ohne Bedeutung für einen Testtyp (z. B. `warmup` bei `hyperv_info`) dür
 entfallen. Storage-Ticks enthalten immer `iops`, `mbps`, `lat_us`, `cpu_pct`;
 optional sind `read_iops`, `write_iops`, `read_mbps`, `write_mbps`, `proc_cpu_pct` und
 `workers` (je Worker `id`, `iops`, `mbps`, optional `lat_us{mean,p99}`). CPU-Ticks nutzen `ops_per_s`, Memory-Ticks `gbps`,
-Netz-Ticks `mbps`.
+Netz-Ticks `mbps`. Ab Vertrag 1.3 nennt `metric` in jedem Tick den Hauptwert (`iops` |
+`ops_per_s` | `gbps` | `latency_ns` | `mbps`), und das erste `phase`-Event eines Tests
+(`preparing`) trägt `threads` und bei cpu/memory `cpus` (siehe [Vertrag 1.3](#vertrag-13-metric-threadscpus-teilergebnisse-score)).
 
 Ausführung: Tests laufen in der Reihenfolge des Jobs nacheinander. Bei `storage`
 werden die Worker reihum auf die Targets verteilt (Worker *i* → Target *i* mod Anzahl
@@ -165,7 +191,9 @@ verwendet; `stop` versucht beide Namen.
 Nach dem Stop beendet `run` den laufenden Test sofort, schreibt das **Teilergebnis**
 trotzdem nach `--out` (mit `aborted: true`, bereits abgeschlossene Tests vollständig,
 der laufende Test mit den bis dahin gemessenen Werten, nicht begonnene Tests fehlen),
-sendet `done` mit `aborted: true` und endet mit Exit-Code **3**.
+sendet `done` mit `aborted: true` und endet mit Exit-Code **3**. Ab Vertrag 1.3 trägt der
+laufende Test `partial: true` und `stopped_in`; bei einem Stopp in `preparing` oder `warmup`
+sind seine Messwerte `null` (siehe [Teilergebnisse](#teilergebnisse-partial-stopped_in)).
 
 `sbench stop` selbst endet mit 0, wenn das Event gesetzt wurde, und mit 1, wenn kein
 Lauf mit dieser ID existiert.
@@ -204,6 +232,11 @@ Zusätzlich zu `errors` enthält die Ausgabe `warnings` (gleicher Aufbau). Warnu
 | `W_NEEDS_ADMIN` | Der Job braucht Administratorrechte, die gerade fehlen. Bei Raw-Zugriff (`volume`/`physical`) würde `run` mit Exit-Code **4** enden; bei `SetFileValidData` (Anlegen von Testdateien) gibt es nur einen langsameren Fallback. |
 | `W_DESTRUCTIVE` | Schreibtest auf `volume`/`physical` mit `allow_destructive: true`: die Daten auf dem Ziel werden zerstört; `run` braucht zusätzlich `--allow-destructive`. |
 | `W_LOW_DISK_SPACE` | Wenig freier Platz auf dem Volume einer Testdatei (vor oder nach dem Anlegen). |
+| `W_LOW_MEMORY` | `memory`: Die Puffer aller Threads (`threads` × `buffer_size`) belegen mehr als 50 % des freien Arbeitsspeichers (bzw. des Knotens `mem_node`). |
+| `W_OVERSUBSCRIBED` | `cpu`/`memory`: `threads` ist größer als die Zahl der logischen Prozessoren (bzw. des Knotens `numa_node`); Prozessoren werden mehrfach belegt. |
+| `W_THREADS_IGNORED` | `memory` mit `mode: latency` und `threads` > 1: Latenz wird immer mit einem Thread gemessen. |
+| `W_NONTEMPORAL_IGNORED` | `nontemporal: true` bei `op: read`: wirkt nur bei `write` und `copy`. |
+| `W_NONTEMPORAL_UNSUPPORTED` | `nontemporal: true` auf ARM64: dort gibt es keine umgesetzten Streaming Stores; es werden normale Stores genutzt (`summary.nontemporal: false`). |
 
 Semantische Regeln (über das JSON Schema hinaus):
 
@@ -216,6 +249,10 @@ Semantische Regeln (über das JSON Schema hinaus):
 | `E_TARGET_NOT_FOUND` | Datei-Verzeichnis, Volume oder physische Disk existiert nicht. |
 | `E_TARGET_SIZE` | `file_size` bzw. Zielgröße kleiner als `block_size`. |
 | `E_UDP_RATE` | `udp_rate_mbps` bei `proto: tcp` angegeben bzw. bei UDP-Durchsatztest fehlend. |
+| `E_NUMA_NODE` | `numa_node` nennt keinen Knoten mit logischen Prozessoren bzw. `mem_node` keinen vorhandenen Knoten (`meta.numa_nodes[].id`). |
+| `E_SIMD_UNSUPPORTED` | `simd` wird von CPU oder Betriebssystem nicht unterstützt (z. B. `avx512` ohne AVX-512F, `neon` auf x64, `avx2` auf ARM64). |
+| `E_BUFFER_SIZE` | `buffer_size` kleiner als 8 KiB. |
+| `E_OUT_OF_MEMORY` | `threads` × `buffer_size` ist größer als 90 % des freien Arbeitsspeichers (bzw. des Knotens `mem_node`). Zur Laufzeit derselbe Code, wenn `VirtualAllocExNuma` scheitert. |
 
 ### `sbench export`
 
@@ -224,12 +261,22 @@ sbench export <result.json> --csv <out.csv> [--style iometer|flat]
 ```
 
 - `flat` (Standard): eine Zeile pro Test bzw. pro Worker/Access-Spec mit Spalten
-  `test,type,scope,id,iops,mbps,read_iops,write_iops,read_mbps,write_mbps,lat_mean_us,lat_p99_us,lat_max_us,errors`;
-  Trennzeichen Komma, Dezimalpunkt, UTF-8.
+  `test,type,scope,id,iops,mbps,read_iops,write_iops,read_mbps,write_mbps,lat_mean_us,lat_p99_us,lat_max_us,errors,ops_per_s,gbps,latency_ns,score`;
+  Trennzeichen Komma, Dezimalpunkt, UTF-8. Die Spalten `ops_per_s` (cpu), `gbps` und
+  `latency_ns` (memory) sowie `score` (cpu) sind seit Vertrag 1.2 hinten angehängt; die
+  Positionen der älteren Spalten bleiben gleich. Bei `cpu`/`memory` gibt es Zeilen
+  `scope = total` und `scope = worker` (je Thread). Ab Vertrag 1.3 folgen `partial`
+  (`true`/`false`, auf allen Zeilen eines Tests) und `stopped_in`.
+  **Leeres Feld** heißt „kein Wert“: die Spalte gilt nicht für Testtyp bzw. `scope` (z. B.
+  `errors` und `score` auf cpu/memory-Worker-Zeilen, `score` bei storage, `read_mbps`/`write_mbps`
+  auf Worker-/Spec-Zeilen) oder der Messwert ist `null` (Teilergebnis). `0` ist immer ein
+  gemessener Wert. `scope` ist endgültig: `total` (Summe des Tests, bei allen Testtypen),
+  `worker` (je Worker/Thread), `spec` (nur storage, je Access-Spec).
 - `iometer`: an das Iometer-Ergebnis-CSV angelehnte Spaltennamen
   (`Target Type`, `Target Name`, `Access Specification Name`, `IOps`, `MBps (Decimal)`,
   `Average Response Time`, …) zur Weiterverarbeitung in vorhandenen Auswertungen.
-  Nur Storage-Tests werden exportiert.
+  Nur Storage-Tests werden exportiert (gewollt: das Iometer-Format hat keine Spalten für
+  ops/s, GB/s oder ns; cpu/memory stehen im `flat`-Export).
 
 ### `sbench bundle`
 
@@ -261,16 +308,74 @@ Exit-Codes: 0 ok, 1 Laufzeitfehler, 2 ungültige Argumente.
 ### `sbench import-icf` (Meilenstein 2)
 
 ```
-sbench import-icf <datei.icf> --out <job.json>
+sbench import-icf <datei.icf> [-o|--out <job.json>] [--target <pfad>]... [--json]
 ```
 
-Wandelt eine Iometer-Konfiguration (ICF) in einen Job `sb-job/1` um (Worker, Targets,
-Queue Depth, Access-Specs mit Gewichten, Laufzeit). Felder ohne Entsprechung
-(z. B. Netzwerk-Worker, Ramp-up-Varianten, mehrere Manager) werden nicht übernommen und
-als Warnungen gemeldet: Ausgabe `sb-validate/1` auf stdout mit `ok: true` und
-`warnings` (Code `W_ICF_UNSUPPORTED`, `path` = JSON Pointer auf das betroffene Ziel im
-erzeugten Job bzw. `""`). Exit-Codes: 0 ok (auch mit Warnungen), 1 Datei nicht lesbar,
-2 ICF ungültig oder nicht konvertierbar.
+Wandelt eine Iometer-Konfiguration (`.icf`, Iometer 1.1.0 und 2006.07.27; ANSI oder UTF-8,
+CRLF oder LF) in einen Job `sb-job/1` mit `storage`-Tests um.
+
+| Option | Wirkung |
+|---|---|
+| `-o`, `--out <job.json>` | Job in die Datei schreiben (UTF-8). stdout: `sb-validate/1` (Vertrag der GUI). Die Datei wird nur bei Exit 0 geschrieben. |
+| ohne `-o` | Job auf stdout, Fehler und Warnungen als Text (`CODE [pfad]: meldung`) auf stderr. |
+| `--json` | Ohne `-o`: nur `sb-validate/1` auf stdout, kein Job (Prüfmodus). Mit `-o` ohne zusätzliche Wirkung. |
+| `--target <pfad>` | Mehrfach angebbar. Ersetzt die Targets aus dem ICF in ihrer Reihenfolge; die Anzahl muss gleich sein (sonst `E_ICF_TARGET_COUNT`). Hat das ICF keine Targets, werden die angegebenen übernommen (ein Worker je Target). `kind` wird aus dem Pfad bestimmt: `\\.\PhysicalDriveN` → `physical`, `\\.\X:` → `volume`, sonst `file`. |
+
+**Abbildung**
+
+| Iometer | sb-job/1 |
+|---|---|
+| Access Specification (einem Worker zugewiesen; Iometer führt sie nacheinander aus) | je ein Test `storage`, `name` = Name der Spec, Reihenfolge wie im ICF. Ohne Zuweisung: alle Specs (`W_ICF_NO_ASSIGNMENT`, wenn es Worker gibt). |
+| Zeile `size,% of size,% reads,% random,delay,burst,align,reply` | ein Eintrag in `access_specs`: `block_size` = size, `weight` = % of size (Summe muss 100 sein), `read_pct`, `random_pct`; `delay_ms` und `burst_len` nur bei delay > 0; `align` nur bei align > 0 |
+| Test Description | `name` des Jobs (sonst Dateiname ohne Endung) |
+| Run Time (h/min/s), Ramp Up Time | `duration_s`, `warmup_s` |
+| Outstanding I/Os (pro Worker und Target) | `queue_depth` |
+| Disk-Worker × Targets | `workers` = Anzahl der Paare (Worker, Target); sbench verteilt die Worker reihum auf `targets` |
+| Target `D: "Label"` | `{"path": "D:\\iobw.tst", "kind": "file"}`, `file_size` = Disk maximum size × 512 Bytes |
+| Target `PHYSICALDRIVE:N` | `{"path": "\\\\.\\PhysicalDriveN", "kind": "physical"}` ohne `allow_destructive` |
+| – | `cache: "unbuffered"` (wie Iometer) |
+
+**Warnungen** (`ok: true`, Exit 0; `path` = JSON Pointer in den erzeugten Job bzw. `""`,
+ICF-Zeilennummern in `msg`):
+
+| Code | Bedeutung |
+|---|---|
+| `W_ICF_RUN_TIME` | Run Time 0 (unbegrenzt) oder fehlend → `duration_s` = 60 |
+| `W_ICF_DISK_SIZE` | Disk maximum size 0 (Iometer füllt das Laufwerk) → Testdatei 8 GiB; bei physischen Disks wird die Größe nicht übernommen (sbench testet die ganze Disk) |
+| `W_ICF_ALIGN` | align 0 (Iometer: Sektorgrenzen) → ohne `align`, sbench richtet zufällige Offsets an der `block_size` aus |
+| `W_ICF_REPLY` | reply ≠ 0 (nur Netzwerk) wird ignoriert |
+| `W_ICF_CYCLING` | Test Type ≠ NORMAL (Worker-/Target-/Queue-Depth-Cycling): ein Durchgang mit den Worker-Einstellungen |
+| `W_ICF_QD_MIXED` | Worker mit unterschiedlichen Outstanding I/Os → Wert des ersten Workers |
+| `W_ICF_SPEC_MIXED` | Worker mit unterschiedlichen Access Specs → Specs des ersten Workers |
+| `W_ICF_WORKER_SPLIT` | Iometer-Worker mit mehreren Targets → ein sbench-Worker je Target |
+| `W_ICF_TARGET_LAYOUT` | Targets mit unterschiedlich vielen Workern → reihum verteilt |
+| `W_ICF_MANAGERS` | mehrere Manager → nur der erste (sbench misst lokal) |
+| `W_ICF_NETWORK_WORKER` | Netzwerk-Worker werden ignoriert (dafür `net_client`/`net_server`) |
+| `W_ICF_DATA_PATTERN` | Data pattern ≠ 2 (Full random) bei Schreibanteil: sbench schreibt immer Zufallsdaten |
+| `W_ICF_SECTOR` | size/align kein Vielfaches von 512 |
+| `W_ICF_ZERO_WEIGHT` | Zeile mit 0 % of size wird weggelassen |
+| `W_ICF_NO_TARGET` | kein Disk-Worker mit Target und kein `--target` → Platzhalter `D:\sbtest.dat` (8 GiB) |
+| `W_ICF_NO_WORKERS` | keine Manager-Liste → 1 Worker je Target, `queue_depth` 1 |
+| `W_ICF_UNSUPPORTED` | sonstige Felder ohne Entsprechung (Starting Sector, fixed seed, connection rate, Burst ohne Delay, unbekannte Abschnitte oder Targets) |
+| `W_ICF_VALIDATE` | Der erzeugte Job wurde wie bei `validate` geprüft; umgebungsabhängige Fehler (`E_TARGET_NOT_FOUND`, `E_DESTRUCTIVE_NOT_ALLOWED`, `E_BLOCK_ALIGN`, `E_TARGET_SIZE`) werden nur gewarnt, der ursprüngliche Code steht am Anfang von `msg`. Vor `run` den Job anpassen. |
+
+Warnungen von `validate` (z. B. `W_NEEDS_ADMIN`, `W_LOW_DISK_SPACE`, `W_DESTRUCTIVE`) werden
+unverändert durchgereicht.
+
+**Fehler** (`ok: false`, Exit 2, keine Job-Datei): `E_ICF_FORMAT` (keine Iometer-Datei,
+fehlende `Version`-Zeile, keine Access Specifications, Datei abgeschnitten), `E_ICF_PARSE`
+(Zeile nicht lesbar, z. B. falsche Spaltenzahl), `E_ICF_VALUE` (Wert außerhalb des Bereichs),
+`E_ICF_SPEC` (Summe `% of size` ≠ 100, Spec ohne Zeilen, doppelt, unbekannte Spec bei einem
+Worker), `E_ICF_TARGET_COUNT` (`--target` passt nicht). Exit 1: ICF-Datei nicht lesbar
+(`E_IO`) oder Ausgabedatei nicht schreibbar.
+
+Beispiel:
+
+```
+sbench import-icf fileserver.icf -o fileserver.json --target E:\sbench\test.dat
+sbench validate --job fileserver.json
+sbench run --job fileserver.json
+```
 
 ### `sbench version`
 
@@ -306,6 +411,199 @@ Git-Commit des Builds (`unknown`, falls beim Bauen nicht bekannt), `arch` `x64` 
 `arm64`, `sha256` der Hash der ausgeführten EXE-Datei. Exit-Code 0; 1, wenn die EXE nicht
 lesbar war (dann `sha256: null`).
 
+## Testtypen `cpu` und `memory` (Vertrag 1.2)
+
+Methodik und Definitionen: [`docs/core.md`](core.md#cpu--und-memory-engine-meilenstein-2).
+Beispiele: [`job-compute.json`](../schema/examples/job-compute.json),
+[`result-compute.json`](../schema/examples/result-compute.json),
+[`progress-compute.jsonl`](../schema/examples/progress-compute.jsonl).
+
+### Job-Felder
+
+| Feld | Typ | Standard | Bedeutung |
+|---|---|---|---|
+| `threads` | Integer ≥ 0 | 0 | Anzahl Threads; 0 = alle logischen Prozessoren (bzw. alle des Knotens `numa_node`). Bei `mode: latency` immer 1. |
+| `workload` (cpu) | `int` \| `float` \| `crypto` \| `mixed` | `mixed` | Rechenlast, siehe `docs/core.md`. |
+| `mode` (memory) | `bandwidth` \| `latency` | – (Pflicht) | Durchsatz oder Latenz abhängiger Ladezugriffe. |
+| `op` (memory) | `read` \| `write` \| `copy` | `read` | Nur bei `bandwidth`. |
+| `buffer_size` (memory) | Größe | – (Pflicht) | Puffer **pro Thread**, mindestens 8 KiB. Für Arbeitsspeicher statt Cache deutlich größer als der L3-Cache wählen (256 MiB bis 1 GiB). |
+| `warmup_s` | Zahl ≥ 0 | 1 | Aufwärmen vor der Messung (Takt, Caches, TLB). |
+| `duration_s` | Zahl > 0 | – (Pflicht) | Messdauer. |
+| `numa_node` | Integer | alle Knoten | Nur Prozessoren dieses Knotens nutzen. |
+| `mem_node` (memory) | Integer | Knoten des Threads | Puffer auf diesem Knoten anlegen; `numa_node` ≠ `mem_node` misst remote. |
+| `nontemporal` (memory) | Boolean | `false` | Streaming Stores für `write`/`copy` (x64). |
+| `simd` (memory) | `auto` \| `scalar` \| `sse2` \| `avx2` \| `avx512` \| `neon` | `auto` | Befehlssatz der Bandbreiten-Kernel; `auto` = AVX2, sonst SSE2 (x64) bzw. NEON (ARM64). AVX-512 nur auf ausdrückliche Anforderung. |
+
+Threads werden fest an logische Prozessoren gebunden, auch über Prozessorgruppen hinweg
+(Systeme mit mehr als 64 logischen Prozessoren). Reihenfolge der Auswahl: zuerst ein
+Thread pro physischem Kern, die NUMA-Knoten abwechselnd, danach die SMT-Geschwister.
+`threads: 1` misst also einen Kern auf Knoten 0, `threads: 2` je einen Kern auf zwei
+Knoten (falls vorhanden).
+
+### Ergebnis
+
+`summary` (cpu): `workload`, `threads`, `ops_per_s`, `score`, `ops`, `cpus` (gebundene
+Prozessoren in Thread-Reihenfolge), `cpu_pct`, optional `numa_node`.
+
+`summary` (memory): `mode`, `op`, `threads`, `buffer_size_bytes` (tatsächliche Größe),
+`gbps` + `simd` + `nontemporal` + `bytes` (bandwidth) bzw. `latency_ns` + `loads`
+(latency), `cpus`, `cpu_pct`, optional `numa_node`, `mem_node`.
+
+`per_worker[]`: `id`, `cpu`, `node`, bei memory `mem_node`, dazu `ops_per_s`, `gbps` oder
+`latency_ns`. `timeseries[]`: `t`, `ops_per_s` | `gbps` | `latency_ns`, `cpu_pct`.
+
+Einheiten: `gbps` = 10^9 Byte/s, Summe aller Threads; bei `copy` zählen gelesene **und**
+geschriebene Bytes (wie STREAM). `latency_ns` = mittlere Zeit eines abhängigen Ladezugriffs.
+`score` = `ops_per_s` ÷ Referenz-Rate eines Threads × 1000 (Referenzen in `docs/core.md`).
+
+### Fortschritt
+
+- `preparing` (nur memory): `progress` mit `unit: "bytes"` beim Anlegen und
+  Beschreiben der Puffer (Summe aller Threads).
+- `warmup`: `progress` mit `unit: "s"`.
+- `measure`: `tick` mit `ops_per_s` (cpu), `gbps` (bandwidth) oder `latency_ns`
+  (latency), dazu `cpu_pct`, `proc_cpu_pct` und – außer bei latency – `workers[]`
+  mit `id` und dem Wert pro Thread. Ab 1.3 zusätzlich `metric` und bei cpu `score`.
+- Stop (`sbench stop`, Strg+C) beendet die Messung innerhalb von ≤ 250 ms; das
+  Teilergebnis enthält die bis dahin gemessenen Werte (ab 1.3 mit `partial: true`).
+
+## Vertrag 1.3: metric, threads/cpus, Teilergebnisse, Score
+
+Alle Felder sind optional im Schema und werden von sbench ab 1.3 immer ausgegeben. Beispiele:
+[`progress-compute.jsonl`](../schema/examples/progress-compute.jsonl),
+[`result-compute.json`](../schema/examples/result-compute.json),
+[`progress-partial.jsonl`](../schema/examples/progress-partial.jsonl),
+[`result-partial.json`](../schema/examples/result-partial.json).
+
+### Ticks
+
+| Feld | Bedeutung |
+|---|---|
+| `metric` | Name des Hauptwerts in diesem Tick: `iops` (storage), `ops_per_s` (cpu), `gbps` (memory bandwidth), `latency_ns` (memory latency), `mbps` (net, später). Das gleichnamige Feld ist immer vorhanden. |
+| `score` | nur cpu: Score des Intervalls = `ops_per_s` ÷ `meta.cpu_score.ref_ops_per_s[workload]` × 1000. |
+| `workers[]` | Jeder Worker/Thread genau einmal, aufsteigend nach `id` (0 … n−1, wie `per_worker[].id` und `phase.cpus[].id`). Werte sind **Raten im Intervall** (IOPS, MB/s, ops/s, GB/s), keine Summen. Storage: Hat ein Worker den Intervallwechsel noch nicht quittiert (≤ 250 ms Wartezeit), zählt sein Intervall zum nächsten Tick; er steht dann mit 0 drin. `lat_us` fehlt bei Workern ohne abgeschlossene I/O im Intervall. memory latency hat kein `workers[]` (immer genau ein Thread, Wert = Gesamtwert). |
+
+### phase-Event beim Teststart
+
+Das erste `phase`-Event eines Tests (`preparing`) trägt `threads`: bei cpu/memory die
+tatsächliche Thread-Anzahl (auch bei `threads: 0` im Job schon aufgelöst; latency immer 1),
+bei storage die Anzahl Worker. cpu/memory zusätzlich `cpus[]`, ein Eintrag je Thread in
+Thread-Reihenfolge:
+
+| Feld | Bedeutung |
+|---|---|
+| `id` | Thread-Index (= `workers[].id`) |
+| `cpu` | globaler Index = `group` × 64 + `number` (wie `meta.numa_nodes[].cpus`, `summary.cpus`) |
+| `group`, `number` | Prozessorgruppe und Nummer in der Gruppe (`PROCESSOR_NUMBER`) |
+| `numa_node` | NUMA-Knoten des Prozessors |
+| `core` | laufende Nummer des physischen Kerns innerhalb des Laufs; gleicher Wert = SMT-Geschwister |
+| `smt_sibling_of` | globaler Index des ersten logischen Prozessors desselben Kerns, `null` für diesen selbst (bzw. ohne SMT) |
+
+Bei mehr Threads als Prozessoren (`W_OVERSUBSCRIBED`) wiederholen sich `cpu`-Werte.
+Storage-Worker werden nicht gebunden; dort gibt es kein `cpus`.
+
+### Teilergebnisse (`partial`, `stopped_in`)
+
+Jeder Test im Ergebnis trägt `partial` (`false` = vollständig gelaufen). `partial: true`
+heißt: der Test endete vorzeitig durch `sbench stop`/Strg+C oder einen Laufzeitfehler (Ursache
+in `errors[]`); `stopped_in` nennt die Phase (`preparing`, `warmup`, `measure`, Namen wie im
+`phase`-Event).
+
+| Ende in | Test im Ergebnis | Messwerte |
+|---|---|---|
+| vor dem Test (Stop zwischen zwei Tests) | fehlt | – |
+| `preparing`, `warmup` | steht drin, `partial: true` | alle Messwerte der `summary` `null` (nicht 0): storage `iops`, `mbps`, `read_*`, `write_*`, `lat_us`, `errors`, `io_count`, `cpu_pct`, `proc_cpu_pct`; cpu `ops_per_s`, `score`, `ops`, `cpu_pct`, `proc_cpu_pct`; memory `gbps`/`latency_ns`, `bytes`/`loads`, `cpu_pct`, `proc_cpu_pct`. `per_worker`, `per_spec`, `histogram`, `timeseries` sind leer. Konfiguration (`threads`, `cpus`, `buffer_size_bytes`, `simd`, `targets[]`) bleibt gesetzt. |
+| `measure` | steht drin, `partial: true` | Werte über die tatsächlich gemessene Zeit (Raten bezogen auf diese Zeit) |
+| – | `partial: false` | vollständig |
+
+Nach dem abgebrochenen Test folgende Tests fehlen. `aborted` ist ab Vertrag 1.3.1 nur bei einem
+Stopp `true`, bei einem Laufzeitfehler `false` (siehe [Vertrag 1.3.1](#vertrag-131-cpus-im-ergebnis-aborted-und-fatal)).
+Ein `null`-Messwert kommt nur bei `partial: true` mit `stopped_in` `preparing`/`warmup` vor.
+
+### Score und Referenzwerte
+
+`meta.cpu_score` (in `sb-result` und `sb-info`): `formula`, `points` (1000), `reference_threads`
+(1), `reference_system` und `ref_ops_per_s` je workload (`int`, `float`, `crypto`, `mixed`).
+`summary.score_reference` (cpu) ist die Referenz des Tests; `score = ops_per_s ÷
+score_reference × 1000`. Die GUI muss keine Werte aus `docs/core.md` übernehmen.
+
+### CPU-Last und Zeitreihe
+
+- `summary.proc_cpu_pct` (alle Typen) und `summary.cpu_pct` (jetzt auch storage): Mittel über
+  die Messphase, Skala wie im Tick.
+- `timeseries[]` hat einen Punkt je `tick`-Event, also im Takt `--tick-ms`, nicht fest 1 s;
+  das Intervall steht in `tick_ms` des Ergebnisses. Neu: `timeseries[].proc_cpu_pct`, bei cpu
+  `timeseries[].score`.
+
+### Fortschritt `preparing`
+
+| Testtyp | Häufigkeit | `total` |
+|---|---|---|
+| storage | ≥ 1 s Abstand beim Füllen einer Testdatei, plus ein Event je fertiger Datei | Summe `file_size` aller `kind: file`-Targets |
+| memory | etwa alle 0,3 s (≥ 250 ms Abstand), plus ein Abschluss-Event mit `done = total` | `threads` × `summary.buffer_size_bytes` (tatsächliche, abgerundete Größe), auch bei `copy` (beide Pufferhälften werden beschrieben) |
+| cpu | keine `progress`-Events (nichts vorzubereiten) | – |
+
+`warmup`: storage etwa jede Sekunde, cpu/memory etwa alle 0,5 s (`unit: "s"`).
+
+## Vertrag 1.3.1: `cpus` im Ergebnis, `aborted` und `fatal`
+
+### `cpus` im Ergebnis
+
+Bei cpu- und memory-Tests steht `cpus[]` zusätzlich direkt im Testobjekt des Ergebnisses
+(`tests[].cpus`, neben `summary`), mit demselben Inhalt wie `phase.cpus` im ersten
+`phase`-Event des Tests (Felder `id`, `cpu`, `group`, `number`, `numa_node`, `core`,
+`smt_sibling_of`, siehe [phase-Event beim Teststart](#phase-event-beim-teststart)). Damit kann
+die GUI SMT-Geschwister und NUMA-Knoten auch nachträglich, ohne Progress-Strom, über
+`per_worker[].id` zuordnen.
+
+- Optional im Schema (`$defs/cpu_binding` in `sb-result-1.schema.json`); sbench ab 1.3.1 gibt es
+  bei cpu/memory immer aus, sobald die Threads verteilt sind, also auch bei `partial: true`.
+  Es fehlt nur, wenn die Prozessor-Topologie nicht lesbar war.
+- `tests[].cpus[i].cpu` = `summary.cpus[i]` = `per_worker[i].cpu`; `numa_node` = `per_worker[i].node`.
+- Bei storage, net_client, net_server und hyperv_info ist `cpus` nicht erlaubt.
+- Beispiele: [`result-compute.json`](../schema/examples/result-compute.json),
+  [`result-partial.json`](../schema/examples/result-partial.json).
+
+### `aborted` und `errors[].fatal`
+
+| Ende des Laufs | Exit | `aborted` (Ergebnis, `done`) | betroffener Test | folgende Tests |
+|---|---|---|---|---|
+| vollständig | 0 | `false` | – | – |
+| Stopp (`sbench stop`, Strg+C) | 3 | `true` | `partial: true`, `stopped_in`; kein `fatal` | fehlen |
+| Laufzeitfehler (z. B. `E_TARGET_SIZE`, `E_OUT_OF_MEMORY`, zu viele I/O-Fehler eines Workers) | 1 | **`false`** (bis 1.3: `true`) | `partial: true`, `stopped_in`; genau ein `errors[]`-Eintrag mit `fatal: true` | fehlen, werden nicht mehr ausgeführt |
+
+- `fatal: true` steht an genau dem `errors[]`-Eintrag, der den Test und damit den Lauf beendet
+  hat, also höchstens einmal im Ergebnis und nur im letzten Test. Fehlt das Feld, gilt `false`.
+  Nicht abbrechende Fehler (z. B. einzelne fehlgeschlagene I/Os unter der Abbruchgrenze) haben
+  kein `fatal`. Bei storage kann derselbe Eintrag zusammengefasste I/O-Fehler (`count`) tragen.
+- Das `error`-Event im Progress-Strom bleibt unverändert (ohne `fatal`).
+- Beispiele: [`result-fatal.json`](../schema/examples/result-fatal.json),
+  [`progress-fatal.jsonl`](../schema/examples/progress-fatal.jsonl).
+
+### `done.exit_code`
+
+Das `done`-Event trägt ab 1.3.1 `exit_code` (Integer), genau den Exit-Code, mit dem sbench
+direkt danach endet. `done` wird nur geschrieben, wenn die Ergebnisdatei geschrieben ist,
+deshalb kommen dort praktisch nur 0, 1 und 3 vor (2 und 4 enden ohne `done`); das Schema
+erlaubt 0–4.
+
+- `exit_code: 3` genau dann, wenn `aborted: true`.
+- `exit_code: 1` genau dann, wenn das Ergebnis einen `errors[]`-Eintrag mit `fatal: true`
+  hat; im Progress-Strom steht davor das zugehörige `error`-Event.
+- Optional im Schema; ältere sbench-Versionen (bis 1.3) schreiben es nicht.
+- Beispiele: [`progress-fatal.jsonl`](../schema/examples/progress-fatal.jsonl) (1),
+  [`progress-partial.jsonl`](../schema/examples/progress-partial.jsonl) (3).
+
+Empfohlene Reihenfolge für Clients (z. B. die GUI, wenn sie den Prozess nicht selbst
+gestartet hat oder sein Exit-Code nicht verfügbar ist, etwa bei `runas`):
+
+1. `exit_code` der Zeile zum Lauf in `<data_dir>\runs\index.jsonl`.
+2. Sonst `done.exit_code` aus dem Progress-Strom bzw. der Fortschrittsdatei.
+3. Sonst Ableitung aus dem Ergebnis (bzw. `done.aborted` bei Läufen bis 1.3):
+   `aborted: true` → 3; ein `errors[]`-Eintrag mit `fatal: true` → 1; sonst 0. Bei
+   Ergebnissen bis 1.3 bedeutet `aborted: true` Stopp **oder** Laufzeitfehler; unterscheiden
+   lässt sich das dann nur über die Fehler in `tests[].errors`.
+
 ## Exit-Codes
 
 | Code | Bedeutung |
@@ -317,7 +615,9 @@ lesbar war (dann `sha256: null`).
 | 4 | Fehlende Rechte (z. B. `physical`/`volume`-Target ohne Administratorrechte) |
 
 Bei 0 und 3 existiert die Ergebnisdatei immer. Bei 1 wird – soweit möglich – ein
-Teilergebnis mit `aborted: true` und den Fehlern in `tests[].errors` geschrieben.
+Teilergebnis mit den Fehlern in `tests[].errors` geschrieben; ab Vertrag 1.3.1 mit
+`aborted: false` und `fatal: true` an dem Fehler, der den Lauf beendet hat (vorher
+`aborted: true`).
 Bei 2 und 4 wird keine Messung gestartet und keine Ergebnisdatei geschrieben;
 die Ursache steht in einem `error`-Event (mit `field` als JSON Pointer bei 2).
 
@@ -339,7 +639,8 @@ die Ursache steht in einem `error`-Event (mit `field` als JSON Pointer bei 2).
 
 ## Laufzeit-Fehlercodes (Auswahl)
 
-`E_IO`, `E_ACCESS_DENIED`, `E_NET_CONNECT`, `E_NET_BIND`, `E_TIMEOUT`, `E_PIPE_CONNECT`
+`E_IO`, `E_ACCESS_DENIED`, `E_OUT_OF_MEMORY` (Puffer nicht anforderbar), `E_NUMA_NODE`,
+`E_SIMD_UNSUPPORTED`, `E_NET_CONNECT`, `E_NET_BIND`, `E_TIMEOUT`, `E_PIPE_CONNECT`
 (Named Pipe nach 10 s nicht erreichbar), `E_DESTRUCTIVE_NOT_ALLOWED`, `E_INTERNAL`. Codes folgen dem Muster `E_[A-Z0-9_]+`; neue Codes dürfen ohne
 Versionswechsel ergänzt werden, die GUI muss unbekannte Codes generisch anzeigen.
 

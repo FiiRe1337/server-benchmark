@@ -1,0 +1,38 @@
+{
+  "schema": "sb-job/1",
+  "name": "Abnahme M2 – Latenz Cache und RAM",
+  "tests": [
+    {
+      "type": "memory",
+      "name": "Latenz 16KiB",
+      "mode": "latency",
+      "buffer_size": "16KiB",
+      "warmup_s": 2,
+      "duration_s": 10
+    },
+    {
+      "type": "memory",
+      "name": "Latenz 256KiB",
+      "mode": "latency",
+      "buffer_size": "256KiB",
+      "warmup_s": 2,
+      "duration_s": 10
+    },
+    {
+      "type": "memory",
+      "name": "Latenz 8MiB",
+      "mode": "latency",
+      "buffer_size": "8MiB",
+      "warmup_s": 2,
+      "duration_s": 10
+    },
+    {
+      "type": "memory",
+      "name": "Latenz 1GiB",
+      "mode": "latency",
+      "buffer_size": "1GiB",
+      "warmup_s": 2,
+      "duration_s": 10
+    }
+  ]
+}

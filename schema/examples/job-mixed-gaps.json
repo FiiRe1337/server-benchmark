@@ -1,12 +1,11 @@
 {
   "schema": "sb-job/1",
-  "name": "Gemischter Job mit Lücken (cpu/memory noch nicht implementiert)",
+  "name": "Gemischter Job mit Lücken (net_client und hyperv_info noch nicht implementiert)",
   "tests": [
     {
-      "type": "cpu",
-      "name": "CPU gemischt",
-      "threads": 0,
-      "workload": "mixed",
+      "type": "net_client",
+      "name": "Netz zu 192.0.2.20",
+      "host": "192.0.2.20",
       "duration_s": 30
     },
     {
@@ -49,12 +48,9 @@
       ]
     },
     {
-      "type": "memory",
-      "mode": "bandwidth",
-      "op": "copy",
-      "threads": 0,
-      "buffer_size": "256MiB",
-      "duration_s": 20
+      "type": "hyperv_info",
+      "include_perfcounters": true,
+      "sample_s": 5
     },
     {
       "type": "storage",

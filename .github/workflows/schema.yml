@@ -5,11 +5,13 @@ on:
     paths:
       - "schema/**"
       - "tools/validate_examples.py"
+      - "jobs/**"
       - ".github/workflows/schema.yml"
   pull_request:
     paths:
       - "schema/**"
       - "tools/validate_examples.py"
+      - "jobs/**"
       - ".github/workflows/schema.yml"
 
 permissions:

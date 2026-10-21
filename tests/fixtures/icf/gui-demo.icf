@@ -1,0 +1,26 @@
+Version 1.1.0 
+'TEST SETUP ====================================================================
+'Test Description
+	DB-Server Altprofil
+'Run Time
+'	hours      minutes    seconds
+	0          1          0
+'Ramp Up Time (s)
+	10
+'END test setup
+'ACCESS SPECIFICATIONS =========================================================
+'Access specification name,default assignment
+	OLTP 8K 70/30,NONE
+'size,% of size,% reads,% random,delay,burst,align,reply
+	8192,90,70,100,0,1,0,0
+	65536,10,100,0,0,1,0,512
+'Access specification name,default assignment
+	Backup 256K seq,NONE
+'size,% of size,% reads,% random,delay,burst,align,reply
+	262144,100,100,0,0,1,0,0
+'END access specifications
+'MANAGER LIST ==================================================================
+'Manager ID, manager name
+	1,DEMO-HV01
+'END manager list
+End of configuration file

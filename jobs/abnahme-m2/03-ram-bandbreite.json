@@ -1,0 +1,58 @@
+{
+  "schema": "sb-job/1",
+  "name": "Abnahme M2 – RAM-Bandbreite alle Threads",
+  "tests": [
+    {
+      "type": "memory",
+      "name": "RAM read alle Threads",
+      "mode": "bandwidth",
+      "op": "read",
+      "threads": 0,
+      "buffer_size": "256MiB",
+      "warmup_s": 3,
+      "duration_s": 20
+    },
+    {
+      "type": "memory",
+      "name": "RAM write alle Threads",
+      "mode": "bandwidth",
+      "op": "write",
+      "threads": 0,
+      "buffer_size": "256MiB",
+      "warmup_s": 3,
+      "duration_s": 20
+    },
+    {
+      "type": "memory",
+      "name": "RAM write NT alle Threads",
+      "mode": "bandwidth",
+      "op": "write",
+      "nontemporal": true,
+      "threads": 0,
+      "buffer_size": "256MiB",
+      "warmup_s": 3,
+      "duration_s": 20
+    },
+    {
+      "type": "memory",
+      "name": "RAM copy alle Threads",
+      "mode": "bandwidth",
+      "op": "copy",
+      "threads": 0,
+      "buffer_size": "256MiB",
+      "warmup_s": 3,
+      "duration_s": 20
+    },
+    {
+      "type": "memory",
+      "name": "RAM copy NT alle Threads",
+      "mode": "bandwidth",
+      "op": "copy",
+      "nontemporal": true,
+      "threads": 0,
+      "buffer_size": "256MiB",
+      "warmup_s": 3,
+      "duration_s": 20
+    }
+  ]
+}

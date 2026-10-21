@@ -9,7 +9,9 @@ Prüft gegen die JSON-Schemas in schema/ (jsonschema):
     -> Exit 0, Ergebnis sb-result/1 + semantische Regeln, Fortschritt sb-progress/1
   * Fortschritt über Named Pipe (GUI-Rolle: Python legt die Pipe als Server an)
   * Stop: Lauf starten, nach 2 s 'sbench stop' -> Exit 3, aborted = true
-  * nicht implementierte Testtypen -> error-Event E_NOT_IMPLEMENTED
+  * nicht implementierte Testtypen (net_*, hyperv_info) -> error-Event E_NOT_IMPLEMENTED
+  * Meilenstein 2 (cpu, memory, NUMA): siehe smoke_m2.py
+  * import-icf (Iometer-ICF -> sb-job/1): siehe smoke_icf.py
   * export (flat/iometer), bundle (ZIP, manifest gegen sb-bundle/1, sha256,
     --all/--results/--include/--anonymize)
   * Vertrag 1.1: runs/<id>.jsonl, Lock-Datei, runs/index.jsonl, list --running --json,
@@ -59,6 +61,10 @@ try:
     from validate_examples import semantic_checks
 except Exception:  # noqa: BLE001
     semantic_checks = None
+try:
+    from validate_examples import check_progress_v13
+except Exception:  # noqa: BLE001
+    check_progress_v13 = None
 
 SCHEMAS = {p.name: json.loads(p.read_text(encoding="utf-8")) for p in SCHEMA_DIR.glob("*.schema.json")}
 V = {k: make_validator(k, SCHEMAS) for k in SCHEMAS}
@@ -94,7 +100,7 @@ def read_jsonl(path: Path) -> list[dict]:
     return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
 
 
-def check_progress(events: list[dict], what: str, expect_aborted: bool | None = None) -> None:
+def check_progress(events: list[dict], what: str, expect_aborted: bool | None = None, rc: int | None = None) -> None:
     bad = 0
     for i, ev in enumerate(events):
         errs = list(V["sb-progress-1.schema.json"].iter_errors(ev))
@@ -108,6 +114,9 @@ def check_progress(events: list[dict], what: str, expect_aborted: bool | None = 
     check(bool(evs) and evs[-1] == "done" and evs.count("done") == 1, f"{what}: letztes Event ist done (genau einmal)")
     if expect_aborted is not None and evs and evs[-1] == "done":
         check(events[-1]["aborted"] is expect_aborted, f"{what}: done.aborted = {expect_aborted}")
+    if rc is not None and evs and evs[-1] == "done":
+        # Vertrag 1.3.1: done.exit_code = tatsächlicher Exit-Code des Prozesses
+        check(events[-1].get("exit_code") == rc, f"{what}: done.exit_code {events[-1].get('exit_code')} = Prozess-Exit-Code {rc}")
     # Ticks nur in measure
     phase = None
     tick_ok = True
@@ -126,6 +135,22 @@ def check_progress(events: list[dict], what: str, expect_aborted: bool | None = 
         if e["ev"] == "progress" and (e["phase"] != phase or e["done"] > e["total"] + 1e-9):
             prog_ok = False
     check(prog_ok, f"{what}: progress-Events passen zur Phase, done <= total")
+    # Vertrag 1.3 (nur Lauf-Ströme; bundle meldet nur preparing/progress)
+    if any(e["ev"] == "tick" or (e["ev"] == "phase" and e["name"] != "preparing") for e in events):
+        ticks = [e for e in events if e["ev"] == "tick"]
+        check(all("metric" in e and e["metric"] in e for e in ticks), f"{what}: jeder Tick mit metric (Vertrag 1.3)")
+        check(all("score" in e for e in ticks if e.get("metric") == "ops_per_s"), f"{what}: cpu-Ticks mit score")
+        first: dict[int, dict] = {}
+        for e in events:
+            if e["ev"] == "phase":
+                first.setdefault(e["test"], e)
+        check(all(e["name"] == "preparing" and e.get("threads", 0) >= 1 for e in first.values()),
+              f"{what}: erstes phase-Event je Test mit threads")
+        if check_progress_v13:
+            v = check_progress_v13(events)
+            for m in v[:5]:
+                print("         " + m)
+            check(not v, f"{what}: Regeln Vertrag 1.3 (workers[] vollständig/sortiert, phase.cpus)")
 
 
 def check_result(path: Path, what: str, expect_aborted: bool, job: Path | None = None) -> dict | None:
@@ -140,6 +165,11 @@ def check_result(path: Path, what: str, expect_aborted: bool, job: Path | None =
             print("         " + m)
         check(not extra, f"{what}: semantische Regeln (Summen = io_count, index steigend{' < Tests im Job' if jdoc else ''}, NUMA disjunkt)")
     check(doc["aborted"] is expect_aborted, f"{what}: aborted = {expect_aborted}")
+    # Vertrag 1.3
+    check(isinstance(doc.get("tick_ms"), int) and "cpu_score" in doc.get("meta", {}), f"{what}: tick_ms und meta.cpu_score")
+    check(all(isinstance(t.get("partial"), bool) for t in doc.get("tests", [])), f"{what}: partial in jedem Test")
+    check(all("proc_cpu_pct" in t["summary"] for t in doc.get("tests", []) if t["type"] in ("storage", "cpu", "memory")),
+          f"{what}: summary.proc_cpu_pct")
     return doc
 
 
@@ -417,7 +447,7 @@ def main() -> int:
             "--tick-ms", "1000", timeout=600)
     check(p.returncode == 0, f"run Exit 0 (ist {p.returncode}, {time.time() - t0:.1f} s)")
     events = read_jsonl(prog)
-    check_progress(events, "Fortschritt (file:)", expect_aborted=False)
+    check_progress(events, "Fortschritt (file:)", expect_aborted=False, rc=p.returncode)
     ticks = [e for e in events if e["ev"] == "tick"]
     check(len(ticks) >= 4, f"mindestens 4 Ticks bei 5 s / 1000 ms (ist {len(ticks)})")
     progs = [e for e in events if e["ev"] == "progress"]
@@ -432,6 +462,11 @@ def main() -> int:
           "Ticks mit read/write-Aufteilung und proc_cpu_pct")
     check(all(abs(t["read_iops"] + t["write_iops"] - t["iops"]) <= 0.2 for t in ticks), "Tick: read_iops + write_iops = iops")
     check(all("lat_us" in w for t in ticks for w in t["workers"] if w["iops"] > 0), "Tick: workers[].lat_us")
+    check(all(t.get("metric") == "iops" and [w["id"] for w in t["workers"]] == [0, 1] for t in ticks),
+          "Tick: metric iops, workers[] vollständig und nach id sortiert (Vertrag 1.3)")
+    ph0 = next((e for e in events if e["ev"] == "phase"), {})
+    check(ph0.get("name") == "preparing" and ph0.get("threads") == 2 and "cpus" not in ph0,
+          f"storage: erstes phase-Event mit threads = 2 Worker, ohne cpus ({ph0})")
     sm = json.loads(out.read_text(encoding="utf-8")) if out.exists() else {"tests": [{}]}
     tg = sm["tests"][0].get("targets", [])
     check(tg == [{"index": 0, "path": str(testfile), "kind": "file", "created": True, "deleted": True}] and not testfile.exists(),
@@ -567,11 +602,13 @@ def main() -> int:
         proc.kill()
         rc = None
     check(rc == 3, f"run nach stop: Exit 3 (ist {rc}, Reaktionszeit {time.time() - ts:.2f} s)")
-    check_progress(read_jsonl(sprog), "Fortschritt (stop)", expect_aborted=True)
+    check_progress(read_jsonl(sprog), "Fortschritt (stop)", expect_aborted=True, rc=rc)
     sres = check_result(sout, "Teilergebnis (stop)", expect_aborted=True)
     if sres and sres["tests"]:
         s = sres["tests"][0]["summary"]
         check(s["io_count"] > 0, f"Teilergebnis enthält Messwerte ({s['io_count']} I/Os, {s['iops']:.0f} IOPS)")
+        check(sres["tests"][0].get("partial") is True and sres["tests"][0].get("stopped_in") == "measure",
+              "Teilergebnis storage: partial true, stopped_in measure (Vertrag 1.3)")
         tg = sres["tests"][0].get("targets", [])
         check(len(tg) == 1 and tg[0]["created"] and tg[0]["deleted"] and not testfile.exists(),
               f"#5: Testdatei auch nach stop gelöscht ({tg})")
@@ -602,20 +639,19 @@ def main() -> int:
 
     print("\n== nicht implementierte Testtypen ==")
     ni = storage_job(work / "job-ni.json", "ni", testfile, 1, warmup=0,
-                     extra_tests=[{"type": "cpu", "duration_s": 1}, {"type": "memory", "mode": "latency", "buffer_size": "64MiB", "duration_s": 1},
-                                  {"type": "net_client", "host": "127.0.0.1", "duration_s": 1}, {"type": "hyperv_info"}])
-    # Storage an Position 1 (cpu davor): echte Ergebnisse haben Lücken in tests[].index
+                     extra_tests=[{"type": "net_client", "host": "127.0.0.1", "duration_s": 1}, {"type": "hyperv_info"}])
+    # Storage an Position 1 (net_client davor): echte Ergebnisse haben Lücken in tests[].index
     nij = json.loads(ni.read_text(encoding="utf-8"))
     nij["tests"].insert(1, nij["tests"].pop(0))
     ni.write_text(json.dumps(nij), encoding="utf-8")
     nprog = work / "progress-ni.jsonl"
     nout = work / "result-ni.json"
     p = run(sbench, "run", "--job", ni, "--out", nout, "--progress", f"file:{nprog}")
-    check(p.returncode == 0, f"Job mit cpu/memory/net/hyperv_info: Exit 0 (ist {p.returncode})")
+    check(p.returncode == 0, f"Job mit net/hyperv_info: Exit 0 (ist {p.returncode})")
     nevs = read_jsonl(nprog)
-    check_progress(nevs, "Fortschritt (not implemented)", expect_aborted=False)
+    check_progress(nevs, "Fortschritt (not implemented)", expect_aborted=False, rc=p.returncode)
     nis = [e for e in nevs if e["ev"] == "error" and e["code"] == "E_NOT_IMPLEMENTED"]
-    check(sorted(e["test"] for e in nis) == [0, 2, 3, 4], "E_NOT_IMPLEMENTED für Tests 0, 2-4")
+    check(sorted(e["test"] for e in nis) == [0, 2], "E_NOT_IMPLEMENTED für Tests 0 und 2 (net_client, hyperv_info)")
     nres = check_result(nout, "Ergebnis (not implemented)", expect_aborted=False, job=ni)
     if nres:
         check([t["index"] for t in nres["tests"]] == [1], "nur der Storage-Test im Ergebnis, index = 1 (Lücke)")
@@ -648,6 +684,11 @@ def main() -> int:
               and any(e.get("ev") == "error" and e.get("code") == "E_ACCESS_DENIED" for e in pev),
               f"run ohne Admin: Exit 4 (ist {rr and rr[0]}), E_ACCESS_DENIED, kein Ergebnis")
         SUMMARY.append(f"#6 Exit 4 ohne Admin: {'ok' if rr and rr[0] == 4 else 'FEHLER'}")
+
+    import smoke_m2  # noqa: E402  (tests/smoke liegt durch den Skriptaufruf im sys.path)
+    m2 = smoke_m2.run_m2(sys.modules[__name__], sbench, work, info, quick)
+    import smoke_icf  # noqa: E402
+    icf = smoke_icf.run_icf(sys.modules[__name__], sbench, work, quick)
 
     print("\n== export ==")
     for style in ("flat", "iometer"):
@@ -755,10 +796,10 @@ def main() -> int:
     user = os.environ.get("USERNAME", "runneradmin")
     gui = work / "gui-logs"
     (gui / "sub").mkdir(parents=True)
-    (gui / "gui.log").write_text(f"2026-10-20T08:00:00Z verbunden mit {host} (192.168.17.4, fe80::1c2b:3a4d:5e6f:7081%12)\n"
+    (gui / "gui.log").write_text(f"2026-10-20T08:00:00Z verbunden mit {host} (203.0.113.4, fe80::1c2b:3a4d:5e6f:7081%12)\n"
                                  f"Profil C:\\Users\\{user}\\AppData\\sbench MAC 00-15-5D-01-02-03 Zeit 12:34:56\n",
                                  encoding="utf-8")
-    (gui / "sub" / "profil.json").write_text(json.dumps({"host": host, "ip": "192.168.17.4", "mac": "00:15:5d:01:02:03",
+    (gui / "sub" / "profil.json").write_text(json.dumps({"host": host, "ip": "203.0.113.4", "mac": "00:15:5d:01:02:03",
                                                           "pfad": f"C:\\Users\\{user}\\x.json", "version": "10.0.20348"}),
                                              encoding="utf-8")
     (gui / "bild.bin").write_bytes(b"\x00\x01" + host.encode())
@@ -778,7 +819,7 @@ def main() -> int:
                         leaks.append(f"{n}: Hostname")
                     if f"\\{user.lower()}\\" in t.lower() or f"\\\\{user.lower()}\\\\" in t.lower():
                         leaks.append(f"{n}: Benutzername")
-                    if "192.168.17.4" in t or "00:15:5d:01:02:03" in t.lower() or "00-15-5d-01-02-03" in t.lower() or "fe80::1c2b" in t:
+                    if "203.0.113.4" in t or "00:15:5d:01:02:03" in t.lower() or "00-15-5d-01-02-03" in t.lower() or "fe80::1c2b" in t:
                         leaks.append(f"{n}: Adresse")
             check(not leaks, f"anonymisiert: keine Hostnamen/Benutzer/IPs/MACs ({leaks[:5]})")
             g = z.read("extra/gui-logs/gui.log").decode("utf-8")
@@ -808,7 +849,9 @@ def main() -> int:
         # feste Namen für das Artefakt sbench-smoke-<runner>-<arch>
         for src, name in [(out, "result.json"), (prog, "progress.jsonl"), (sout, "result-stop.json"), (nout, "result-ni.json"),
                           (zp, "bundle.zip"), (zp3, "bundle-anon.zip"),
-                          (work / "result-vol.json", "result-volume.json")]:
+                          (work / "result-vol.json", "result-volume.json"),
+                          (m2.get("cpu", work / "-"), "result-cpu.json"), (m2.get("memory", work / "-"), "result-memory.json"),
+                          (icf.get("result", work / "-"), "result-icf.json"), (work / "icf-standard.json", "job-icf-standard.json")]:
             if src.exists():
                 shutil.copy2(src, od / name)
         (od / "info.json").write_text(json.dumps(info, indent=2, ensure_ascii=False), encoding="utf-8")

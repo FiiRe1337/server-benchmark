@@ -30,10 +30,13 @@ endif()
 
 set(SB_CORE_SOURCES
   core/src/bundle.c
+  core/src/compute.c
   core/src/export.c
   core/src/hist.c
+  core/src/icf.c
   core/src/info.c
   core/src/job.c
+  core/src/kernels.c
   core/src/log.c
   core/src/progress.c
   core/src/rng.c
@@ -42,7 +45,9 @@ set(SB_CORE_SOURCES
   core/src/sha256.c
   core/src/storage.c
   core/src/target.c
+  core/src/topo.c
   core/src/util.c
+  core/src/vertrag.c
   third_party/cjson/cJSON.c
   third_party/miniz/miniz.c
 )

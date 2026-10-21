@@ -83,7 +83,12 @@ zerstören Daten und laufen nur, wenn das Target `allow_destructive: true` hat *
 - **Ticks:** Jeder Worker führt zwei Intervall-Puffer (Zähler + Histogramm). Der
   Haupt-Thread fordert im Takt `--tick-ms` einen Wechsel an, der Worker bestätigt ihn
   zwischen zwei I/Os, ohne Sperren im I/O-Pfad. Ein letztes Teilintervall wird
-  gemeldet, wenn es mindestens 10 % eines Ticks lang ist.
+  gemeldet, wenn es mindestens 10 % eines Ticks lang ist. Der Haupt-Thread wartet höchstens
+  250 ms auf die Quittungen; ein Worker, der bis dahin nicht quittiert hat (z. B. eine I/O
+  hängt), steht im Tick mit 0 und sein Intervall zählt zum nächsten Tick. `workers[]` enthält
+  trotzdem immer alle Worker, nach `id` sortiert (Vertrag 1.3, docs/cli.md).
+- **Zeitreihe:** `timeseries[]` im Ergebnis sind genau die Tick-Intervalle (`--tick-ms`,
+  im Ergebnis `tick_ms`), nicht fest 1 s.
 - **CPU:** `cpu_pct` = Systemlast über alle logischen Prozessoren aus `GetSystemTimes`.
   `proc_cpu_pct` = CPU-Zeit von sbench (`GetProcessTimes`) bezogen auf alle logischen
   Prozessoren (gleiche Skala).
@@ -97,11 +102,24 @@ zerstören Daten und laufen nur, wenn das Target `allow_destructive: true` hat *
 - **CPU:** Modell aus CPUID (x64) bzw. Registry (ARM64), Sockel/Kerne/Threads aus
   `GetLogicalProcessorInformationEx`.
 - **RAM:** `GetPhysicallyInstalledSystemMemory`, frei aus `GlobalMemoryStatusEx`.
-- **NUMA:** `GetNumaNodeProcessorMaskEx`; `cpus` enthält globale Indizes
-  Prozessorgruppe × 64 + Bitnummer (bei nicht voll belegten Gruppen also mit Lücken), freier Speicher je Knoten aus `GetNumaAvailableMemoryNodeEx`.
-  **Grenze:** Win32 liefert keinen Gesamt-RAM je Knoten. Bei einem Knoten ist
-  `ram_bytes` der installierte RAM, bei mehreren Knoten der installierte RAM geteilt
-  durch die Knotenzahl (Näherung, mindestens der freie Speicher des Knotens).
+- **NUMA:** `GetLogicalProcessorInformationEx(RelationNumaNodeEx)` (Fallback
+  `RelationNumaNode`), auch für Knoten über mehrere Prozessorgruppen; `cpus` enthält
+  globale Indizes Prozessorgruppe × 64 + Bitnummer (bei nicht voll belegten Gruppen also
+  mit Lücken), freier Speicher je Knoten aus `GetNumaAvailableMemoryNodeEx`.
+  **RAM pro Knoten (Issue #8):** Win32 hat keine API für den Gesamt-RAM eines Knotens.
+  `ram_method` nennt die Quelle von `ram_bytes`:
+  - `total` – nur ein Knoten: `ram_bytes` = für Windows nutzbarer physischer RAM
+    (`GlobalMemoryStatusEx.ullTotalPhys`).
+  - `srat` – mehrere Knoten: ACPI-Tabelle SRAT über `GetSystemFirmwareTable('ACPI', 'SRAT')`
+    (keine Adminrechte nötig). Summiert werden die Memory-Affinity-Einträge (Typ 1) je
+    Proximity Domain, die aktiv und weder Hotplug noch nichtflüchtig sind; die Domain wird
+    per `GetNumaProximityNodeEx` dem Knoten zugeordnet. Plausibilitätsprüfung: alle
+    Domains zugeordnet, Summe zwischen der Hälfte des sichtbaren und dem installierten RAM
+    (`GetPhysicallyInstalledSystemMemory`) + 5 %. Die SRAT-Werte enthalten auch vom
+    Firmware/Hypervisor reservierte Bereiche; die Summe kann daher etwas über
+    `meta.ram_bytes` liegen.
+  - `estimate` – SRAT fehlt oder ist unplausibel (z. B. manche VMs, Container): Aufteilung
+    des Gesamt-RAM im Verhältnis des freien Speichers der Knoten (ungenau).
 - **Hypervisor:** Alle verfügbaren Methoden werden ausgewertet und unter
   `partition_info.methods` ausgegeben:
   1. CPUID (nur x64): Hypervisor-Bit, Vendor (Leaf 0x40000000), Privileg
@@ -152,12 +170,105 @@ zerstören Daten und laufen nur, wenn das Target `allow_destructive: true` hat *
 und Binärdateien bleiben unverändert. Die Zuordnung gilt nur innerhalb eines Bundles und
 wird nicht gespeichert.
 
-## Grenzen und bekannte Abweichungen (M1)
+## CPU- und Memory-Engine (Meilenstein 2)
 
-- Nur `storage` ist implementiert. `cpu`, `memory`, `net_client`, `net_server` und
-  `hyperv_info` erzeugen ein `error`-Event `E_NOT_IMPLEMENTED` und werden übersprungen;
-  sie erscheinen nicht in `tests[]` des Ergebnisses.
-- Kein Pinning der Worker auf CPUs oder NUMA-Knoten; Windows verteilt die Threads.
+### Ablauf
+
+1. **Threadauswahl** (`topo.c`): Topologie aus `GetLogicalProcessorInformationEx`
+   (Gruppen, Kerne mit SMT-Geschwistern, NUMA-Knoten). Reihenfolge: erst ein logischer
+   Prozessor je physischem Kern, die Knoten abwechselnd (bzw. nur `numa_node`), dann die
+   SMT-Geschwister; bei mehr Threads als Prozessoren beginnt die Liste von vorn
+   (`W_OVERSUBSCRIBED`). `threads: 0` = alle (des Knotens).
+2. **Binden:** Jeder Thread wird angehalten erzeugt, per `SetThreadGroupAffinity` auf
+   genau einen logischen Prozessor gebunden (funktioniert über Prozessorgruppen hinweg,
+   also auch bei mehr als 64 logischen Prozessoren) und mit
+   `SetThreadIdealProcessorEx` markiert.
+3. **preparing** (memory): Jeder Thread legt seinen Puffer selbst mit
+   `VirtualAllocExNuma` auf `mem_node` bzw. dem eigenen Knoten an und beschreibt ihn
+   vollständig (First Touch), damit die physischen Seiten auf dem Zielknoten liegen.
+   Normale 4-KiB-Seiten (keine Large Pages: dafür wäre `SeLockMemoryPrivilege` nötig).
+   Fortschritt: der Hauptthread summiert die beschriebenen Bytes aller Threads etwa alle
+   0,3 s; `total` = Threads × tatsächliche Puffergröße (`buffer_size_bytes`, auch bei `copy`).
+   Bei `latency` folgt nach dem Beschreiben noch der Aufbau der Zeigerkette, der Fortschritt
+   steht dann schon bei 100 %. Das erste `phase`-Event nennt `threads` und je Thread den
+   gebundenen Prozessor mit Kern und SMT-Geschwister (`cpus`, Vertrag 1.3).
+4. **warmup** und **measure**: Die Threads arbeiten in Batches, deren Größe sich auf
+   0,5–2 ms einregelt; nach jedem Batch wird ein eigener, cache-zeilen-getrennter Zähler
+   aktualisiert. Der Hauptthread liest die Zähler zu Beginn und Ende der Messphase und pro
+   Tick (QPC-Zeitstempel). Die Messung enthält damit höchstens einen Batch Unschärfe je
+   Thread an den Rändern (≤ 2 ms bei ≥ 1 s Messdauer).
+
+### memory: Bandbreite
+
+| op | Kernel | gezählt |
+|---|---|---|
+| `read` | lädt den ganzen Puffer sequenziell und verknüpft die Werte per XOR/ADD (kein Wegoptimieren) | gelesene Bytes |
+| `write` | schreibt den Puffer sequenziell | geschriebene Bytes |
+| `copy` | kopiert die erste Pufferhälfte in die zweite | gelesene + geschriebene Bytes (STREAM-Zählweise) |
+
+`simd`: `scalar` (64-Bit-Zugriffe, Vektorisierung abgeschaltet), `sse2` (128 Bit),
+`avx2` (256 Bit), `avx512` (512 Bit, nur auf ausdrückliche Anforderung, weil der Takt
+auf manchen CPUs sinkt), `neon` (128 Bit, ARM64). `auto` = `avx2`, sonst `sse2` (x64) bzw.
+`neon` (ARM64). Erkennung per CPUID und XGETBV (das Betriebssystem muss die
+YMM/ZMM-Register sichern). `nontemporal` nutzt `_mm_stream_*` + `sfence` (x64) und
+umgeht die Caches beim Schreiben; das zeigt die echte Schreibbandbreite ohne
+Read-for-Ownership. GB/s = 10^9 Byte/s, Summe aller Threads.
+
+### memory: Latenz
+
+Pointer Chasing: Der Puffer wird in 64-Byte-Zeilen geteilt, die in zufälliger Reihenfolge
+(zufällige Permutation nach Sattolo, fester Seed) zu **einem** Zyklus über alle Zeilen verkettet werden. Jeder
+Zugriff hängt vom vorherigen ab, Hardware-Prefetcher können nicht vorhersagen.
+`latency_ns` = Messzeit ÷ Anzahl Sprünge, immer mit einem Thread. Bei Puffern über dem
+L3-Cache enthält der Wert auch TLB-Fehlzugriffe (4-KiB-Seiten), wie bei Intel MLC ohne
+Large Pages; deshalb liegt er typischerweise etwas über MLC-`--idle_latency`. Puffer im
+L1/L2 (z. B. 16 KiB) zeigen die Cache-Latenz.
+
+### cpu
+
+| workload | 1 Operation |
+|---|---|
+| `int` | eine Runde aus Addition, Multiplikation, Rotation, XOR, Shift und einem Tabellenzugriff auf vier abhängigen 64-Bit-Ketten |
+| `float` | drei Multiplikations-/Additionsketten und eine Division (double) |
+| `crypto` | SHA-256 über einen 64-Byte-Block (portable Implementierung ohne SHA-Befehle) |
+| `mixed` | 256 `int` + 128 `float` + SHA-256 einer 64-Byte-Nachricht (inkl. Padding und Abschluss); auf dem Referenzsystem je etwa ein Drittel der Zeit |
+
+Die Kernel sind skalar und laufen auf x64 und ARM64 mit identischer Arbeit; sie messen die
+Ganzzahl-/Gleitkomma-Leistung je Kern und die Skalierung über Kerne, nicht SIMD-Durchsatz.
+
+**Score:** `score = ops_per_s / Referenz × 1000`. Referenz = ops/s **eines** Threads auf
+dem GitHub-Runner `windows-2022`/`windows-2025` mit AMD EPYC 7763 (Mittel der Smoke-Läufe
+der M2-Kalibrierung, siehe PR #13). Die Werte sind ab Vertrag 1.2 fest; GitHub-Runner wechseln die CPU-Typen, ein
+Score von 1000 auf einem Runner ist deshalb kein Testkriterium. 1000 heißt „ein Thread der Referenzmaschine“,
+ein 16-Kern-System mit gleicher Kernleistung erreicht im Mehrthreadtest etwa 16 000
+(plus SMT-Anteil). Die Referenzen stehen in `sb_cpu_reference()` (`compute.c`). Ab Vertrag 1.3
+gibt sbench Formel und Referenzen selbst aus (`meta.cpu_score` in `info` und Ergebnis,
+`summary.score_reference` je cpu-Test) und berechnet `score` auch je Tick und Zeitreihen-Punkt.
+
+| workload | Referenz (ops/s, 1 Thread) |
+|---|---|
+| `int` | 2,8 · 10^8 |
+| `float` | 1,5 · 10^8 |
+| `crypto` | 3,4 · 10^6 |
+| `mixed` | 3,8 · 10^5 |
+
+## Grenzen und bekannte Abweichungen
+
+- `net_client`, `net_server` und `hyperv_info` erzeugen ein `error`-Event
+  `E_NOT_IMPLEMENTED` und werden übersprungen; sie erscheinen nicht in `tests[]` des
+  Ergebnisses.
+- Storage-Worker werden nicht gebunden; Windows verteilt die Threads. cpu/memory binden
+  jeden Thread (siehe oben).
+- memory nutzt keine Large Pages; Latenzwerte großer Puffer enthalten TLB-Fehlzugriffe.
+- ARM64 (CI-Runner mit Microsoft Cobalt 100): `write` liefert deutlich mehr als `read`
+  (ca. 120 vs. 40 GB/s mit 2 Threads). Der Unit-Test bestätigt, dass jede Zeile beschrieben
+  wird; vermutlich schreibt die CPU ganze Zeilen ohne vorheriges Lesen (Write Streaming).
+  Mit einem Vergleichswerkzeug auf ARM64 noch nicht gegengeprüft.
+- Die CPU-Kernel sind skalar; Vergleiche mit Cinebench oder 7-Zip zeigen Tendenzen,
+  keine gleichen Zahlen (siehe `docs/abnahme-m2.md`).
+- Teilergebnisse (Vertrag 1.3): Endet ein Test durch Stop oder Laufzeitfehler, steht er mit
+  `partial: true` und `stopped_in` im Ergebnis; vor der Messphase (`preparing`, `warmup`) sind
+  seine Messwerte `null`, nicht 0. Ein Stopp zwischen zwei Tests lässt die folgenden Tests weg.
 - Selbst angelegte Testdateien werden nach jedem Test gelöscht. Nutzen mehrere Tests
   eines Jobs dieselbe Datei, legt jeder Test sie neu an; zum Wiederverwenden großer Dateien
   `--keep-files` angeben.

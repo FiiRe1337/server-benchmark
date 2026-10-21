@@ -8,6 +8,7 @@
 #include "sb/job.h"
 #include "sb/util.h"
 #include "sb/target.h"
+#include "sb/topo.h"
 
 void sb_verrs_add(sb_verrs *e, const char *pointer, const char *code, const char *fmt, ...) {
     if (e->n == e->cap) {
@@ -207,8 +208,9 @@ static int match_physical_path(const char *p) {
 static const char *const K_TARGET[] = {"path", "kind", "file_size", "allow_destructive", NULL};
 static const char *const K_SPEC[] = {"name", "weight", "block_size", "read_pct", "random_pct", "align", "burst_len", "delay_ms", NULL};
 static const char *const K_STORAGE[] = {"type", "name", "targets", "workers", "queue_depth", "warmup_s", "duration_s", "cache", "access_specs", NULL};
-static const char *const K_CPU[] = {"type", "name", "threads", "workload", "duration_s", NULL};
-static const char *const K_MEMORY[] = {"type", "name", "mode", "op", "threads", "buffer_size", "duration_s", NULL};
+static const char *const K_CPU[] = {"type", "name", "threads", "workload", "warmup_s", "duration_s", "numa_node", NULL};
+static const char *const K_MEMORY[] = {"type", "name", "mode", "op", "threads", "buffer_size", "warmup_s", "duration_s",
+                                       "numa_node", "mem_node", "nontemporal", "simd", NULL};
 static const char *const K_NETC[] = {"type", "name", "host", "port", "proto", "streams", "duration_s", "udp_rate_mbps", "packet_size", "mode", "reverse", NULL};
 static const char *const K_NETS[] = {"type", "name", "bind", "port", "proto", "once", NULL};
 static const char *const K_HV[] = {"type", "name", "include_perfcounters", "sample_s", NULL};
@@ -305,20 +307,38 @@ static void parse_other(sb_test *t, const cJSON *o, const char *ptr, sb_verrs *e
         static const char *const W[] = {"int", "float", "crypto", "mixed", NULL};
         check_keys(e, o, ptr, K_CPU);
         get_int(e, o, ptr, "threads", 0, 0, 1 << 20, 0, &v);
-        get_enum(e, o, ptr, "workload", 0, W, 3);
-        get_num(e, o, ptr, "duration_s", 1, 0, 1, 0, &d);
+        t->threads = (uint32_t)v;
+        int wl = get_enum(e, o, ptr, "workload", 0, W, 3);
+        t->workload = wl < 0 ? 3 : wl;
+        get_num(e, o, ptr, "warmup_s", 0, 0, 0, 1, &t->warmup_s);
+        get_num(e, o, ptr, "duration_s", 1, 0, 1, 0, &t->duration_s);
+        get_int(e, o, ptr, "numa_node", 0, 0, 1023, -1, &v);
+        t->numa_node = (int)v;
+        t->mem_node = -1;
         break;
     }
     case SB_T_MEMORY: {
         static const char *const M[] = {"bandwidth", "latency", NULL};
         static const char *const OP[] = {"read", "write", "copy", NULL};
-        uint64_t sz;
+        static const char *const SI[] = {"auto", "scalar", "sse2", "avx2", "avx512", "neon", NULL};
         check_keys(e, o, ptr, K_MEMORY);
-        get_enum(e, o, ptr, "mode", 1, M, 0);
-        get_enum(e, o, ptr, "op", 0, OP, 0);
+        int m = get_enum(e, o, ptr, "mode", 1, M, 0);
+        t->mem_mode = m < 0 ? 0 : m;
+        int op = get_enum(e, o, ptr, "op", 0, OP, 0);
+        t->mem_op = op < 0 ? 0 : op;
         get_int(e, o, ptr, "threads", 0, 0, 1 << 20, 0, &v);
-        get_size(e, o, ptr, "buffer_size", 1, 0, &sz);
-        get_num(e, o, ptr, "duration_s", 1, 0, 1, 0, &d);
+        t->threads = (uint32_t)v;
+        get_size(e, o, ptr, "buffer_size", 1, 0, &t->buffer_size);
+        get_num(e, o, ptr, "warmup_s", 0, 0, 0, 1, &t->warmup_s);
+        get_num(e, o, ptr, "duration_s", 1, 0, 1, 0, &t->duration_s);
+        get_int(e, o, ptr, "numa_node", 0, 0, 1023, -1, &v);
+        t->numa_node = (int)v;
+        get_int(e, o, ptr, "mem_node", 0, 0, 1023, -1, &v);
+        t->mem_node = (int)v;
+        int nt = get_bool(e, o, ptr, "nontemporal");
+        t->nontemporal = nt > 0;
+        int si = get_enum(e, o, ptr, "simd", 0, SI, 0);
+        t->simd = si < 0 ? 0 : si;
         break;
     }
     case SB_T_NET_CLIENT: {
@@ -454,6 +474,76 @@ static void semantic_storage(sb_test *t, const char *ptr, sb_verrs *e, sb_verrs 
     }
 }
 
+/* Semantische Regeln für cpu/memory (M2): NUMA-Knoten, SIMD, Puffergröße, freier RAM */
+static void semantic_compute(sb_test *t, const char *ptr, sb_verrs *e, sb_verrs *w) {
+    char p[200];
+    sb_topo topo;
+    if (sb_topo_get(&topo)) return;
+    int avail = 0;
+    const sb_node *cn = NULL;
+    if (t->numa_node >= 0) {
+        cn = sb_topo_node(&topo, t->numa_node);
+        P(p, sizeof p, ptr, "numa_node");
+        if (!cn || !cn->ncpus) {
+            sb_verrs_add(e, p, "E_NUMA_NODE", "NUMA-Knoten %d existiert nicht oder hat keine logischen Prozessoren (Knoten: %d).",
+                         t->numa_node, topo.nnodes);
+            sb_topo_free(&topo);
+            return;
+        }
+        avail = cn->ncpus;
+    } else avail = topo.ncpus;
+    int latency = t->type == SB_T_MEMORY && t->mem_mode == 1;
+    int threads = latency ? 1 : t->threads ? (int)t->threads : avail;
+    if (latency && t->threads > 1 && w) {
+        P(p, sizeof p, ptr, "threads");
+        sb_verrs_add(w, p, "W_THREADS_IGNORED", "Bei mode = latency misst sbench immer mit einem Thread; threads = %u wird ignoriert.", t->threads);
+    } else if (!latency && t->threads > (uint32_t)avail && w) {
+        P(p, sizeof p, ptr, "threads");
+        sb_verrs_add(w, p, "W_OVERSUBSCRIBED", "%u Threads, aber nur %d logische Prozessoren%s: Prozessoren werden mehrfach belegt.",
+                     t->threads, avail, cn ? " im Knoten" : "");
+    }
+    if (t->type == SB_T_MEMORY) {
+        if (t->mem_node >= 0 && !sb_topo_node(&topo, t->mem_node)) {
+            P(p, sizeof p, ptr, "mem_node");
+            sb_verrs_add(e, p, "E_NUMA_NODE", "NUMA-Knoten %d existiert nicht (Knoten: %d).", t->mem_node, topo.nnodes);
+        }
+        P(p, sizeof p, ptr, "buffer_size");
+        if (t->buffer_size < 8192)
+            sb_verrs_add(e, p, "E_BUFFER_SIZE", "buffer_size muss mindestens 8 KiB betragen (ist %llu Bytes).", (unsigned long long)t->buffer_size);
+        if (!latency) {
+            sb_simd isa = (sb_simd)t->simd;
+            if (isa != SB_SIMD_AUTO && !sb_simd_supported(isa)) {
+                P(p, sizeof p, ptr, "simd");
+                sb_verrs_add(e, p, "E_SIMD_UNSUPPORTED", "simd = %s wird von dieser CPU bzw. diesem Betriebssystem nicht unterstützt.", sb_simd_name(isa));
+            }
+            if (t->nontemporal && w) {
+                P(p, sizeof p, ptr, "nontemporal");
+                if (t->mem_op == 0)
+                    sb_verrs_add(w, p, "W_NONTEMPORAL_IGNORED", "nontemporal wirkt nur bei op = write und copy.");
+                else if (!sb_nontemporal_supported())
+                    sb_verrs_add(w, p, "W_NONTEMPORAL_UNSUPPORTED", "Non-temporal Stores sind auf dieser Architektur nicht umgesetzt; es werden normale Stores genutzt.");
+            }
+        }
+        /* RAM: alle Puffer zusammen gegen freien Speicher (des Zielknotens) */
+        double need = (double)t->buffer_size * threads, freeb = 0;
+        const sb_node *mn = t->mem_node >= 0 ? sb_topo_node(&topo, t->mem_node) : NULL;
+        if (mn) freeb = (double)mn->ram_free_bytes;
+        else {
+            MEMORYSTATUSEX ms;
+            ms.dwLength = sizeof ms;
+            if (GlobalMemoryStatusEx(&ms)) freeb = (double)ms.ullAvailPhys;
+        }
+        P(p, sizeof p, ptr, "buffer_size");
+        if (freeb > 0 && need > freeb * 0.9)
+            sb_verrs_add(e, p, "E_OUT_OF_MEMORY", "Die Puffer brauchen %.2f GiB (%d x buffer_size), frei sind nur %.2f GiB%s.",
+                         need / 1073741824.0, threads, freeb / 1073741824.0, mn ? " auf dem Knoten" : "");
+        else if (freeb > 0 && need > freeb * 0.5 && w)
+            sb_verrs_add(w, p, "W_LOW_MEMORY", "Die Puffer belegen %.2f GiB von %.2f GiB freiem Speicher%s.",
+                         need / 1073741824.0, freeb / 1073741824.0, mn ? " des Knotens" : "");
+    }
+    sb_topo_free(&topo);
+}
+
 static void free_test(sb_test *t) {
     for (int k = 0; k < t->ntargets; k++) free(t->targets[k].path);
     free(t->type_str);
@@ -514,7 +604,10 @@ int sb_job_load_text(sb_job *job, const char *text, sb_verrs *e, sb_verrs *warns
                     parse_storage(t, x, p, e);
                     semantic_storage(t, p, e, warns, 0);
                 } else {
+                    t->numa_node = t->mem_node = -1;
+                    int before = e->n;
                     parse_other(t, x, p, e);
+                    if ((t->type == SB_T_CPU || t->type == SB_T_MEMORY) && e->n == before) semantic_compute(t, p, e, warns);
                 }
             }
         }

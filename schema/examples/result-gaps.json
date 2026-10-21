@@ -6,8 +6,9 @@
   "started_utc": "2026-10-20T08:15:02.117Z",
   "ended_utc": "2026-10-20T08:16:14.902Z",
   "aborted": false,
+  "tick_ms": 1000,
   "meta": {
-    "host": "SRV-HV01",
+    "host": "DEMO-HV01",
     "os": {
       "name": "Windows Server 2022 Datacenter",
       "version": "21H2",
@@ -92,7 +93,8 @@
           63
         ],
         "ram_bytes": 274877906944,
-        "ram_free_bytes": 199715979264
+        "ram_free_bytes": 199715979264,
+        "ram_method": "srat"
       },
       {
         "id": 1,
@@ -163,7 +165,8 @@
           127
         ],
         "ram_bytes": 274877906944,
-        "ram_free_bytes": 201622364160
+        "ram_free_bytes": 201622364160,
+        "ram_method": "srat"
       }
     ],
     "elevated": true,
@@ -206,7 +209,7 @@
       {
         "name": "Mellanox ConnectX-5 #1",
         "ipv4": [
-          "10.0.0.10"
+          "192.0.2.10"
         ],
         "ipv6": [
           "fe80::1e34:daff:fe5a:10"
@@ -216,17 +219,30 @@
       {
         "name": "Intel I350 #1",
         "ipv4": [
-          "192.168.10.21"
+          "198.51.100.21"
         ],
         "ipv6": [],
         "link_mbps": 1000
       }
-    ]
+    ],
+    "cpu_score": {
+      "formula": "score = ops_per_s / ref_ops_per_s[workload] * 1000",
+      "points": 1000,
+      "reference_threads": 1,
+      "reference_system": "GitHub-Runner windows-2022/windows-2025, AMD EPYC 7763, 1 Thread",
+      "ref_ops_per_s": {
+        "int": 280000000.0,
+        "float": 150000000.0,
+        "crypto": 3400000.0,
+        "mixed": 380000.0
+      }
+    }
   },
   "tests": [
     {
       "index": 1,
       "type": "storage",
+      "partial": false,
       "config": {
         "type": "storage",
         "name": "OLTP-ähnlicher Mix",
@@ -1181,6 +1197,7 @@
     {
       "index": 3,
       "type": "storage",
+      "partial": false,
       "config": {
         "type": "storage",
         "name": "OLTP-ähnlicher Mix",
