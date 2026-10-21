@@ -84,15 +84,18 @@ def pytest_sessionfinish(session, exitstatus):
 
 @pytest.hookimpl(trylast=True)
 def pytest_unconfigure(config):
-    """Windows CI: all tests passed, junit XML written, yet python sometimes ended with exit code 1 during Qt/pyqtgraph
-    teardown at interpreter shutdown. Clean up explicitly and, on Windows, end the process with pytest's own exit status
-    (reports are already written at this point)."""
+    """Windows CI: all tests pass and the junit XML is written, but the process then dies with an access violation while
+    Windows unloads the Qt DLLs at process exit (seen even inside os._exit, faulthandler trace in run 39579246514) and
+    python reports exit code 1. Clean up the Qt objects explicitly and, on Windows, end the process with pytest's own
+    exit status via TerminateProcess, which skips the DLL detach handlers (reports are already written here)."""
     import faulthandler
     st = getattr(config, "_sb_exitstatus", None)
-    print(f"\n[conftest] pytest exit status {st}, closing Qt widgets", file=sys.__stderr__, flush=True)
-    faulthandler.enable(file=sys.__stderr__, all_threads=True)   # a crash during teardown shows up in the CI log
+    faulthandler.enable(file=sys.__stderr__, all_threads=True)   # any other teardown crash shows up in the CI log
     _close_widgets()
-    print("[conftest] Qt widgets closed", file=sys.__stderr__, flush=True)
     if sys.platform == "win32" and st is not None:
-        sys.stdout.flush(); sys.stderr.flush()
-        os._exit(st)
+        import ctypes
+        sys.stdout.flush(); sys.stderr.flush(); sys.__stdout__.flush(); sys.__stderr__.flush()
+        k32 = ctypes.windll.kernel32
+        k32.GetCurrentProcess.restype = ctypes.c_void_p
+        k32.TerminateProcess(ctypes.c_void_p(k32.GetCurrentProcess()), int(st))
+        os._exit(st)                                              # not reached
