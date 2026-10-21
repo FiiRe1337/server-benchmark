@@ -29,6 +29,7 @@ typedef struct sb_run_error {
     double   t;
     int      worker, target;    /* -1 = keine Angabe */
     uint64_t count;
+    int      fatal;             /* Vertrag 1.3.1: dieser Eintrag hat den Test (und damit den Lauf) beendet */
 } sb_run_error;
 
 typedef struct sb_storage_result {

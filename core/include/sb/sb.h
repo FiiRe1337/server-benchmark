@@ -43,6 +43,12 @@ typedef struct sb_bundle_options {
     const char  *progress;       /* wie bei run */
 } sb_bundle_options;
 
+typedef struct sb_import_icf_options {
+    const char  *icf_path;       /* Iometer-.icf (Pflicht) */
+    const char **targets;        /* --target: ersetzt die ICF-Targets in Reihenfolge */
+    int          ntargets;
+} sb_import_icf_options;
+
 SB_API const char *sb_version(void);
 SB_API const char *sb_data_directory(void);
 /* --data-dir: vor allen anderen Regeln; vor jedem anderen Aufruf setzen. 0 = ok */
@@ -57,6 +63,9 @@ SB_API int  sb_list_running(char **json_out);
 SB_API int  sb_info(char **json_out);
 SB_API int  sb_export_csv(const char *result_path, const char *csv_path, const char *style, char *err, size_t errlen);
 SB_API int  sb_bundle(const sb_bundle_options *o, char *err, size_t errlen);
+/* Iometer-.icf -> sb-job/1. *job_json = erzeugter Job (nur bei Rückgabe 0), *report_json = sb-validate/1
+ * mit E_ICF_x/W_ICF_x und den Meldungen der Job-Prüfung. Rückgabe 0 ok, 1 Datei nicht lesbar, 2 ICF fehlerhaft. */
+SB_API int  sb_import_icf(const sb_import_icf_options *o, char **job_json, char **report_json);
 SB_API void sb_free(void *p);
 
 #ifdef __cplusplus

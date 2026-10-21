@@ -5,6 +5,8 @@
     auch bei threads = 0; SMT-Geschwister passen zu meta.cpu.cores
   * meta.cpu_score, summary.score_reference, summary.proc_cpu_pct, timeseries.proc_cpu_pct, tick_ms
   * preparing-Fortschritt memory: total = threads × buffer_size_bytes (auch copy), letztes done = total
+  * Vertrag 1.3.1: Stopp -> aborted true ohne errors[].fatal (Laufzeitfehler: Unit-Test test_v131_fatal)
+  * Vertrag 1.3.1: tests[].cpus im Ergebnis = phase.cpus (cpu, memory, auch Teilergebnisse)
   * Teilergebnis: Stopp in warmup (cpu) und früh in preparing/warmup (memory) -> partial: true,
     stopped_in = letzte Phase, Messwerte null, Listen leer
 """
@@ -40,7 +42,7 @@ def _stop_run(h, sbench: Path, work: Path, name: str, tests: list[dict], wait_fo
         proc.kill()
         rc = None
     evs = h.read_jsonl(prog) if prog.exists() else []
-    h.check_progress(evs, f"Fortschritt ({name})", expect_aborted=True)
+    h.check_progress(evs, f"Fortschritt ({name})", expect_aborted=True, rc=rc)
     res = h.check_result(out, f"Teilergebnis ({name})", expect_aborted=True)
     return rc, evs, res
 
@@ -81,6 +83,7 @@ def run_v13(h, sbench: Path, work: Path, info: dict, quick: bool, cprog: Path, c
             check(ph and ph[0]["name"] == "preparing" and ph[0].get("threads") == s["threads"]
                   and [c["cpu"] for c in ph[0].get("cpus", [])] == s["cpus"],
                   f"cpu {nm}: erstes phase-Event mit threads {ph[0].get('threads') if ph else None} und cpus = summary.cpus")
+            check(ph and t.get("cpus") == ph[0].get("cpus"), f"cpu {nm}: tests[].cpus = phase.cpus (Vertrag 1.3.1)")
             check(all(len(e.get("workers", [])) == s["threads"] for e in ticks), f"cpu {nm}: workers[] vollständig")
             check("proc_cpu_pct" in s and all("proc_cpu_pct" in p and "score" in p for p in t["timeseries"]),
                   f"cpu {nm}: summary.proc_cpu_pct {s.get('proc_cpu_pct')}, timeseries mit proc_cpu_pct/score")
@@ -121,6 +124,9 @@ def run_v13(h, sbench: Path, work: Path, info: dict, quick: bool, cprog: Path, c
                 check(all([w["id"] for w in e["workers"]] == list(range(s["threads"])) for e in ticks),
                       f"memory {nm}: workers[] vollständig, nach id sortiert")
             check(s.get("proc_cpu_pct") is not None and t.get("partial") is False, f"memory {nm}: proc_cpu_pct, partial false")
+            mph = [e for e in evs if e["ev"] == "phase" and e["test"] == i]
+            check(mph and t.get("cpus") == mph[0].get("cpus") and len(t.get("cpus") or []) == s["threads"],
+                  f"memory {nm}: tests[].cpus = phase.cpus, ein Eintrag je Thread (Vertrag 1.3.1)")
 
     print("\n== Vertrag 1.3: Stopp in warmup (cpu) ==")
     rc, evs, res = _stop_run(h, sbench, work, "v13-stop-warmup",
@@ -129,6 +135,10 @@ def run_v13(h, sbench: Path, work: Path, info: dict, quick: bool, cprog: Path, c
                              "warmup", 0.5)
     check(rc == 3, f"Stopp in warmup: Exit 3 (ist {rc})")
     if res:
+        check(res.get("aborted") is True and not any(e.get("fatal") for t in res["tests"] for e in t["errors"]),
+              "Stopp: aborted true, kein errors[].fatal (Vertrag 1.3.1)")
+        dn = [e for e in evs if e["ev"] == "done"]
+        check(dn and dn[-1].get("aborted") is True, "Stopp: done.aborted true")
         T = res["tests"]
         check(len(T) == 1 and T[0]["index"] == 0, f"nicht begonnener Test fehlt im Ergebnis ({[t['index'] for t in T]})")
         if T:
@@ -136,6 +146,7 @@ def run_v13(h, sbench: Path, work: Path, info: dict, quick: bool, cprog: Path, c
             check(t.get("partial") is True and t.get("stopped_in") == "warmup", f"partial true, stopped_in warmup ({t.get('stopped_in')})")
             _check_nulls(h, t, "Stopp in warmup", ("ops_per_s", "score", "ops", "proc_cpu_pct"))
             check(t["summary"].get("threads") == 1 and t["summary"].get("cpus"), "Stopp in warmup: threads/cpus bleiben gesetzt")
+            check([c["cpu"] for c in t.get("cpus", [])] == t["summary"].get("cpus"), "Stopp in warmup: tests[].cpus bleibt gesetzt (Vertrag 1.3.1)")
         check(not any(e["ev"] == "tick" for e in evs), "Stopp in warmup: keine Ticks")
 
     print("\n== Vertrag 1.3: früher Stopp (memory preparing/warmup) ==")

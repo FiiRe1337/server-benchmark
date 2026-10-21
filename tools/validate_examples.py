@@ -10,6 +10,10 @@ Prüft:
     < Anzahl Tests im Job, disjunkte NUMA-CPU-Listen),
   * Vertrag 1.3: partial/stopped_in und null-Messwerte (check_partial), Progress-Regeln
     (check_progress_v13: tick.metric, workers[] vollständig/sortiert, phase.threads/cpus),
+  * Vertrag 1.3.1: errors[].fatal höchstens einmal, im letzten Test, partial: true, aborted false
+    (check_fatal); done.exit_code passt zu aborted/fatal (check_exit_code),
+  * Vertrag 1.3.1: tests[].cpus bei cpu/memory (check_cpu_list, gleiche Regeln wie phase.cpus, passend
+    zu summary.cpus und per_worker[].node),
   * einen Selbsttest der semantischen Regeln mit absichtlich falschen Dokumenten.
 
 Die Funktionen check_result_indices() und check_numa() nutzen auch die Smoke-Tests
@@ -48,6 +52,7 @@ RESULT_JOBS = {
     "result-gaps.json": "job-mixed-gaps.json",
     "result-compute.json": "job-compute.json",
     "result-partial.json": "job-compute.json",
+    "result-fatal.json": "job-compute.json",
 }
 
 
@@ -109,6 +114,24 @@ def check_numa(meta: dict, prefix: str = "/meta") -> list[str]:
     return errs
 
 
+def check_cpu_list(cpus: list[dict], threads: int | None, where: str) -> list[str]:
+    """phase.cpus (Vertrag 1.3) bzw. tests[].cpus (Vertrag 1.3.1): ein Eintrag je Thread, id 0..n-1,
+    cpu = group*64+number, smt_sibling_of liegt auf demselben Kern und ist nicht der Prozessor selbst."""
+    errs: list[str] = []
+    if threads is not None and len(cpus) != threads:
+        errs.append(f"{where}: {len(cpus)} Einträge, threads = {threads}")
+    if [c["id"] for c in cpus] != list(range(len(cpus))):
+        errs.append(f"{where}: id muss 0..n-1 sein")
+    core = {c["cpu"]: c["core"] for c in cpus}
+    for c in cpus:
+        if c["cpu"] != c["group"] * 64 + c["number"]:
+            errs.append(f"{where}: cpu {c['cpu']} != group*64+number")
+        sib = c["smt_sibling_of"]
+        if sib is not None and (sib == c["cpu"] or (sib in core and core[sib] != c["core"])):
+            errs.append(f"{where}: smt_sibling_of {sib} von cpu {c['cpu']} liegt nicht auf demselben Kern")
+    return errs
+
+
 def check_compute(i: int, t: dict, meta: dict) -> list[str]:
     """cpu/memory (Vertrag 1.2): Threads, gepinnte CPUs, NUMA-Zuordnung, Summen."""
     errs: list[str] = []
@@ -120,6 +143,14 @@ def check_compute(i: int, t: dict, meta: dict) -> list[str]:
         errs.append(f"{pre}/summary/threads: latency misst immer mit 1 Thread")
     if "cpus" in s and len(s["cpus"]) != s["threads"]:
         errs.append(f"{pre}/summary/cpus: {len(s['cpus'])} Einträge, threads = {s['threads']}")
+    tc = t.get("cpus")
+    if tc is not None:
+        # Vertrag 1.3.1: tests[].cpus wie phase.cpus, passend zu summary.cpus und per_worker
+        errs += check_cpu_list(tc, s.get("threads"), f"{pre}/cpus")
+        if "cpus" in s and [c["cpu"] for c in tc] != s["cpus"]:
+            errs.append(f"{pre}/cpus: cpu passt nicht zu summary.cpus")
+        if pw and len(pw) == len(tc) and any(w.get("node", c["numa_node"]) != c["numa_node"] for w, c in zip(pw, tc)):
+            errs.append(f"{pre}/cpus: numa_node passt nicht zu per_worker[].node")
     if pw:
         if len(pw) != s["threads"]:
             errs.append(f"{pre}/per_worker: {len(pw)} Einträge, threads = {s['threads']}")
@@ -194,17 +225,7 @@ def check_progress_v13(events: list[dict]) -> list[str]:
             threads[e["test"]] = e["threads"]
             cpus = e.get("cpus")
             if cpus is not None:
-                if len(cpus) != e["threads"]:
-                    errs.append(f"Zeile {n}: phase.cpus hat {len(cpus)} Einträge, threads = {e['threads']}")
-                if [c["id"] for c in cpus] != list(range(len(cpus))):
-                    errs.append(f"Zeile {n}: phase.cpus[].id muss 0..n-1 sein")
-                core = {c["cpu"]: c["core"] for c in cpus}
-                for c in cpus:
-                    if c["cpu"] != c["group"] * 64 + c["number"]:
-                        errs.append(f"Zeile {n}: cpu {c['cpu']} != group*64+number")
-                    sib = c["smt_sibling_of"]
-                    if sib is not None and (sib == c["cpu"] or (sib in core and core[sib] != c["core"])):
-                        errs.append(f"Zeile {n}: smt_sibling_of {sib} von cpu {c['cpu']} liegt nicht auf demselben Kern")
+                errs += check_cpu_list(cpus, e["threads"], f"Zeile {n}: phase.cpus")
         if e.get("ev") == "tick" and "metric" in e:
             if METRIC_KEY.get(e["metric"]) not in e:
                 errs.append(f"Zeile {n}: tick.metric {e['metric']!r}, Feld fehlt")
@@ -215,6 +236,49 @@ def check_progress_v13(events: list[dict]) -> list[str]:
                     errs.append(f"Zeile {n}: workers[].id {ids[:8]} nicht 0..n-1 aufsteigend")
                 if e["test"] in threads and len(ids) != threads[e["test"]]:
                     errs.append(f"Zeile {n}: {len(ids)} workers, phase.threads = {threads[e['test']]}")
+    return errs
+
+
+def check_fatal(doc: dict) -> list[str]:
+    """Vertrag 1.3.1: höchstens ein errors[]-Eintrag mit fatal: true im ganzen Ergebnis. Er steht im
+    letzten Test, der Test hat partial: true, und aborted ist false (aborted nur bei Stopp)."""
+    errs: list[str] = []
+    tests = doc.get("tests", [])
+    hits = [(i, k) for i, t in enumerate(tests) for k, e in enumerate(t.get("errors", [])) if e.get("fatal")]
+    if len(hits) > 1:
+        errs.append(f"/tests: {len(hits)} Einträge mit fatal: true, erlaubt ist höchstens einer ({hits})")
+    for i, k in hits[:1]:
+        if i != len(tests) - 1:
+            errs.append(f"/tests/{i}/errors/{k}: fatal, aber es folgen weitere Tests")
+        if tests[i].get("partial") is not True:
+            errs.append(f"/tests/{i}: fatal-Fehler, aber partial ist nicht true")
+        if doc.get("aborted") is True:
+            errs.append(f"/tests/{i}/errors/{k}: fatal (Laufzeitfehler), aber aborted = true (nur bei Stopp)")
+    return errs
+
+
+def check_exit_code(events: list[dict], result: dict | None = None) -> list[str]:
+    """Vertrag 1.3.1: done.exit_code (optional) passt zu aborted (3 genau bei aborted: true), bei 1 gibt
+    es vorher ein error-Event; mit Ergebnis zusätzlich: 1 genau dann, wenn ein errors[]-Eintrag fatal
+    ist, und aborted wie im Ergebnis."""
+    errs: list[str] = []
+    done = [e for e in events if e.get("ev") == "done"]
+    if not done or "exit_code" not in done[-1]:
+        return errs
+    d = done[-1]
+    code, aborted = d["exit_code"], d.get("aborted")
+    if (code == 3) != (aborted is True):
+        errs.append(f"done: exit_code {code} passt nicht zu aborted {aborted} (3 genau bei aborted: true)")
+    if code in (2, 4):
+        errs.append(f"done: exit_code {code} kommt ohne Ergebnis nicht im done-Event vor")
+    if code == 1 and not any(e.get("ev") == "error" for e in events):
+        errs.append("done: exit_code 1 ohne vorheriges error-Event")
+    if result is not None:
+        fatal = any(e.get("fatal") for t in result.get("tests", []) for e in t.get("errors", []))
+        if (code == 1) != fatal:
+            errs.append(f"done: exit_code {code}, aber errors[].fatal im Ergebnis ist {fatal}")
+        if result.get("aborted") != aborted:
+            errs.append(f"done.aborted {aborted} != aborted im Ergebnis {result.get('aborted')}")
     return errs
 
 
@@ -240,6 +304,7 @@ def semantic_checks(kind: str, doc, job: dict | None = None) -> list[str]:
         check_tests([t["config"] for t in doc["tests"]], "/tests/*/config")
         errs += check_result_indices(doc, job)
         errs += check_numa(doc.get("meta", {}))
+        errs += check_fatal(doc)
         for i, t in enumerate(doc["tests"]):
             if t["type"] != t["config"]["type"]:
                 errs.append(f"/tests/{i}: type passt nicht zu config.type")
@@ -286,6 +351,11 @@ def _tk(metric: str, ids: list[int], key: str | None = None) -> dict:
     return {"ev": "tick", "test": 0, "t": 1.0, "metric": metric, k: 1.0, "workers": [{"id": i, k: 0.5} for i in ids]}
 
 
+def _fd() -> dict:
+    return {"aborted": False, "tests": [{"partial": False, "errors": []},
+                                        {"partial": True, "errors": [{"code": "E_IO", "count": 3}, {"code": "E_IO", "fatal": True}]}]}
+
+
 def selftest() -> list[str]:
     """Die semantischen Regeln müssen falsche Dokumente erkennen und Lücken zulassen."""
     bad: list[str] = []
@@ -324,6 +394,28 @@ def selftest() -> list[str]:
         ("workers unvollständig", check_progress_v13([_ph(2), _tk("ops_per_s", [0])]), True),
         ("cpus != threads", check_progress_v13([dict(_ph(2), threads=3)]), True),
         ("SMT anderer Kern", check_progress_v13([_ph(2, core1=5)]), True),
+        # Vertrag 1.3.1: fatal / aborted
+        ("fatal ok", check_fatal(_fd()), False),
+        ("fatal mit aborted", check_fatal(dict(_fd(), aborted=True)), True),
+        ("fatal nicht im letzten Test", check_fatal({"aborted": False, "tests": _fd()["tests"] + [{"partial": False, "errors": []}]}), True),
+        ("fatal doppelt", check_fatal({"aborted": False, "tests": [{"partial": True, "errors": [{"fatal": True}, {"fatal": True}]}]}), True),
+        ("fatal ohne partial", check_fatal({"aborted": False, "tests": [{"partial": False, "errors": [{"fatal": True}]}]}), True),
+        # Vertrag 1.3.1: done.exit_code
+        ("exit 3 bei Stopp", check_exit_code([{"ev": "done", "aborted": True, "exit_code": 3}]), False),
+        ("exit 0 bei Stopp", check_exit_code([{"ev": "done", "aborted": True, "exit_code": 0}]), True),
+        ("exit 3 ohne aborted", check_exit_code([{"ev": "done", "aborted": False, "exit_code": 3}]), True),
+        ("exit 1 mit fatal", check_exit_code([{"ev": "error"}, {"ev": "done", "aborted": False, "exit_code": 1}], _fd()), False),
+        ("exit 1 ohne fatal", check_exit_code([{"ev": "error"}, {"ev": "done", "aborted": False, "exit_code": 1}],
+                                              {"aborted": False, "tests": [{"errors": []}]}), True),
+        ("exit 0 mit fatal", check_exit_code([{"ev": "done", "aborted": False, "exit_code": 0}], _fd()), True),
+        ("exit 1 ohne error-Event", check_exit_code([{"ev": "done", "aborted": False, "exit_code": 1}]), True),
+        ("ohne exit_code (1.3)", check_exit_code([{"ev": "done", "aborted": True}]), False),
+        # Vertrag 1.3.1: tests[].cpus
+        ("result cpus ok", check_compute(0, dict(_ct(), cpus=_ph(2)["cpus"]), _M2), False),
+        ("result cpus != threads", check_compute(0, dict(_ct(), cpus=_ph(1)["cpus"]), _M2), True),
+        ("result cpus != summary.cpus", check_compute(0, dict(_ct(), cpus=[dict(c, cpu=c["cpu"] + 64, group=1) for c in _ph(2)["cpus"]]), _M2), True),
+        ("result cpus SMT anderer Kern", check_compute(0, dict(_ct(), cpus=_ph(2, core1=5)["cpus"]), _M2), True),
+        ("result cpus Knoten != per_worker", check_compute(0, dict(_ct(), cpus=[dict(c, numa_node=1) for c in _ph(2)["cpus"]]), _M2), True),
     ]
     for name, errs, expect_err in cases:
         if bool(errs) != expect_err:
@@ -374,6 +466,9 @@ def main() -> int:
             if not evs or evs[-1] != "done" or evs.count("done") != 1:
                 extra.append("letztes (und einziges) 'done'-Event fehlt")
             extra += check_progress_v13([d for _, d in docs])
+            # Vertrag 1.3.1: progress-X.jsonl gehört zu result-X.json (falls vorhanden)
+            rp = EXAMPLE_DIR / p.name.replace("progress-", "result-").replace(".jsonl", ".json")
+            extra += check_exit_code([d for _, d in docs], load_json(rp) if rp.exists() else None)
         else:
             doc = load_json(p)
             docs = [("", doc)]

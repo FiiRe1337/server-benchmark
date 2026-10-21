@@ -35,7 +35,8 @@
       "description": "UTC-Zeitstempel (RFC 3339, Endung Z)."
     },
     "aborted": {
-      "type": "boolean"
+      "type": "boolean",
+      "description": "true nur, wenn der Lauf gestoppt wurde (sbench stop/Strg+C, Exit 3). Ab Vertrag 1.3.1 bei einem Laufzeitfehler (Exit 1) false; der betroffene Test hat partial: true und einen errors[]-Eintrag mit fatal: true, folgende Tests fehlen."
     },
     "tick_ms": {
       "type": "integer",
@@ -1118,6 +1119,61 @@
       ],
       "additionalProperties": false
     },
+    "cpu_binding": {
+      "description": "Vertrag 1.3.1: gebundener logischer Prozessor eines Threads, gleiches Format wie phase.cpus[] in sb-progress/1.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Thread-Index."
+        },
+        "cpu": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Globaler Index (Prozessorgruppe × 64 + number) wie meta.numa_nodes[].cpus."
+        },
+        "group": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Prozessorgruppe."
+        },
+        "number": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 63,
+          "description": "Nummer innerhalb der Prozessorgruppe."
+        },
+        "numa_node": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "NUMA-Knoten des Prozessors."
+        },
+        "core": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Laufende Nummer des physischen Kerns (gleicher Wert = SMT-Geschwister), gültig innerhalb des Laufs."
+        },
+        "smt_sibling_of": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "Globaler Index des ersten logischen Prozessors desselben Kerns, null für diesen selbst (bzw. ohne SMT)."
+        }
+      },
+      "required": [
+        "id",
+        "cpu",
+        "group",
+        "number",
+        "numa_node",
+        "core",
+        "smt_sibling_of"
+      ],
+      "additionalProperties": false
+    },
     "spec_result": {
       "type": "object",
       "description": "Kennzahlen pro Access-Spec (storage).",
@@ -1302,6 +1358,11 @@
           "type": "integer",
           "minimum": 1,
           "description": "Anzahl gleichartiger Fehler (zusammengefasst)."
+        },
+        "fatal": {
+          "type": "boolean",
+          "const": true,
+          "description": "Vertrag 1.3.1, optional: true an genau dem Eintrag, der den Test (und damit den Lauf) beendet hat (Laufzeitfehler, Exit 1). Fehlt = false; nicht abbrechende Fehler (z. B. einzelne I/O-Fehler) haben kein fatal."
         }
       },
       "required": [
@@ -1346,6 +1407,13 @@
         },
         "summary": {
           "type": "object"
+        },
+        "cpus": {
+          "type": "array",
+          "description": "Vertrag 1.3.1, optional, nur cpu/memory: gebundener logischer Prozessor je Thread mit SMT-Zuordnung, Reihenfolge = Thread-id (= per_worker[].id, tick.workers[].id). Gleicher Inhalt wie phase.cpus im ersten phase-Event des Tests; damit lässt sich SMT auch nachträglich aus dem Ergebnis zuordnen. Auch bei partial: true vorhanden, sobald die Threads verteilt sind. Fehlt bei storage, net_client, net_server und hyperv_info.",
+          "items": {
+            "$ref": "#/$defs/cpu_binding"
+          }
         },
         "targets": {
           "type": "array",
@@ -1577,6 +1645,27 @@
             "not": {
               "required": [
                 "stopped_in"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "enum": [
+                  "storage",
+                  "net_client",
+                  "net_server",
+                  "hyperv_info"
+                ]
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "cpus"
               ]
             }
           }

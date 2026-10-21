@@ -2,7 +2,8 @@
 
 Diese Anleitung beschreibt, wie die Testtypen `cpu` und `memory` aus Meilenstein 2 und die
 NUMA-Angaben (Issue #8) auf echter Hardware geprüft werden. Wir vergleichen mit
-**Intel MLC**, **AIDA64**, **`winsat mem`**, **7-Zip** und **Cinebench**. Zum Schluss
+**Intel MLC**, **AIDA64**, **`winsat mem`**, **7-Zip** und **Cinebench**; den Import von
+Iometer-Konfigurationen (`sbench import-icf`) mit **Iometer** (Abschnitt 10). Zum Schluss
 packst du alles in ein Bundle und schickst es zurück.
 
 Methodik und Definitionen der Kennzahlen: [core.md](core.md#cpu--und-memory-engine-meilenstein-2).
@@ -210,7 +211,77 @@ Maschinen mit sbench. Score 1000 ≈ ein Thread des Referenz-Runners.
   Lauf-zu-Lauf-Stabilität prüfen. `nontemporal` wirkt dort nicht
   (`W_NONTEMPORAL_UNSUPPORTED`).
 
-## 10. Bundle zurückschicken
+## 10. Iometer-ICF importieren und mit Iometer vergleichen
+
+`sbench import-icf` übernimmt eine Iometer-Konfiguration (`.icf`) als Job. Geprüft wird,
+dass der Job dasselbe misst wie Iometer. Details zur Abbildung und zu den Warnungen:
+[cli.md](cli.md#sbench-import-icf-meilenstein-2). Nur x64 mit Desktop-Oberfläche
+(Iometer 1.1.0, siehe [abnahme-m1.md](abnahme-m1.md), Abschnitt 1); Rechner und Laufwerk
+`D:` wie in Meilenstein 1.
+
+**10.1 Konfiguration in Iometer anlegen** (Iometer als Administrator)
+
+1. Entweder eigene Einstellungen setzen oder `tests\fixtures\icf\standard-profiles.icf`
+   aus dem Repository öffnen (*File → Open Config*; enthält die Standardprofile File Server,
+   Web Server, Workstation und Database). Fragt Iometer beim Öffnen, welche Teile übernommen
+   werden, die Manager-Zuordnung abwählen und Worker/Targets von Hand setzen.
+2. Einstellungen: ein Disk-Worker, Target `D:`, *Maximum Disk Size* `16777216` Sektoren
+   (8 GiB), *# of Outstanding I/Os* `32`, *Ramp Up Time* 10 s, *Run Time* 1 min,
+   *Test Type* „Normal“ (kein Cycling). Den Access Specs des Workers die gewünschten
+   Profile in der gewünschten Reihenfolge zuweisen. Für identische Offsets in der Access
+   Specification *Align I/Os on: Request Size Boundaries* wählen; sonst meldet der Import
+   `W_ICF_ALIGN`.
+3. Konfiguration speichern (*Save Test Configuration*) nach `C:\Abnahme\icf\profil.icf`.
+4. Iometer laufen lassen und das Ergebnis speichern (`C:\Abnahme\icf\iometer-profil.csv`).
+
+**10.2 Importieren und mit sbench messen** (normale Konsole)
+
+```bat
+cd C:\Tools\sbench
+sbench import-icf C:\Abnahme\icf\profil.icf -o C:\Abnahme\icf\profil.json
+sbench validate --job C:\Abnahme\icf\profil.json
+sbench run --job C:\Abnahme\icf\profil.json --out C:\Abnahme\icf\result-profil.json
+sbench export C:\Abnahme\icf\result-profil.json --csv C:\Abnahme\icf\sbench-profil.csv --style iometer
+```
+
+- `import-icf` gibt einen Bericht `sb-validate/1` aus. Erwartet: `"ok": true`, Exit 0, und
+  bei den Einstellungen aus 10.1 keine Warnungen außer ggf. `W_ICF_ALIGN` und
+  `W_LOW_DISK_SPACE`/`W_NEEDS_ADMIN`. Jede Warnung notieren.
+- In `profil.json` prüfen: ein Test je zugewiesener Access Specification, Gewichte =
+  „% of size“, `block_size`, `read_pct`, `random_pct` wie in Iometer, `queue_depth` 32,
+  `warmup_s` 10, `duration_s` 60, Target `D:\iobw.tst` mit 8 GiB.
+- sbench nutzt dieselbe Testdatei `D:\iobw.tst` wie Iometer (gleiche Lage auf dem Datenträger).
+  Iometer und sbench nacheinander laufen lassen, nie gleichzeitig.
+- Kaputte Datei prüfen: `sbench import-icf tests\fixtures\icf\broken-weights.icf --json`
+  → Exit 2, `E_ICF_SPEC`.
+
+**10.3 Vergleich**
+
+Pro Profil (Test) die Zeile „ALL“ aus der Iometer-CSV mit dem Test in
+`sbench-profil.csv` vergleichen:
+
+| Kennzahl | Toleranz |
+|---|---|
+| IOPS, Profile mit einer Zeile (Workstation, Database) | **± 5 %** |
+| IOPS, gemischte Profile (File Server, Web Server) | **± 10 %** (unterschiedliche Zufallsfolgen bei sehr ungleichen Blockgrößen) |
+| MB/s (Iometer „MBps (Decimal)“) | wie IOPS |
+| mittlere Latenz | ± 10 % (Richtwert) |
+| Lese-/Schreibanteil der I/Os | ± 2 Prozentpunkte |
+
+Weicht ein Wert ab, zuerst die Warnungen des Imports prüfen (z. B. `W_ICF_ALIGN`,
+`W_ICF_DATA_PATTERN`, `W_ICF_CYCLING`) und den Lauf beider Tools einmal wiederholen.
+
+| Profil | Iometer IOPS | sbench IOPS | Abw. | Iometer MB/s | sbench MB/s | Abw. | Warnungen | ok? |
+|---|---|---|---|---|---|---|---|---|
+| File Server | | | | | | | | |
+| Web Server | | | | | | | | |
+| Workstation | | | | | | | | |
+| Database | | | | | | | | |
+
+Danach `D:\iobw.tst` löschen. Der Ordner `C:\Abnahme\icf` liegt in `C:\Abnahme` und kommt mit
+`--include C:\Abnahme` ins Bundle (Abschnitt 11).
+
+## 11. Bundle zurückschicken
 
 ```bat
 sbench bundle --all --include C:\Abnahme --out C:\Abnahme\abnahme-m2.zip

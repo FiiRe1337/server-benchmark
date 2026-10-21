@@ -14,6 +14,8 @@
 #include "sb/util.h"
 #include "sb/topo.h"
 #include "sb/kernels.h"
+#include "sb/icf.h"
+#include "sb/sb.h"
 
 static int g_fail = 0, g_pass = 0;
 #define CHECK(cond, ...) do { if (cond) g_pass++; else { g_fail++; printf("FAIL %s:%d: ", __FILE__, __LINE__); printf(__VA_ARGS__); printf("\n"); } } while (0)
@@ -432,6 +434,125 @@ static void test_v13_phase_cpus(void) {
     cJSON_Delete(a);
 }
 
+/* Vertrag 1.3.1: tests[].cpus im Ergebnis = phase.cpus des ersten phase-Events */
+static cJSON *g_phase_cpus;
+static void cap_phase(void *ctx, int test, const char *name, double d, const cJSON *extra) {
+    (void)ctx; (void)test; (void)d;
+    if (!strcmp(name, "preparing") && extra && !g_phase_cpus)
+        g_phase_cpus = cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(extra, "cpus"), 1);
+}
+
+static void test_v131_result_cpus(void) {
+    sb_job j; sb_verrs e;
+    int rc = load("{\"schema\":\"sb-job/1\",\"name\":\"t\",\"tests\":[{\"type\":\"cpu\",\"workload\":\"int\","
+                  "\"threads\":2,\"warmup_s\":0,\"duration_s\":0.3}]}", &j, &e);
+    CHECK(rc == 0 && e.n == 0, "cpu-Job für tests[].cpus gültig (%d Fehler)", e.n);
+    if (rc == 0) {
+        sb_storage_opts o; memset(&o, 0, sizeof o);
+        sb_storage_cb cb; memset(&cb, 0, sizeof cb);
+        cb.phase = cap_phase;
+        sb_compute_result r;
+        g_phase_cpus = NULL;
+        int x = sb_compute_run(0, &j.tests[0], &o, &cb, &r);
+        CHECK(x == 0 && r.cpus_json && cJSON_GetArraySize(r.cpus_json) == r.nthreads && r.nthreads == 2,
+              "compute: cpus_json mit einem Eintrag je Thread (rc %d, %d Threads)", x, r.nthreads);
+        int same = r.cpus_json != NULL;
+        for (int i = 0; same && i < r.nthreads; i++) {
+            const cJSON *c = cJSON_GetArrayItem(r.cpus_json, i);
+            same = cJSON_GetObjectItemCaseSensitive(c, "id")->valueint == i &&
+                   (uint32_t)cJSON_GetObjectItemCaseSensitive(c, "cpu")->valuedouble == r.cpus[i];
+        }
+        CHECK(same, "tests[].cpus: id = Thread-id, cpu = summary.cpus");
+        CHECK(g_phase_cpus && r.cpus_json && cJSON_Compare(g_phase_cpus, r.cpus_json, 1), "tests[].cpus gleich phase.cpus");
+        cJSON_Delete(g_phase_cpus);
+        g_phase_cpus = NULL;
+        sb_compute_result_free(&r);
+        CHECK(r.cpus_json == NULL, "sb_compute_result_free gibt cpus_json frei");
+    }
+    sb_verrs_free(&e);
+    sb_job_free(&j);
+}
+
+/* Vertrag 1.3.1: errors[].fatal genau an dem Fehler, der den Test beendet hat */
+static int count_fatal(const sb_run_error *e, int n, int *idx) {
+    int c = 0;
+    for (int i = 0; i < n; i++) if (e[i].fatal) { c++; if (idx) *idx = i; }
+    return c;
+}
+
+/* Vertrag 1.3.1: done.exit_code = Rückgabewert von sb_run (= Prozess-Exit-Code von sbench run) */
+static void test_v131_exit_code(void) {
+    char dd[MAX_PATH], jp[MAX_PATH], op[MAX_PATH], pp[MAX_PATH], prog[MAX_PATH + 8], lp[MAX_PATH];
+    snprintf(dd, sizeof dd, "%ssb131-data", g_tmpdir);
+    snprintf(jp, sizeof jp, "%ssb131-job.json", g_tmpdir);
+    snprintf(op, sizeof op, "%ssb131-result.json", g_tmpdir);
+    snprintf(pp, sizeof pp, "%ssb131-progress.jsonl", g_tmpdir);
+    snprintf(lp, sizeof lp, "%ssb131.log", g_tmpdir);
+    snprintf(prog, sizeof prog, "file:%s", pp);
+    CreateDirectoryA(dd, NULL);
+    CHECK(sb_set_data_directory(dd) == 0, "Datenverzeichnis %s", dd);
+    const char *job = "{\"schema\":\"sb-job/1\",\"name\":\"exit\",\"tests\":[{\"type\":\"cpu\",\"threads\":1,"
+                      "\"warmup_s\":0,\"duration_s\":0.3}]}";
+    CHECK(sb_write_file(jp, job, strlen(job)) == 0, "Job schreiben");
+    DeleteFileA(pp);
+    sb_run_options o; memset(&o, 0, sizeof o);
+    o.job_path = jp; o.out_path = op; o.progress = prog; o.log_path = lp; o.id = "unit-exit-code"; o.tick_ms = 100;
+    int rc = sb_run(&o);
+    char *txt = NULL; size_t n = 0;
+    cJSON *done = NULL;
+    if (sb_read_file(pp, &txt, &n) == 0) {
+        /* letzte nicht leere Zeile */
+        while (n && (txt[n - 1] == '\n' || txt[n - 1] == '\r')) txt[--n] = 0;
+        char *last = strrchr(txt, '\n');
+        done = cJSON_Parse(last ? last + 1 : txt);
+    }
+    const cJSON *ev = cJSON_GetObjectItem(done, "ev"), *ec = cJSON_GetObjectItem(done, "exit_code");
+    CHECK(rc == 0, "sb_run cpu 0,3 s: rc %d", rc);
+    CHECK(cJSON_IsString(ev) && !strcmp(ev->valuestring, "done"), "letztes Event ist done");
+    CHECK(cJSON_IsNumber(ec) && ec->valueint == rc, "done.exit_code %d = rc %d", cJSON_IsNumber(ec) ? ec->valueint : -1, rc);
+    cJSON_Delete(done); free(txt);
+    DeleteFileA(jp); DeleteFileA(op); DeleteFileA(pp); DeleteFileA(lp);
+}
+
+static void test_v131_fatal(void) {
+    sb_job j; sb_verrs e;
+    /* cpu: NUMA-Knoten ohne Prozessoren (nach der Prüfung gesetzt) -> rc 1, E_NUMA_NODE fatal */
+    int rc = load("{\"schema\":\"sb-job/1\",\"name\":\"t\",\"tests\":[{\"type\":\"cpu\",\"threads\":1,\"duration_s\":0.2}]}", &j, &e);
+    CHECK(rc == 0, "cpu-Job für fatal gültig");
+    if (rc == 0) {
+        sb_storage_opts o; memset(&o, 0, sizeof o);
+        sb_storage_cb cb; memset(&cb, 0, sizeof cb);
+        sb_compute_result r;
+        j.tests[0].numa_node = 1000;
+        int x = sb_compute_run(0, &j.tests[0], &o, &cb, &r);
+        int k = -1;
+        CHECK(x == 1 && count_fatal(r.errs, r.nerrs, &k) == 1 && k == 0 && !strcmp(r.errs[0].code, "E_NUMA_NODE"),
+              "cpu-Laufzeitfehler: rc %d, genau ein fatal (%s)", x, r.nerrs ? r.errs[0].code : "-");
+        CHECK(r.stop_phase != 0, "cpu-Laufzeitfehler: Teilergebnis (stop_phase gesetzt)");
+        sb_compute_result_free(&r);
+    }
+    sb_verrs_free(&e); sb_job_free(&j);
+    /* storage: Testdatei kleiner als block_size (file_size nach der Prüfung verkleinert) -> E_TARGET_SIZE fatal */
+    rc = load("{\"schema\":\"sb-job/1\",\"name\":\"t\",\"tests\":[{\"type\":\"storage\","
+              "\"targets\":[{\"path\":\"%ssbfatal.dat\",\"kind\":\"file\",\"file_size\":\"1MiB\"}],"
+              "\"duration_s\":0.2,\"cache\":\"buffered\","
+              "\"access_specs\":[{\"weight\":100,\"block_size\":\"64KiB\",\"read_pct\":100,\"random_pct\":0}]}]}", &j, &e);
+    CHECK(rc == 0, "storage-Job für fatal gültig");
+    if (rc == 0) {
+        sb_storage_opts o; memset(&o, 0, sizeof o);
+        o.tick_ms = 1000;
+        sb_storage_cb cb; memset(&cb, 0, sizeof cb);
+        sb_storage_result r;
+        j.tests[0].targets[0].file_size = 4096;
+        int x = sb_storage_run(0, &j.tests[0], &o, &cb, &r);
+        int k = -1;
+        CHECK(x == 1 && count_fatal(r.errs, r.nerrs, &k) == 1 && k >= 0 && !strcmp(r.errs[k].code, "E_TARGET_SIZE"),
+              "storage-Laufzeitfehler: rc %d, genau ein fatal (%s)", x, k >= 0 ? r.errs[k].code : "-");
+        sb_storage_result_free(&r);
+    }
+    sb_verrs_free(&e); sb_job_free(&j);
+}
+
 static void test_v13_buffer_bytes(void) {
     CHECK(sb_mem_buffer_bytes(0, 256u << 20) == 256u << 20 && sb_mem_buffer_bytes(0, (1u << 20) + 100) == 1u << 20 &&
           sb_mem_buffer_bytes(0, 12000) == 8192 && sb_mem_buffer_bytes(0, 8192) == 8192,
@@ -557,6 +678,217 @@ static void test_job_m2(void) {
     sb_job_free(&j); sb_verrs_free(&e);
 }
 
+/* ---- Iometer-ICF-Import (tests/fixtures/icf) ---- */
+typedef struct { int rc; cJSON *job; sb_verrs e, w; } icf_res;
+
+static void icf_conv_text(icf_res *r, const char *text, const char *const *targets, int nt) {
+    memset(r, 0, sizeof *r);
+    sb_icf_opts o = {targets, nt, "fixture"};
+    r->rc = sb_icf_convert(text, strlen(text), &o, &r->job, &r->e, &r->w);
+}
+
+static void icf_conv(icf_res *r, const char *name, const char *const *targets, int nt) {
+    char path[260], *txt = NULL;
+    size_t len = 0;
+    snprintf(path, sizeof path, "tests/fixtures/icf/%s", name);
+    memset(r, 0, sizeof *r);
+    if (sb_read_file(path, &txt, &len)) { r->rc = -1; CHECK(0, "%s nicht lesbar", path); return; }
+    sb_icf_opts o = {targets, nt, "fixture"};
+    r->rc = sb_icf_convert(txt, len, &o, &r->job, &r->e, &r->w);
+    free(txt);
+}
+
+static void icf_free(icf_res *r) { cJSON_Delete(r->job); sb_verrs_free(&r->e); sb_verrs_free(&r->w); }
+
+static int has_code(const sb_verrs *v, const char *code, const char *ptr) {
+    for (int i = 0; i < v->n; i++)
+        if (!strcmp(v->v[i].code, code) && (!ptr || !strcmp(v->v[i].pointer, ptr))) return 1;
+    return 0;
+}
+
+static cJSON *jget(const cJSON *o, const char *path) { /* "tests/0/access_specs/1/weight" */
+    char buf[200];
+    snprintf(buf, sizeof buf, "%s", path);
+    const cJSON *x = o;
+    for (char *t = strtok(buf, "/"); t && x; t = strtok(NULL, "/"))
+        x = cJSON_IsArray(x) ? cJSON_GetArrayItem(x, atoi(t)) : cJSON_GetObjectItemCaseSensitive(x, t);
+    return (cJSON *)x;
+}
+static double jnum(const cJSON *o, const char *p) { cJSON *x = jget(o, p); return cJSON_IsNumber(x) ? x->valuedouble : -1; }
+static const char *jstr(const cJSON *o, const char *p) { cJSON *x = jget(o, p); return cJSON_IsString(x) ? x->valuestring : ""; }
+
+/* Erzeugter Job muss vom Job-Parser angenommen werden; umgebungsabhängige Prüfungen ausgenommen */
+static void icf_check_job_valid(const icf_res *r, const char *what) {
+    char *t = cJSON_Print(r->job);
+    sb_job j;
+    sb_verrs e = {0};
+    sb_job_load_text(&j, t, &e, NULL);
+    for (int i = 0; i < e.n; i++) {
+        const char *c = e.v[i].code;
+        int env = !strcmp(c, "E_TARGET_NOT_FOUND") || !strcmp(c, "E_DESTRUCTIVE_NOT_ALLOWED") || !strcmp(c, "E_BLOCK_ALIGN") || !strcmp(c, "E_TARGET_SIZE");
+        CHECK(env, "%s: erzeugter Job ungültig: %s %s %s", what, c, e.v[i].pointer, e.v[i].msg);
+    }
+    sb_verrs_free(&e);
+    sb_job_free(&j);
+    free(t);
+}
+
+static void test_icf_standard_profiles(void) {
+    icf_res r;
+    icf_conv(&r, "standard-profiles.icf", NULL, 0);
+    CHECK(r.rc == 0 && r.job, "standard-profiles: rc %d", r.rc);
+    if (!r.job) { icf_free(&r); return; }
+    CHECK(cJSON_GetArraySize(jget(r.job, "tests")) == 4, "4 Tests erwartet");
+    CHECK(!strcmp(jstr(r.job, "tests/0/name"), "File Server") && !strcmp(jstr(r.job, "tests/1/name"), "Web Server") &&
+          !strcmp(jstr(r.job, "tests/2/name"), "Workstation") && !strcmp(jstr(r.job, "tests/3/name"), "Database"), "Reihenfolge der Profile");
+    static const int fs_w[] = {10, 5, 5, 60, 2, 4, 4, 10};
+    static const char *const fs_b[] = {"", "1KiB", "2KiB", "4KiB", "8KiB", "16KiB", "32KiB", "64KiB"};
+    CHECK(cJSON_GetArraySize(jget(r.job, "tests/0/access_specs")) == 8, "File Server: 8 Zeilen");
+    for (int i = 0; i < 8; i++) {
+        char p[80];
+        snprintf(p, sizeof p, "tests/0/access_specs/%d/weight", i);
+        CHECK(jnum(r.job, p) == fs_w[i], "File Server Gewicht %d", i);
+        snprintf(p, sizeof p, "tests/0/access_specs/%d/block_size", i);
+        CHECK(i == 0 ? jnum(r.job, p) == 512 : !strcmp(jstr(r.job, p), fs_b[i]), "File Server Größe %d", i);
+        snprintf(p, sizeof p, "tests/0/access_specs/%d/read_pct", i);
+        CHECK(jnum(r.job, p) == 80, "File Server 80 %% Lesen");
+    }
+    CHECK(cJSON_GetArraySize(jget(r.job, "tests/1/access_specs")) == 10, "Web Server: 10 Zeilen");
+    CHECK(jnum(r.job, "tests/1/access_specs/0/weight") == 22 && jnum(r.job, "tests/1/access_specs/9/weight") == 1 &&
+          !strcmp(jstr(r.job, "tests/1/access_specs/9/block_size"), "512KiB") && jnum(r.job, "tests/1/access_specs/3/read_pct") == 100, "Web Server");
+    CHECK(!strcmp(jstr(r.job, "tests/2/access_specs/0/block_size"), "8KiB") && jnum(r.job, "tests/2/access_specs/0/read_pct") == 80 &&
+          jnum(r.job, "tests/2/access_specs/0/random_pct") == 80, "Workstation 8K 80/80");
+    CHECK(jnum(r.job, "tests/3/access_specs/0/read_pct") == 67 && jnum(r.job, "tests/3/access_specs/0/random_pct") == 100, "Database 8K 67/100");
+    CHECK(jnum(r.job, "tests/0/queue_depth") == 32 && jnum(r.job, "tests/0/workers") == 1, "QD 32, 1 Worker");
+    CHECK(jnum(r.job, "tests/0/duration_s") == 300 && jnum(r.job, "tests/0/warmup_s") == 30, "Run Time 5 min, Ramp Up 30 s");
+    CHECK(!strcmp(jstr(r.job, "tests/0/targets/0/path"), "D:\\iobw.tst") && !strcmp(jstr(r.job, "tests/0/targets/0/file_size"), "8GiB"),
+          "Target D:\\iobw.tst, 16777216 Sektoren = 8 GiB");
+    CHECK(!strcmp(jstr(r.job, "tests/0/cache"), "unbuffered"), "cache unbuffered");
+    CHECK(!strcmp(jstr(r.job, "name"), "Iometer Standardprofile (Fileserver, Webserver, Workstation, Datenbank)"), "Jobname = Test Description");
+    CHECK(r.e.n == 0 && !has_code(&r.w, "W_ICF_RUN_TIME", NULL) && has_code(&r.w, "W_ICF_ALIGN", ""), "Warnungen Standardprofile");
+    icf_check_job_valid(&r, "standard-profiles");
+    icf_free(&r);
+}
+
+static void test_icf_default_and_demo(void) {
+    icf_res r;
+    icf_conv(&r, "iometer-default.icf", NULL, 0);
+    CHECK(r.rc == 0 && r.job, "iometer-default: rc %d", r.rc);
+    if (r.job) {
+        CHECK(!strcmp(jstr(r.job, "name"), "fixture"), "Jobname ohne Test Description = Dateiname");
+        CHECK(!strcmp(jstr(r.job, "tests/0/access_specs/0/block_size"), "2KiB") && jnum(r.job, "tests/0/access_specs/0/read_pct") == 67, "Default 2K 67 %%");
+        CHECK(jnum(r.job, "tests/0/duration_s") == 60 && !jget(r.job, "tests/0/warmup_s"), "Run Time 0 -> 60 s, kein warmup");
+        CHECK(has_code(&r.w, "W_ICF_RUN_TIME", "/tests") && has_code(&r.w, "W_ICF_DISK_SIZE", ""), "W_ICF_RUN_TIME/W_ICF_DISK_SIZE");
+        CHECK(!strcmp(jstr(r.job, "tests/0/targets/0/path"), "C:\\iobw.tst"), "C: -> C:\\iobw.tst");
+        icf_check_job_valid(&r, "iometer-default");
+    }
+    icf_free(&r);
+    icf_conv(&r, "gui-demo.icf", NULL, 0);
+    CHECK(r.rc == 0 && r.job, "gui-demo: rc %d", r.rc);
+    if (r.job) {
+        CHECK(cJSON_GetArraySize(jget(r.job, "tests")) == 2, "ohne Worker: alle Specs als Tests");
+        CHECK(has_code(&r.w, "W_ICF_NO_TARGET", "") && has_code(&r.w, "W_ICF_REPLY", "/tests/0/access_specs/1"), "W_ICF_NO_TARGET, W_ICF_REPLY");
+        CHECK(jnum(r.job, "tests/0/access_specs/0/weight") == 90 && jnum(r.job, "tests/0/warmup_s") == 10, "OLTP 90/10, Ramp Up 10");
+        icf_check_job_valid(&r, "gui-demo");
+    }
+    icf_free(&r);
+}
+
+static void test_icf_multi_worker(void) {
+    icf_res r;
+    icf_conv(&r, "multi-worker.icf", NULL, 0);
+    CHECK(r.rc == 0 && r.job, "multi-worker: rc %d", r.rc);
+    if (!r.job) { icf_free(&r); return; }
+    CHECK(cJSON_GetArraySize(jget(r.job, "tests")) == 2, "nur zugewiesene Specs werden Tests");
+    CHECK(jnum(r.job, "tests/0/workers") == 4 && jnum(r.job, "tests/0/queue_depth") == 16, "2 Worker x 2 Targets = 4 sb-Worker, QD 16");
+    CHECK(cJSON_GetArraySize(jget(r.job, "tests/0/targets")) == 2 && !strcmp(jstr(r.job, "tests/0/targets/1/path"), "E:\\iobw.tst") &&
+          !strcmp(jstr(r.job, "tests/0/targets/0/file_size"), "16GiB"), "Targets D:/E:, 16 GiB");
+    CHECK(jnum(r.job, "tests/1/access_specs/0/delay_ms") == 10 && jnum(r.job, "tests/1/access_specs/0/burst_len") == 4 &&
+          jnum(r.job, "tests/1/access_specs/0/read_pct") == 0, "Delay 10 ms, Burst 4");
+    CHECK(!jget(r.job, "tests/0/access_specs/0/delay_ms") && !jget(r.job, "tests/0/access_specs/0/burst_len"), "ohne Delay kein delay_ms/burst_len");
+    CHECK(jnum(r.job, "tests/0/duration_s") == 150 && jnum(r.job, "tests/0/warmup_s") == 15, "2:30 min, Ramp Up 15");
+    CHECK(has_code(&r.w, "W_ICF_MANAGERS", "") && has_code(&r.w, "W_ICF_NETWORK_WORKER", "") && has_code(&r.w, "W_ICF_DATA_PATTERN", "") &&
+          has_code(&r.w, "W_ICF_WORKER_SPLIT", "/tests") && !has_code(&r.w, "W_ICF_QD_MIXED", NULL) && !has_code(&r.w, "W_ICF_TARGET_LAYOUT", NULL),
+          "Warnungen multi-worker");
+    icf_check_job_valid(&r, "multi-worker");
+    icf_free(&r);
+}
+
+static void test_icf_physical_and_targets(void) {
+    icf_res r;
+    icf_conv(&r, "physical-2006.icf", NULL, 0);
+    CHECK(r.rc == 0 && r.job, "physical-2006: rc %d", r.rc);
+    if (r.job) {
+        CHECK(!strcmp(jstr(r.job, "tests/0/targets/0/path"), "\\\\.\\PhysicalDrive1") && !strcmp(jstr(r.job, "tests/0/targets/0/kind"), "physical") &&
+              !jget(r.job, "tests/0/targets/0/file_size") && !jget(r.job, "tests/0/targets/0/allow_destructive"), "PHYSICALDRIVE:1, ohne allow_destructive");
+        CHECK(!strcmp(jstr(r.job, "tests/0/access_specs/0/align"), "4KiB") && jnum(r.job, "tests/0/queue_depth") == 4, "align 4K, QD 4");
+        CHECK(has_code(&r.w, "W_ICF_CYCLING", "/tests") && !has_code(&r.w, "W_ICF_ALIGN", NULL), "W_ICF_CYCLING");
+    }
+    icf_free(&r);
+    const char *one[] = {"X:\\bench\\sb.dat"};
+    icf_conv(&r, "standard-profiles.icf", one, 1);
+    CHECK(r.rc == 0 && !strcmp(jstr(r.job, "tests/3/targets/0/path"), "X:\\bench\\sb.dat") && !strcmp(jstr(r.job, "tests/3/targets/0/file_size"), "8GiB"),
+          "--target ersetzt Pfad, file_size aus ICF");
+    icf_free(&r);
+    const char *two[] = {"\\\\.\\PhysicalDrive3", "\\\\.\\F:"};
+    icf_conv(&r, "standard-profiles.icf", two, 2);
+    CHECK(r.rc == 2 && has_code(&r.e, "E_ICF_TARGET_COUNT", ""), "--target: Anzahl passt nicht");
+    icf_free(&r);
+    icf_conv(&r, "gui-demo.icf", two, 2);
+    CHECK(r.rc == 0 && !strcmp(jstr(r.job, "tests/0/targets/0/kind"), "physical") && !strcmp(jstr(r.job, "tests/0/targets/1/kind"), "volume") &&
+          jnum(r.job, "tests/0/workers") == 2 && !has_code(&r.w, "W_ICF_NO_TARGET", NULL), "--target ohne ICF-Targets, kind erkannt");
+    icf_free(&r);
+}
+
+static void test_icf_broken(void) {
+    static const struct { const char *f, *code; } B[] = {
+        {"broken-no-version.icf", "E_ICF_FORMAT"}, {"broken-truncated.icf", "E_ICF_FORMAT"}, {"broken-weights.icf", "E_ICF_SPEC"},
+        {"broken-unknown-spec.icf", "E_ICF_SPEC"}, {"broken-values.icf", "E_ICF_VALUE"}, {"broken-columns.icf", "E_ICF_PARSE"}};
+    for (size_t i = 0; i < sizeof B / sizeof B[0]; i++) {
+        icf_res r;
+        icf_conv(&r, B[i].f, NULL, 0);
+        CHECK(r.rc == 2 && !r.job && has_code(&r.e, B[i].code, "") && r.e.n > 0 && strstr(r.e.v[0].msg, "Zeile"),
+              "%s: erwartet %s, rc %d, %d Fehler", B[i].f, B[i].code, r.rc, r.e.n);
+        icf_free(&r);
+    }
+    icf_res r;
+    icf_conv_text(&r, "", NULL, 0);
+    CHECK(r.rc == 2 && has_code(&r.e, "E_ICF_FORMAT", ""), "leere Datei");
+    icf_free(&r);
+    /* LF statt CRLF, Latin-1-Umlaut im Namen, Delay 0 mit Burst > 1 */
+    icf_conv_text(&r, "Version 1.1.0\n'ACCESS SPECIFICATIONS ====\n'Access specification name,default assignment\n\tL\xe4ngs 1M,NONE\n"
+                      "'size,% of size,% reads,% random,delay,burst,align,reply\n\t1048576,100,100,0,0,8,0,0\n'END access specifications\n", NULL, 0);
+    CHECK(r.rc == 0 && !strcmp(jstr(r.job, "tests/0/name"), "L\xc3\xa4ngs 1M") && !strcmp(jstr(r.job, "tests/0/access_specs/0/block_size"), "1MiB"),
+          "Latin-1 -> UTF-8, LF-Zeilen");
+    CHECK(has_code(&r.w, "W_ICF_UNSUPPORTED", "/tests/0/access_specs/0") && has_code(&r.w, "W_ICF_NO_TARGET", "") && !has_code(&r.w, "W_ICF_ALIGN", NULL),
+          "Burst ohne Delay, kein Target");
+    icf_free(&r);
+}
+
+static void test_icf_api(void) {
+    char *job = NULL, *rep = NULL;
+    sb_import_icf_options o = {"tests/fixtures/icf/physical-2006.icf", NULL, 0};
+    int rc = sb_import_icf(&o, &job, &rep);
+    cJSON *d = rep ? cJSON_Parse(rep) : NULL;
+    CHECK(rc == 0 && job && d && !strcmp(jstr(d, "schema"), "sb-validate/1") && cJSON_IsTrue(jget(d, "ok")), "sb_import_icf physical-2006: rc %d", rc);
+    int found = 0;
+    cJSON *x;
+    cJSON_ArrayForEach(x, jget(d, "warnings")) if (!strcmp(jstr(x, "code"), "W_ICF_VALIDATE") && strstr(jstr(x, "msg"), "E_DESTRUCTIVE_NOT_ALLOWED")) found = 1;
+    CHECK(found, "Schreibtest auf PhysicalDrive ohne allow_destructive -> W_ICF_VALIDATE");
+    cJSON_Delete(d);
+    sb_free(job); sb_free(rep);
+    job = rep = NULL;
+    o.icf_path = "tests/fixtures/icf/broken-weights.icf";
+    rc = sb_import_icf(&o, &job, &rep);
+    CHECK(rc == 2 && !job && rep && strstr(rep, "E_ICF_SPEC"), "sb_import_icf broken: rc %d", rc);
+    sb_free(job); sb_free(rep);
+    job = rep = NULL;
+    o.icf_path = "tests/fixtures/icf/gibt-es-nicht.icf";
+    rc = sb_import_icf(&o, &job, &rep);
+    CHECK(rc == 1 && !job && rep && strstr(rep, "E_IO"), "sb_import_icf fehlende Datei: rc %d", rc);
+    sb_free(job); sb_free(rep);
+}
+
 int main(void) {
     DWORD n = GetTempPathA(MAX_PATH, g_tmpdir);
     if (!n) strcpy(g_tmpdir, ".\\");
@@ -575,12 +907,21 @@ int main(void) {
     test_topo_pick();
     test_v13_metric_score();
     test_v13_phase_cpus();
+    test_v131_result_cpus();
+    test_v131_fatal();
+    test_v131_exit_code();
     test_v13_buffer_bytes();
     test_v13_export_partial();
     test_chase();
     test_memkern();
     test_cpu_kernels();
     test_job_m2();
+    test_icf_standard_profiles();
+    test_icf_default_and_demo();
+    test_icf_multi_worker();
+    test_icf_physical_and_targets();
+    test_icf_broken();
+    test_icf_api();
     printf("%d Prüfungen bestanden, %d fehlgeschlagen\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

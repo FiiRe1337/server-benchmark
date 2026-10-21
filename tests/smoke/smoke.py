@@ -11,6 +11,7 @@ Prüft gegen die JSON-Schemas in schema/ (jsonschema):
   * Stop: Lauf starten, nach 2 s 'sbench stop' -> Exit 3, aborted = true
   * nicht implementierte Testtypen (net_*, hyperv_info) -> error-Event E_NOT_IMPLEMENTED
   * Meilenstein 2 (cpu, memory, NUMA): siehe smoke_m2.py
+  * import-icf (Iometer-ICF -> sb-job/1): siehe smoke_icf.py
   * export (flat/iometer), bundle (ZIP, manifest gegen sb-bundle/1, sha256,
     --all/--results/--include/--anonymize)
   * Vertrag 1.1: runs/<id>.jsonl, Lock-Datei, runs/index.jsonl, list --running --json,
@@ -99,7 +100,7 @@ def read_jsonl(path: Path) -> list[dict]:
     return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
 
 
-def check_progress(events: list[dict], what: str, expect_aborted: bool | None = None) -> None:
+def check_progress(events: list[dict], what: str, expect_aborted: bool | None = None, rc: int | None = None) -> None:
     bad = 0
     for i, ev in enumerate(events):
         errs = list(V["sb-progress-1.schema.json"].iter_errors(ev))
@@ -113,6 +114,9 @@ def check_progress(events: list[dict], what: str, expect_aborted: bool | None = 
     check(bool(evs) and evs[-1] == "done" and evs.count("done") == 1, f"{what}: letztes Event ist done (genau einmal)")
     if expect_aborted is not None and evs and evs[-1] == "done":
         check(events[-1]["aborted"] is expect_aborted, f"{what}: done.aborted = {expect_aborted}")
+    if rc is not None and evs and evs[-1] == "done":
+        # Vertrag 1.3.1: done.exit_code = tatsächlicher Exit-Code des Prozesses
+        check(events[-1].get("exit_code") == rc, f"{what}: done.exit_code {events[-1].get('exit_code')} = Prozess-Exit-Code {rc}")
     # Ticks nur in measure
     phase = None
     tick_ok = True
@@ -443,7 +447,7 @@ def main() -> int:
             "--tick-ms", "1000", timeout=600)
     check(p.returncode == 0, f"run Exit 0 (ist {p.returncode}, {time.time() - t0:.1f} s)")
     events = read_jsonl(prog)
-    check_progress(events, "Fortschritt (file:)", expect_aborted=False)
+    check_progress(events, "Fortschritt (file:)", expect_aborted=False, rc=p.returncode)
     ticks = [e for e in events if e["ev"] == "tick"]
     check(len(ticks) >= 4, f"mindestens 4 Ticks bei 5 s / 1000 ms (ist {len(ticks)})")
     progs = [e for e in events if e["ev"] == "progress"]
@@ -598,7 +602,7 @@ def main() -> int:
         proc.kill()
         rc = None
     check(rc == 3, f"run nach stop: Exit 3 (ist {rc}, Reaktionszeit {time.time() - ts:.2f} s)")
-    check_progress(read_jsonl(sprog), "Fortschritt (stop)", expect_aborted=True)
+    check_progress(read_jsonl(sprog), "Fortschritt (stop)", expect_aborted=True, rc=rc)
     sres = check_result(sout, "Teilergebnis (stop)", expect_aborted=True)
     if sres and sres["tests"]:
         s = sres["tests"][0]["summary"]
@@ -645,7 +649,7 @@ def main() -> int:
     p = run(sbench, "run", "--job", ni, "--out", nout, "--progress", f"file:{nprog}")
     check(p.returncode == 0, f"Job mit net/hyperv_info: Exit 0 (ist {p.returncode})")
     nevs = read_jsonl(nprog)
-    check_progress(nevs, "Fortschritt (not implemented)", expect_aborted=False)
+    check_progress(nevs, "Fortschritt (not implemented)", expect_aborted=False, rc=p.returncode)
     nis = [e for e in nevs if e["ev"] == "error" and e["code"] == "E_NOT_IMPLEMENTED"]
     check(sorted(e["test"] for e in nis) == [0, 2], "E_NOT_IMPLEMENTED für Tests 0 und 2 (net_client, hyperv_info)")
     nres = check_result(nout, "Ergebnis (not implemented)", expect_aborted=False, job=ni)
@@ -683,6 +687,8 @@ def main() -> int:
 
     import smoke_m2  # noqa: E402  (tests/smoke liegt durch den Skriptaufruf im sys.path)
     m2 = smoke_m2.run_m2(sys.modules[__name__], sbench, work, info, quick)
+    import smoke_icf  # noqa: E402
+    icf = smoke_icf.run_icf(sys.modules[__name__], sbench, work, quick)
 
     print("\n== export ==")
     for style in ("flat", "iometer"):
@@ -844,7 +850,8 @@ def main() -> int:
         for src, name in [(out, "result.json"), (prog, "progress.jsonl"), (sout, "result-stop.json"), (nout, "result-ni.json"),
                           (zp, "bundle.zip"), (zp3, "bundle-anon.zip"),
                           (work / "result-vol.json", "result-volume.json"),
-                          (m2.get("cpu", work / "-"), "result-cpu.json"), (m2.get("memory", work / "-"), "result-memory.json")]:
+                          (m2.get("cpu", work / "-"), "result-cpu.json"), (m2.get("memory", work / "-"), "result-memory.json"),
+                          (icf.get("result", work / "-"), "result-icf.json"), (work / "icf-standard.json", "job-icf-standard.json")]:
             if src.exists():
                 shutil.copy2(src, od / name)
         (od / "info.json").write_text(json.dumps(info, indent=2, ensure_ascii=False), encoding="utf-8")

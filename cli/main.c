@@ -10,6 +10,7 @@
 #include "sb/sb.h"
 #include "cJSON.h"
 #include "sb/sha256.h"
+#include "sb/util.h"
 
 #ifndef SB_COMMIT
 #define SB_COMMIT "unknown"
@@ -34,6 +35,7 @@ static void usage(FILE *f) {
         "  sbench info [--json]\n"
         "  sbench validate --job <job.json>\n"
         "  sbench export <result.json> --csv <out.csv> [--style iometer|flat]\n"
+        "  sbench import-icf <datei.icf> [-o|--out <job.json>] [--target <pfad>]... [--json]\n"
         "  sbench bundle --out <datei.zip> [--all] [--results <result.json>...] [--include <ordner>]...\n"
         "                [--anonymize] [--progress ...]\n"
         "  sbench version [--json]\n\n"
@@ -94,6 +96,65 @@ static int cmd_validate(int argc, char **argv) {
     char *out = NULL;
     int rc = sb_validate(job, &out);
     if (out) { fputs(out, stdout); fputs("\n", stdout); sb_free(out); }
+    return rc;
+}
+
+/* import-icf: mit -o/--out wird der Job geschrieben und sb-validate/1 auf stdout ausgegeben (Vertrag der GUI);
+ * ohne -o geht der Job auf stdout und die Meldungen als Text auf stderr, mit --json nur sb-validate/1. */
+static int cmd_import_icf(int argc, char **argv) {
+    const char *icf = NULL, *out = NULL;
+    int json = 0;
+    const char **tg = (const char **)calloc((size_t)argc, sizeof(char *));
+    sb_import_icf_options o;
+    memset(&o, 0, sizeof o);
+    o.targets = tg;
+    for (int i = 2; i < argc; i++) {
+        if (!strcmp(argv[i], "-o") || !strcmp(argv[i], "--out")) { if (!(out = need(argc, argv, &i))) { free(tg); return 2; } }
+        else if (!strcmp(argv[i], "--target")) { if (!(tg[o.ntargets++] = need(argc, argv, &i))) { free(tg); return 2; } }
+        else if (!strcmp(argv[i], "--json")) json = 1;
+        else if (!icf && argv[i][0] != '-') icf = argv[i];
+        else { fprintf(stderr, "sbench: unbekannte Option '%s'\n", argv[i]); free(tg); return 2; }
+    }
+    if (!icf) { fprintf(stderr, "sbench import-icf: <datei.icf> fehlt\n"); free(tg); return 2; }
+    o.icf_path = icf;
+    char *job = NULL, *rep = NULL;
+    int rc = sb_import_icf(&o, &job, &rep);
+    free(tg);
+    if (rc == 0 && out && job && sb_write_file(out, job, strlen(job))) {
+        fprintf(stderr, "sbench: %s ist nicht schreibbar\n", out);
+        rc = 1;
+        cJSON *d = cJSON_Parse(rep);
+        if (d) {
+            cJSON_ReplaceItemInObject(d, "ok", cJSON_CreateFalse());
+            cJSON *x = cJSON_CreateObject();
+            cJSON_AddStringToObject(x, "path", "");
+            cJSON_AddStringToObject(x, "code", "E_IO");
+            cJSON_AddStringToObject(x, "msg", "Ausgabedatei ist nicht schreibbar.");
+            cJSON_AddItemToArray(cJSON_GetObjectItem(d, "errors"), x);
+            sb_free(rep);
+            rep = cJSON_Print(d);
+            cJSON_Delete(d);
+        }
+    }
+    if (out || json) {
+        if (rep) { fputs(rep, stdout); fputs("\n", stdout); }
+    } else {
+        cJSON *d = cJSON_Parse(rep);
+        const char *keys[] = {"errors", "warnings"};
+        for (int k = 0; d && k < 2; k++) {
+            cJSON *x;
+            cJSON_ArrayForEach(x, cJSON_GetObjectItem(d, keys[k])) {
+                const char *p = cJSON_GetStringValue(cJSON_GetObjectItem(x, "path"));
+                fprintf(stderr, "%s%s%s%s: %s\n", cJSON_GetStringValue(cJSON_GetObjectItem(x, "code")),
+                        p && *p ? " [" : "", p && *p ? p : "", p && *p ? "]" : "", cJSON_GetStringValue(cJSON_GetObjectItem(x, "msg")));
+            }
+        }
+        cJSON_Delete(d);
+        if (job) { fputs(job, stdout); fputs("\n", stdout); }
+    }
+    if (rc == 0 && out && !json) fprintf(stderr, "Job geschrieben: %s\n", out);
+    sb_free(job);
+    sb_free(rep);
     return rc;
 }
 
@@ -289,6 +350,7 @@ int main(void) {
     else if (!strcmp(argv[1], "validate")) rc = cmd_validate(argc, argv);
     else if (!strcmp(argv[1], "export")) rc = cmd_export(argc, argv);
     else if (!strcmp(argv[1], "bundle")) rc = cmd_bundle(argc, argv);
+    else if (!strcmp(argv[1], "import-icf")) rc = cmd_import_icf(argc, argv);
     else if (!strcmp(argv[1], "version") || !strcmp(argv[1], "--version")) rc = cmd_version(argc, argv); else {
         fprintf(stderr, "sbench: unbekannter Befehl '%s'\n\n", argv[1]);
         usage(stderr);
