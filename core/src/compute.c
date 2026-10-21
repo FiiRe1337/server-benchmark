@@ -157,6 +157,8 @@ static void add_err(sb_compute_result *r, const char *code, int worker, double t
     }
     sb_run_error *x = &r->errs[r->nerrs++];
     memset(x, 0, sizeof *x);
+    /* Vertrag 1.3.1: jeder add_err bei cpu/memory beendet den Test; fatal trägt der erste */
+    x->fatal = r->nerrs == 1;
     snprintf(x->code, sizeof x->code, "%s", code);
     va_list ap;
     va_start(ap, fmt);
