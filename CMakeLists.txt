@@ -33,6 +33,7 @@ set(SB_CORE_SOURCES
   core/src/compute.c
   core/src/export.c
   core/src/hist.c
+  core/src/icf.c
   core/src/info.c
   core/src/job.c
   core/src/kernels.c
