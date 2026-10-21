@@ -216,6 +216,17 @@
         "cpu_pct": 0.9,
         "proc_cpu_pct": 0.88
       },
+      "cpus": [
+        {
+          "id": 0,
+          "cpu": 0,
+          "group": 0,
+          "number": 0,
+          "numa_node": 0,
+          "core": 0,
+          "smt_sibling_of": null
+        }
+      ],
       "per_worker": [
         {
           "id": 0,
@@ -297,6 +308,80 @@
         "cpu_pct": null,
         "proc_cpu_pct": null
       },
+      "cpus": [
+        {
+          "id": 0,
+          "cpu": 64,
+          "group": 1,
+          "number": 0,
+          "numa_node": 1,
+          "core": 32,
+          "smt_sibling_of": null
+        },
+        {
+          "id": 1,
+          "cpu": 66,
+          "group": 1,
+          "number": 2,
+          "numa_node": 1,
+          "core": 33,
+          "smt_sibling_of": null
+        },
+        {
+          "id": 2,
+          "cpu": 68,
+          "group": 1,
+          "number": 4,
+          "numa_node": 1,
+          "core": 34,
+          "smt_sibling_of": null
+        },
+        {
+          "id": 3,
+          "cpu": 70,
+          "group": 1,
+          "number": 6,
+          "numa_node": 1,
+          "core": 35,
+          "smt_sibling_of": null
+        },
+        {
+          "id": 4,
+          "cpu": 72,
+          "group": 1,
+          "number": 8,
+          "numa_node": 1,
+          "core": 36,
+          "smt_sibling_of": null
+        },
+        {
+          "id": 5,
+          "cpu": 74,
+          "group": 1,
+          "number": 10,
+          "numa_node": 1,
+          "core": 37,
+          "smt_sibling_of": null
+        },
+        {
+          "id": 6,
+          "cpu": 76,
+          "group": 1,
+          "number": 12,
+          "numa_node": 1,
+          "core": 38,
+          "smt_sibling_of": null
+        },
+        {
+          "id": 7,
+          "cpu": 78,
+          "group": 1,
+          "number": 14,
+          "numa_node": 1,
+          "core": 39,
+          "smt_sibling_of": null
+        }
+      ],
       "per_worker": [],
       "timeseries": [],
       "errors": []

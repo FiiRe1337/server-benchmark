@@ -103,17 +103,18 @@ double sb_cpu_pct(const sb_cpu_sample *a, const sb_cpu_sample *b) {
 
 /* ---- Ergebnis-Hilfen ------------------------------------------------- */
 
-static void add_err(sb_storage_result *r, const char *code, int worker_id, int target, double t, uint64_t count,
-                    const char *fmt, ...) {
+/* Rückgabe: Index des (ggf. zusammengefassten) Eintrags, -1 ohne Speicher */
+static int add_err(sb_storage_result *r, const char *code, int worker_id, int target, double t, uint64_t count,
+                   const char *fmt, ...) {
     for (int i = 0; i < r->nerrs; i++)
         if (!strcmp(r->errs[i].code, code) && r->errs[i].worker == worker_id && r->errs[i].target == target) {
             r->errs[i].count += count;
-            return;
+            return i;
         }
     if (r->nerrs == r->cap_errs) {
         int nc = r->cap_errs ? r->cap_errs * 2 : 8;
         sb_run_error *n = (sb_run_error *)realloc(r->errs, (size_t)nc * sizeof *n);
-        if (!n) return;
+        if (!n) return -1;
         r->errs = n; r->cap_errs = nc;
     }
     sb_run_error *e = &r->errs[r->nerrs++];
@@ -121,6 +122,14 @@ static void add_err(sb_storage_result *r, const char *code, int worker_id, int t
     snprintf(e->code, sizeof e->code, "%s", code);
     va_list ap; va_start(ap, fmt); vsnprintf(e->msg, sizeof e->msg, fmt, ap); va_end(ap);
     e->worker = worker_id; e->target = target; e->t = t; e->count = count ? count : 1;
+    return r->nerrs - 1;
+}
+
+/* Vertrag 1.3.1: genau ein Eintrag mit fatal = der Fehler, der den Test beendet hat */
+static void set_fatal(sb_storage_result *r, int idx) {
+    if (idx < 0) return;
+    for (int i = 0; i < r->nerrs; i++) if (r->errs[i].fatal) return;
+    r->errs[idx].fatal = 1;
 }
 
 void sb_storage_result_free(sb_storage_result *r) {
@@ -433,15 +442,15 @@ int sb_storage_run(int ti, const sb_test *t, const sb_storage_opts *o, const sb_
     r->ntargets = t->ntargets;
     r->t_created = (int *)calloc((size_t)(t->ntargets ? t->ntargets : 1), sizeof(int));
     r->t_deleted = (int *)calloc((size_t)(t->ntargets ? t->ntargets : 1), sizeof(int));
-    if (!r->t_created || !r->t_deleted) { add_err(r, "E_INTERNAL", -1, -1, 0, 1, "kein Speicher"); return 1; }
-    if (alloc_result(r, nw, t->nspecs)) { add_err(r, "E_INTERNAL", -1, -1, 0, 1, "kein Speicher"); return 1; }
+    if (!r->t_created || !r->t_deleted) { set_fatal(r, add_err(r, "E_INTERNAL", -1, -1, 0, 1, "kein Speicher")); return 1; }
+    if (alloc_result(r, nw, t->nspecs)) { set_fatal(r, add_err(r, "E_INTERNAL", -1, -1, 0, 1, "kein Speicher")); return 1; }
     engine E;
     memset(&E, 0, sizeof E);
     E.t = t; E.nw = nw; E.qpf = sb_qpf();
     E.measure_end = (LONG64)INT64_MAX;
     E.w = (worker *)calloc((size_t)nw, sizeof(worker));
     E.start_evt = CreateEventW(NULL, TRUE, FALSE, NULL);
-    if (!E.w || !E.start_evt) { add_err(r, "E_INTERNAL", -1, -1, 0, 1, "kein Speicher"); free(E.w); return 1; }
+    if (!E.w || !E.start_evt) { set_fatal(r, add_err(r, "E_INTERNAL", -1, -1, 0, 1, "kein Speicher")); free(E.w); return 1; }
     char err[600];
     int need_write = 0;
     uint64_t max_bs = 0, max_al = 0;
@@ -474,7 +483,7 @@ int sb_storage_run(int ti, const sb_test *t, const sb_storage_opts *o, const sb_
         }
         if (pr == SB_TERR_STOPPED) { r->aborted = 1; rc = 3; goto out; }
         if (pr != SB_TOK) {
-            add_err(r, pr == SB_TERR_ACCESS ? "E_ACCESS_DENIED" : "E_IO", -1, k, 0, 1, "%s", err);
+            set_fatal(r, add_err(r, pr == SB_TERR_ACCESS ? "E_ACCESS_DENIED" : "E_IO", -1, k, 0, 1, "%s", err));
             if (cb->error) cb->error(cb->ctx, ti, pr == SB_TERR_ACCESS ? "E_ACCESS_DENIED" : "E_IO", err);
             logf_(cb, "ERROR", "%s", err);
             rc = pr == SB_TERR_ACCESS ? 4 : 1;
@@ -501,7 +510,7 @@ int sb_storage_run(int ti, const sb_test *t, const sb_storage_opts *o, const sb_
             if (orc == SB_TERR_ACCESS && T->type != SB_TGT_FILE)
                 snprintf(err + strlen(err), sizeof err - strlen(err), " – für %s sind Administratorrechte nötig",
                          sb_target_type_name(T->type));
-            add_err(r, code, i, w->target, 0, 1, "%s", err);
+            set_fatal(r, add_err(r, code, i, w->target, 0, 1, "%s", err));
             if (cb->error) cb->error(cb->ctx, ti, code, err);
             logf_(cb, "ERROR", "%s", err);
             rc = orc == SB_TERR_ACCESS ? 4 : 1;
@@ -514,7 +523,7 @@ int sb_storage_run(int ti, const sb_test *t, const sb_storage_opts *o, const sb_
         if (size < max_bs) {
             snprintf(err, sizeof err, "Ziel %s ist mit %llu Bytes kleiner als block_size %llu", T->path,
                      (unsigned long long)size, (unsigned long long)max_bs);
-            add_err(r, "E_TARGET_SIZE", i, w->target, 0, 1, "%s", err);
+            set_fatal(r, add_err(r, "E_TARGET_SIZE", i, w->target, 0, 1, "%s", err));
             if (cb->error) cb->error(cb->ctx, ti, "E_TARGET_SIZE", err);
             rc = 1;
             goto out;
@@ -534,7 +543,7 @@ int sb_storage_run(int ti, const sb_test *t, const sb_storage_opts *o, const sb_
         w->iocp = CreateIoCompletionPort(w->h, NULL, (ULONG_PTR)i, 1);
         if (!w->iocp) {
             snprintf(err, sizeof err, "CreateIoCompletionPort: %s", sb_errtext(GetLastError()));
-            add_err(r, "E_INTERNAL", i, w->target, 0, 1, "%s", err);
+            set_fatal(r, add_err(r, "E_INTERNAL", i, w->target, 0, 1, "%s", err));
             rc = 1; goto out;
         }
         w->slots = (slot *)calloc(w->qd, sizeof(slot));
@@ -555,7 +564,7 @@ int sb_storage_run(int ti, const sb_test *t, const sb_storage_opts *o, const sb_
         if (!ok) {
             snprintf(err, sizeof err, "Speicher für Worker %d nicht verfügbar (QD %u, Blockgröße %llu)", i, w->qd,
                      (unsigned long long)max_bs);
-            add_err(r, "E_INTERNAL", i, w->target, 0, 1, "%s", err);
+            set_fatal(r, add_err(r, "E_INTERNAL", i, w->target, 0, 1, "%s", err));
             if (cb->error) cb->error(cb->ctx, ti, "E_INTERNAL", err);
             rc = 1; goto out;
         }
@@ -571,7 +580,7 @@ int sb_storage_run(int ti, const sb_test *t, const sb_storage_opts *o, const sb_
         w->thread = CreateThread(NULL, 256 * 1024, worker_main, w, 0, NULL);
         if (!w->thread) {
             snprintf(err, sizeof err, "CreateThread: %s", sb_errtext(GetLastError()));
-            add_err(r, "E_INTERNAL", i, w->target, 0, 1, "%s", err);
+            set_fatal(r, add_err(r, "E_INTERNAL", i, w->target, 0, 1, "%s", err));
             rc = 1; goto out;
         }
     }
@@ -680,7 +689,8 @@ out:
                      w->err_complete && w->last_err > 0xC0000000u ? "NTSTATUS" : sb_errtext(w->last_err));
             if (w->err_complete && w->last_err > 0xC0000000u)
                 snprintf(m + strlen(m), sizeof m - strlen(m), " 0x%08lX", (unsigned long)w->last_err);
-            add_err(r, "E_IO", i, w->target, 0, ne, "%s", m);
+            int ei = add_err(r, "E_IO", i, w->target, 0, ne, "%s", m);
+            if (w->fatal && rc == 0) set_fatal(r, ei);
             logf_(cb, "ERROR", "%s", m);
             if (cb->error) cb->error(cb->ctx, ti, "E_IO", m);
         }

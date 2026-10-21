@@ -432,6 +432,125 @@ static void test_v13_phase_cpus(void) {
     cJSON_Delete(a);
 }
 
+/* Vertrag 1.3.1: tests[].cpus im Ergebnis = phase.cpus des ersten phase-Events */
+static cJSON *g_phase_cpus;
+static void cap_phase(void *ctx, int test, const char *name, double d, const cJSON *extra) {
+    (void)ctx; (void)test; (void)d;
+    if (!strcmp(name, "preparing") && extra && !g_phase_cpus)
+        g_phase_cpus = cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(extra, "cpus"), 1);
+}
+
+static void test_v131_result_cpus(void) {
+    sb_job j; sb_verrs e;
+    int rc = load("{\"schema\":\"sb-job/1\",\"name\":\"t\",\"tests\":[{\"type\":\"cpu\",\"workload\":\"int\","
+                  "\"threads\":2,\"warmup_s\":0,\"duration_s\":0.3}]}", &j, &e);
+    CHECK(rc == 0 && e.n == 0, "cpu-Job für tests[].cpus gültig (%d Fehler)", e.n);
+    if (rc == 0) {
+        sb_storage_opts o; memset(&o, 0, sizeof o);
+        sb_storage_cb cb; memset(&cb, 0, sizeof cb);
+        cb.phase = cap_phase;
+        sb_compute_result r;
+        g_phase_cpus = NULL;
+        int x = sb_compute_run(0, &j.tests[0], &o, &cb, &r);
+        CHECK(x == 0 && r.cpus_json && cJSON_GetArraySize(r.cpus_json) == r.nthreads && r.nthreads == 2,
+              "compute: cpus_json mit einem Eintrag je Thread (rc %d, %d Threads)", x, r.nthreads);
+        int same = r.cpus_json != NULL;
+        for (int i = 0; same && i < r.nthreads; i++) {
+            const cJSON *c = cJSON_GetArrayItem(r.cpus_json, i);
+            same = cJSON_GetObjectItemCaseSensitive(c, "id")->valueint == i &&
+                   (uint32_t)cJSON_GetObjectItemCaseSensitive(c, "cpu")->valuedouble == r.cpus[i];
+        }
+        CHECK(same, "tests[].cpus: id = Thread-id, cpu = summary.cpus");
+        CHECK(g_phase_cpus && r.cpus_json && cJSON_Compare(g_phase_cpus, r.cpus_json, 1), "tests[].cpus gleich phase.cpus");
+        cJSON_Delete(g_phase_cpus);
+        g_phase_cpus = NULL;
+        sb_compute_result_free(&r);
+        CHECK(r.cpus_json == NULL, "sb_compute_result_free gibt cpus_json frei");
+    }
+    sb_verrs_free(&e);
+    sb_job_free(&j);
+}
+
+/* Vertrag 1.3.1: errors[].fatal genau an dem Fehler, der den Test beendet hat */
+static int count_fatal(const sb_run_error *e, int n, int *idx) {
+    int c = 0;
+    for (int i = 0; i < n; i++) if (e[i].fatal) { c++; if (idx) *idx = i; }
+    return c;
+}
+
+/* Vertrag 1.3.1: done.exit_code = Rückgabewert von sb_run (= Prozess-Exit-Code von sbench run) */
+static void test_v131_exit_code(void) {
+    char dd[MAX_PATH], jp[MAX_PATH], op[MAX_PATH], pp[MAX_PATH], prog[MAX_PATH + 8], lp[MAX_PATH];
+    snprintf(dd, sizeof dd, "%ssb131-data", g_tmpdir);
+    snprintf(jp, sizeof jp, "%ssb131-job.json", g_tmpdir);
+    snprintf(op, sizeof op, "%ssb131-result.json", g_tmpdir);
+    snprintf(pp, sizeof pp, "%ssb131-progress.jsonl", g_tmpdir);
+    snprintf(lp, sizeof lp, "%ssb131.log", g_tmpdir);
+    snprintf(prog, sizeof prog, "file:%s", pp);
+    CreateDirectoryA(dd, NULL);
+    CHECK(sb_set_data_directory(dd) == 0, "Datenverzeichnis %s", dd);
+    const char *job = "{\"schema\":\"sb-job/1\",\"name\":\"exit\",\"tests\":[{\"type\":\"cpu\",\"threads\":1,"
+                      "\"warmup_s\":0,\"duration_s\":0.3}]}";
+    CHECK(sb_write_file(jp, job, strlen(job)) == 0, "Job schreiben");
+    DeleteFileA(pp);
+    sb_run_options o; memset(&o, 0, sizeof o);
+    o.job_path = jp; o.out_path = op; o.progress = prog; o.log_path = lp; o.id = "unit-exit-code"; o.tick_ms = 100;
+    int rc = sb_run(&o);
+    char *txt = NULL; size_t n = 0;
+    cJSON *done = NULL;
+    if (sb_read_file(pp, &txt, &n) == 0) {
+        /* letzte nicht leere Zeile */
+        while (n && (txt[n - 1] == '\n' || txt[n - 1] == '\r')) txt[--n] = 0;
+        char *last = strrchr(txt, '\n');
+        done = cJSON_Parse(last ? last + 1 : txt);
+    }
+    const cJSON *ev = cJSON_GetObjectItem(done, "ev"), *ec = cJSON_GetObjectItem(done, "exit_code");
+    CHECK(rc == 0, "sb_run cpu 0,3 s: rc %d", rc);
+    CHECK(cJSON_IsString(ev) && !strcmp(ev->valuestring, "done"), "letztes Event ist done");
+    CHECK(cJSON_IsNumber(ec) && ec->valueint == rc, "done.exit_code %d = rc %d", cJSON_IsNumber(ec) ? ec->valueint : -1, rc);
+    cJSON_Delete(done); free(txt);
+    DeleteFileA(jp); DeleteFileA(op); DeleteFileA(pp); DeleteFileA(lp);
+}
+
+static void test_v131_fatal(void) {
+    sb_job j; sb_verrs e;
+    /* cpu: NUMA-Knoten ohne Prozessoren (nach der Prüfung gesetzt) -> rc 1, E_NUMA_NODE fatal */
+    int rc = load("{\"schema\":\"sb-job/1\",\"name\":\"t\",\"tests\":[{\"type\":\"cpu\",\"threads\":1,\"duration_s\":0.2}]}", &j, &e);
+    CHECK(rc == 0, "cpu-Job für fatal gültig");
+    if (rc == 0) {
+        sb_storage_opts o; memset(&o, 0, sizeof o);
+        sb_storage_cb cb; memset(&cb, 0, sizeof cb);
+        sb_compute_result r;
+        j.tests[0].numa_node = 1000;
+        int x = sb_compute_run(0, &j.tests[0], &o, &cb, &r);
+        int k = -1;
+        CHECK(x == 1 && count_fatal(r.errs, r.nerrs, &k) == 1 && k == 0 && !strcmp(r.errs[0].code, "E_NUMA_NODE"),
+              "cpu-Laufzeitfehler: rc %d, genau ein fatal (%s)", x, r.nerrs ? r.errs[0].code : "-");
+        CHECK(r.stop_phase != 0, "cpu-Laufzeitfehler: Teilergebnis (stop_phase gesetzt)");
+        sb_compute_result_free(&r);
+    }
+    sb_verrs_free(&e); sb_job_free(&j);
+    /* storage: Testdatei kleiner als block_size (file_size nach der Prüfung verkleinert) -> E_TARGET_SIZE fatal */
+    rc = load("{\"schema\":\"sb-job/1\",\"name\":\"t\",\"tests\":[{\"type\":\"storage\","
+              "\"targets\":[{\"path\":\"%ssbfatal.dat\",\"kind\":\"file\",\"file_size\":\"1MiB\"}],"
+              "\"duration_s\":0.2,\"cache\":\"buffered\","
+              "\"access_specs\":[{\"weight\":100,\"block_size\":\"64KiB\",\"read_pct\":100,\"random_pct\":0}]}]}", &j, &e);
+    CHECK(rc == 0, "storage-Job für fatal gültig");
+    if (rc == 0) {
+        sb_storage_opts o; memset(&o, 0, sizeof o);
+        o.tick_ms = 1000;
+        sb_storage_cb cb; memset(&cb, 0, sizeof cb);
+        sb_storage_result r;
+        j.tests[0].targets[0].file_size = 4096;
+        int x = sb_storage_run(0, &j.tests[0], &o, &cb, &r);
+        int k = -1;
+        CHECK(x == 1 && count_fatal(r.errs, r.nerrs, &k) == 1 && k >= 0 && !strcmp(r.errs[k].code, "E_TARGET_SIZE"),
+              "storage-Laufzeitfehler: rc %d, genau ein fatal (%s)", x, k >= 0 ? r.errs[k].code : "-");
+        sb_storage_result_free(&r);
+    }
+    sb_verrs_free(&e); sb_job_free(&j);
+}
+
 static void test_v13_buffer_bytes(void) {
     CHECK(sb_mem_buffer_bytes(0, 256u << 20) == 256u << 20 && sb_mem_buffer_bytes(0, (1u << 20) + 100) == 1u << 20 &&
           sb_mem_buffer_bytes(0, 12000) == 8192 && sb_mem_buffer_bytes(0, 8192) == 8192,
@@ -575,6 +694,9 @@ int main(void) {
     test_topo_pick();
     test_v13_metric_score();
     test_v13_phase_cpus();
+    test_v131_result_cpus();
+    test_v131_fatal();
+    test_v131_exit_code();
     test_v13_buffer_bytes();
     test_v13_export_partial();
     test_chase();

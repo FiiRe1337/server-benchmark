@@ -20,6 +20,7 @@ typedef struct sb_compute_result {
     sb_compute_kind kind;
     int       nthreads;
     uint32_t *cpus;              /* globaler CPU-Index pro Thread */
+    cJSON    *cpus_json;         /* Vertrag 1.3.1: tests[].cpus (= phase.cpus), NULL ohne Topologie */
     int      *nodes;             /* NUMA-Knoten der CPU pro Thread */
     int      *mem_nodes;         /* Knoten, auf dem der Puffer angefordert wurde (memory) */
     double    value;             /* Gesamtwert der Messphase */

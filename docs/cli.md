@@ -41,6 +41,12 @@ CSV-Spalten `partial,stopped_in`. **Einzige Lockerung:** Messwerte der `summary`
 sein, aber nur bei `partial: true` mit `stopped_in` `preparing`/`warmup` (Test vor der
 Messphase beendet); vorher stand dort 0.
 
+**Vertragsstand 1.3.1.** Drei zusätzliche, optionale Felder: `tests[].cpus` im Ergebnis
+(cpu/memory), gleiches Format wie `phase.cpus`, `errors[].fatal` und `done.exit_code`. Geändert: `aborted`
+(Ergebnis und `done`) ist nur noch bei einem Stopp (Exit 3) `true`, bei einem Laufzeitfehler
+(Exit 1) `false` (Abschnitt [Vertrag 1.3.1](#vertrag-131-cpus-im-ergebnis-aborted-und-fatal)).
+Formatversionen unverändert.
+
 ## Allgemeines
 
 - Alle JSON-Ausgaben sind UTF-8 ohne BOM, Zeilenende LF.
@@ -452,7 +458,8 @@ in `errors[]`); `stopped_in` nennt die Phase (`preparing`, `warmup`, `measure`, 
 | `measure` | steht drin, `partial: true` | Werte über die tatsächlich gemessene Zeit (Raten bezogen auf diese Zeit) |
 | – | `partial: false` | vollständig |
 
-Nach dem abgebrochenen Test folgende Tests fehlen. `aborted` im Dokument bleibt wie bisher.
+Nach dem abgebrochenen Test folgende Tests fehlen. `aborted` ist ab Vertrag 1.3.1 nur bei einem
+Stopp `true`, bei einem Laufzeitfehler `false` (siehe [Vertrag 1.3.1](#vertrag-131-cpus-im-ergebnis-aborted-und-fatal)).
 Ein `null`-Messwert kommt nur bei `partial: true` mit `stopped_in` `preparing`/`warmup` vor.
 
 ### Score und Referenzwerte
@@ -480,6 +487,65 @@ score_reference × 1000`. Die GUI muss keine Werte aus `docs/core.md` übernehme
 
 `warmup`: storage etwa jede Sekunde, cpu/memory etwa alle 0,5 s (`unit: "s"`).
 
+## Vertrag 1.3.1: `cpus` im Ergebnis, `aborted` und `fatal`
+
+### `cpus` im Ergebnis
+
+Bei cpu- und memory-Tests steht `cpus[]` zusätzlich direkt im Testobjekt des Ergebnisses
+(`tests[].cpus`, neben `summary`), mit demselben Inhalt wie `phase.cpus` im ersten
+`phase`-Event des Tests (Felder `id`, `cpu`, `group`, `number`, `numa_node`, `core`,
+`smt_sibling_of`, siehe [phase-Event beim Teststart](#phase-event-beim-teststart)). Damit kann
+die GUI SMT-Geschwister und NUMA-Knoten auch nachträglich, ohne Progress-Strom, über
+`per_worker[].id` zuordnen.
+
+- Optional im Schema (`$defs/cpu_binding` in `sb-result-1.schema.json`); sbench ab 1.3.1 gibt es
+  bei cpu/memory immer aus, sobald die Threads verteilt sind, also auch bei `partial: true`.
+  Es fehlt nur, wenn die Prozessor-Topologie nicht lesbar war.
+- `tests[].cpus[i].cpu` = `summary.cpus[i]` = `per_worker[i].cpu`; `numa_node` = `per_worker[i].node`.
+- Bei storage, net_client, net_server und hyperv_info ist `cpus` nicht erlaubt.
+- Beispiele: [`result-compute.json`](../schema/examples/result-compute.json),
+  [`result-partial.json`](../schema/examples/result-partial.json).
+
+### `aborted` und `errors[].fatal`
+
+| Ende des Laufs | Exit | `aborted` (Ergebnis, `done`) | betroffener Test | folgende Tests |
+|---|---|---|---|---|
+| vollständig | 0 | `false` | – | – |
+| Stopp (`sbench stop`, Strg+C) | 3 | `true` | `partial: true`, `stopped_in`; kein `fatal` | fehlen |
+| Laufzeitfehler (z. B. `E_TARGET_SIZE`, `E_OUT_OF_MEMORY`, zu viele I/O-Fehler eines Workers) | 1 | **`false`** (bis 1.3: `true`) | `partial: true`, `stopped_in`; genau ein `errors[]`-Eintrag mit `fatal: true` | fehlen, werden nicht mehr ausgeführt |
+
+- `fatal: true` steht an genau dem `errors[]`-Eintrag, der den Test und damit den Lauf beendet
+  hat, also höchstens einmal im Ergebnis und nur im letzten Test. Fehlt das Feld, gilt `false`.
+  Nicht abbrechende Fehler (z. B. einzelne fehlgeschlagene I/Os unter der Abbruchgrenze) haben
+  kein `fatal`. Bei storage kann derselbe Eintrag zusammengefasste I/O-Fehler (`count`) tragen.
+- Das `error`-Event im Progress-Strom bleibt unverändert (ohne `fatal`).
+- Beispiele: [`result-fatal.json`](../schema/examples/result-fatal.json),
+  [`progress-fatal.jsonl`](../schema/examples/progress-fatal.jsonl).
+
+### `done.exit_code`
+
+Das `done`-Event trägt ab 1.3.1 `exit_code` (Integer), genau den Exit-Code, mit dem sbench
+direkt danach endet. `done` wird nur geschrieben, wenn die Ergebnisdatei geschrieben ist,
+deshalb kommen dort praktisch nur 0, 1 und 3 vor (2 und 4 enden ohne `done`); das Schema
+erlaubt 0–4.
+
+- `exit_code: 3` genau dann, wenn `aborted: true`.
+- `exit_code: 1` genau dann, wenn das Ergebnis einen `errors[]`-Eintrag mit `fatal: true`
+  hat; im Progress-Strom steht davor das zugehörige `error`-Event.
+- Optional im Schema; ältere sbench-Versionen (bis 1.3) schreiben es nicht.
+- Beispiele: [`progress-fatal.jsonl`](../schema/examples/progress-fatal.jsonl) (1),
+  [`progress-partial.jsonl`](../schema/examples/progress-partial.jsonl) (3).
+
+Empfohlene Reihenfolge für Clients (z. B. die GUI, wenn sie den Prozess nicht selbst
+gestartet hat oder sein Exit-Code nicht verfügbar ist, etwa bei `runas`):
+
+1. `exit_code` der Zeile zum Lauf in `<data_dir>\runs\index.jsonl`.
+2. Sonst `done.exit_code` aus dem Progress-Strom bzw. der Fortschrittsdatei.
+3. Sonst Ableitung aus dem Ergebnis (bzw. `done.aborted` bei Läufen bis 1.3):
+   `aborted: true` → 3; ein `errors[]`-Eintrag mit `fatal: true` → 1; sonst 0. Bei
+   Ergebnissen bis 1.3 bedeutet `aborted: true` Stopp **oder** Laufzeitfehler; unterscheiden
+   lässt sich das dann nur über die Fehler in `tests[].errors`.
+
 ## Exit-Codes
 
 | Code | Bedeutung |
@@ -491,7 +557,9 @@ score_reference × 1000`. Die GUI muss keine Werte aus `docs/core.md` übernehme
 | 4 | Fehlende Rechte (z. B. `physical`/`volume`-Target ohne Administratorrechte) |
 
 Bei 0 und 3 existiert die Ergebnisdatei immer. Bei 1 wird – soweit möglich – ein
-Teilergebnis mit `aborted: true` und den Fehlern in `tests[].errors` geschrieben.
+Teilergebnis mit den Fehlern in `tests[].errors` geschrieben; ab Vertrag 1.3.1 mit
+`aborted: false` und `fatal: true` an dem Fehler, der den Lauf beendet hat (vorher
+`aborted: true`).
 Bei 2 und 4 wird keine Messung gestartet und keine Ergebnisdatei geschrieben;
 die Ursache steht in einem `error`-Event (mit `field` als JSON Pointer bei 2).
 

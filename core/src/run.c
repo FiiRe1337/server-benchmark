@@ -189,6 +189,7 @@ static cJSON *storage_test_json(int idx, const sb_test *t, const sb_storage_resu
         if (e->worker >= 0) cJSON_AddNumberToObject(x, "worker", e->worker);
         if (e->target >= 0) cJSON_AddNumberToObject(x, "target", e->target);
         if (e->count > 1) cJSON_AddNumberToObject(x, "count", (double)e->count);
+        if (e->fatal) cJSON_AddTrueToObject(x, "fatal");
         cJSON_AddItemToArray(er, x);
     }
     return o;
@@ -241,6 +242,8 @@ static cJSON *compute_test_json(int idx, const sb_test *t, const sb_compute_resu
     }
     num_or_null(s, "cpu_pct", m, rnd(r->cpu_pct, 1));
     num_or_null(s, "proc_cpu_pct", m, rnd(r->proc_cpu_pct, 2));
+    /* Vertrag 1.3.1: gebundene CPUs mit SMT-Zuordnung wie im phase-Event, auch bei partial */
+    if (r->cpus_json) cJSON_AddItemToObject(o, "cpus", cJSON_Duplicate(r->cpus_json, 1));
     cJSON *pw = cJSON_AddArrayToObject(o, "per_worker");
     for (int i = 0; m && i < r->nthreads; i++) {
         cJSON *x = cJSON_CreateObject();
@@ -267,6 +270,7 @@ static cJSON *compute_test_json(int idx, const sb_test *t, const sb_compute_resu
         cJSON_AddStringToObject(x, "code", r->errs[i].code);
         cJSON_AddStringToObject(x, "msg", r->errs[i].msg);
         if (r->errs[i].worker >= 0) cJSON_AddNumberToObject(x, "worker", r->errs[i].worker);
+        if (r->errs[i].fatal) cJSON_AddTrueToObject(x, "fatal");
         cJSON_AddItemToArray(er, x);
     }
     return o;
@@ -688,10 +692,12 @@ int sb_run(const sb_run_options *o) {
     runctx ctx = {&pr, &log};
     sb_storage_cb cb = {&ctx, ev_phase, ev_progress, ev_tick, ev_error, ev_log, ev_ctick};
     sb_storage_opts so = {o->tick_ms ? o->tick_ms : 1000, g_stop_evt, o->allow_destructive, o->keep_files};
-    int aborted = 0, rights = 0;
-    for (int i = 0; i < job.ntests && !aborted; i++) {
+    /* aborted nur bei Stopp (Exit 3); halt beendet die Schleife auch nach einem Laufzeitfehler
+     * (Exit 1, aborted bleibt false, folgende Tests laufen nicht mehr) */
+    int aborted = 0, halt = 0, rights = 0;
+    for (int i = 0; i < job.ntests && !halt; i++) {
         const sb_test *t = &job.tests[i];
-        if (g_stop_evt && WaitForSingleObject(g_stop_evt, 0) == WAIT_OBJECT_0) { aborted = 1; break; }
+        if (g_stop_evt && WaitForSingleObject(g_stop_evt, 0) == WAIT_OBJECT_0) { aborted = 1; halt = 1; break; }
         if (t->type == SB_T_CPU || t->type == SB_T_MEMORY) {
             sb_log_write(&log, "INFO", "Test %d%s%s%s: %s, threads %u, warmup %.1f s, Dauer %.1f s, numa_node %d, mem_node %d", i,
                          t->name ? " (" : "", t->name ? t->name : "", t->name ? ")" : "", sb_test_type_name(t->type),
@@ -702,8 +708,8 @@ int sb_run(const sb_run_options *o) {
             sb_log_write(&log, "INFO", "Test %d beendet (rc=%d): %s = %.3f, %d Thread(s), %.2f s", i, crc, ck_key(cr.kind),
                          cr.value, cr.nthreads, cr.measured_s);
             sb_compute_result_free(&cr);
-            if (crc == 3) { aborted = 1; rc = SB_EXIT_ABORTED; }
-            else if (crc == 1) { aborted = 1; rc = SB_EXIT_ERROR; }
+            if (crc == 3) { aborted = 1; halt = 1; rc = SB_EXIT_ABORTED; }
+            else if (crc == 1) { halt = 1; rc = SB_EXIT_ERROR; }
             continue;
         }
         if (t->type != SB_T_STORAGE) {
@@ -726,15 +732,15 @@ int sb_run(const sb_run_options *o) {
                      sb_hist_percentile(res.hist, 99) / 1000.0, (unsigned long long)(res.total.ops_r + res.total.ops_w),
                      (unsigned long long)res.total.errors);
         sb_storage_result_free(&res);
-        if (src == 3) { aborted = 1; rc = SB_EXIT_ABORTED; }
-        else if (src == 1) { aborted = 1; rc = SB_EXIT_ERROR; }
+        if (src == 3) { aborted = 1; halt = 1; rc = SB_EXIT_ABORTED; }
+        else if (src == 1) { halt = 1; rc = SB_EXIT_ERROR; }
     }
     if (rights) {
         rc = SB_EXIT_RIGHTS;
         cJSON_Delete(meta); cJSON_Delete(tests);
         sb_log_write(&log, "ERROR", "Abbruch wegen fehlender Rechte (Exit 4), kein Ergebnis geschrieben");
     } else {
-        if (!aborted && g_stop_evt && WaitForSingleObject(g_stop_evt, 0) == WAIT_OBJECT_0) { aborted = 1; rc = SB_EXIT_ABORTED; }
+        if (!halt && g_stop_evt && WaitForSingleObject(g_stop_evt, 0) == WAIT_OBJECT_0) { aborted = 1; rc = SB_EXIT_ABORTED; }
         sb_utc_iso_ms(ended);
         cJSON *doc = cJSON_CreateObject();
         cJSON_AddStringToObject(doc, "schema", "sb-result/1");
@@ -756,6 +762,8 @@ int sb_run(const sb_run_options *o) {
             cJSON_AddStringToObject(ev, "ev", "done");
             cJSON_AddStringToObject(ev, "result", out_path);
             cJSON_AddBoolToObject(ev, "aborted", aborted);
+            /* Vertrag 1.3.1: rc steht hier fest und ist der Exit-Code des Prozesses */
+            cJSON_AddNumberToObject(ev, "exit_code", rc);
             sb_progress_emit(&pr, ev);
             cJSON_Delete(ev);
         }
