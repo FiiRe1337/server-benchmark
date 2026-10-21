@@ -87,7 +87,12 @@ def pytest_unconfigure(config):
     """Windows CI: all tests passed, junit XML written, yet python sometimes ended with exit code 1 during Qt/pyqtgraph
     teardown at interpreter shutdown. Clean up explicitly and, on Windows, end the process with pytest's own exit status
     (reports are already written at this point)."""
+    import faulthandler
+    st = getattr(config, "_sb_exitstatus", None)
+    print(f"\n[conftest] pytest exit status {st}, closing Qt widgets", file=sys.__stderr__, flush=True)
+    faulthandler.enable(file=sys.__stderr__, all_threads=True)   # a crash during teardown shows up in the CI log
     _close_widgets()
-    if sys.platform == "win32" and hasattr(config, "_sb_exitstatus"):
+    print("[conftest] Qt widgets closed", file=sys.__stderr__, flush=True)
+    if sys.platform == "win32" and st is not None:
         sys.stdout.flush(); sys.stderr.flush()
-        os._exit(config._sb_exitstatus)
+        os._exit(st)
