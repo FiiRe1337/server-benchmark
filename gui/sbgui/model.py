@@ -216,6 +216,13 @@ def run_outcome(res, exit_code=None):
     return "aborted" if (res or {}).get("aborted") else "ok"
 
 
+def done_exit_code(ev):
+    """Contract 1.3.1 (#17 a4287fa): optional done.exit_code, integer 0-4 (in practice 0/1/3). Anything else (missing,
+    bool, float, string, out of range) -> None, i.e. the caller falls back to the derivation from the result."""
+    c = (ev or {}).get("exit_code")
+    return c if type(c) is int and c in EXIT_OUTCOME else None
+
+
 def fallback_exit_code(res):
     """Exit code when index.jsonl has none (e.g. re-attach before the core wrote it): 1 / 3 / 0 from run_outcome."""
     return OUTCOME_EXIT[run_outcome(res)]

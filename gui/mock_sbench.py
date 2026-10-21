@@ -29,7 +29,7 @@ ack now and then -> 0 in that tick, recounted next), SBENCH_MOCK_STOP_AT=<test>:
 SBENCH_MOCK_FAIL_AT=<test>:<E_CODE>[:<ticks>[:<entries>]] (runtime error after <ticks> measure ticks, 0 = in preparing;
 the test becomes partial, errors[] gets <entries> entries, later tests are absent, exit 1), SBENCH_MOCK_CONTRACT=1.3.1
 (cpus[] per test + one errors[].fatal + done.exit_code; valid against the #17 schema in
-gui/tests/fixtures/contract-1.3.1 except done.exit_code), run --keep-files (storage targets[] deleted=false),
+gui/tests/fixtures/contract-1.3.1), run --keep-files (storage targets[] deleted=false),
 SBENCH_MOCK_ABORT_ON_ERROR=1 (runtime error like the real 1.3 core: aborted: true, exit 1; default = 1.3.1: aborted: false),
 SBENCH_MOCK_ALL_TYPES=1 (additionally simulate net_*/hyperv_info), SBENCH_DATA_DIR,
 SBENCH_SCHEMA_DIR.
@@ -73,7 +73,7 @@ M2 = CONTRACT in ("1.2", "1.3", "1.3.1")
 V13 = CONTRACT in ("1.3", "1.3.1")
 # 1.3.1 (PR #17 c4b9d69, not on main yet -> output does NOT validate against main's 1.3 schema, but against
 # gui/tests/fixtures/contract-1.3.1/schema): cpus[] per cpu/memory test, errors[].fatal on exactly one entry of the last
-# (partial) test, aborted: false + exit 1 on a runtime error; plus done.exit_code (announced, not yet in the #17 schema)
+# (partial) test, aborted: false + exit 1 on a runtime error, done.exit_code (#17 a4287fa)
 V131 = CONTRACT == "1.3.1"
 LAG = os.environ.get("SBENCH_MOCK_LAG") == "1"
 ABORT_ON_ERROR = os.environ.get("SBENCH_MOCK_ABORT_ON_ERROR") == "1"   # emulate the real 1.3 core: aborted: true on runtime error
@@ -987,8 +987,8 @@ def run(a):
             json.dump(res, f, indent=1, ensure_ascii=False)
         os.replace(tmp, a.out)
         rc = EXIT_ERR if _fail else (EXIT_ABORTED if _stop else EXIT_OK)
-        # done.exit_code: announced by Devend for 1.3.1, but the #17 schema (c4b9d69) still has done additionalProperties:
-        # false without exit_code -> only in SBENCH_MOCK_CONTRACT=1.3.1 mode (GUI reads it when present)
+        # done.exit_code: contract 1.3.1 (#17 a4287fa), optional 0-4, 3 iff aborted, 1 iff a fatal entry -> 1.3.1 mode only
+        # (main's 1.3 schema does not allow it yet)
         emit({"ev": "done", "result": os.path.abspath(a.out), "aborted": user_stop, **({"exit_code": rc} if V131 else {})})
         return rc
     finally:

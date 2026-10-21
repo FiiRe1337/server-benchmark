@@ -766,14 +766,22 @@ def _errs(v, doc):
     return [e.message for e in v.iter_errors(doc)]
 
 
+def _fix_events(name):
+    return [json.loads(l) for l in open(os.path.join(FIX131, f"progress-{name}.jsonl"), encoding="utf-8") if l.strip()]
+
+
 def test_contract_131_fixtures_valid(V131):
-    """The #17 examples are valid against the #17 schema; our 1.3.1 demo result too. The announced done.exit_code is NOT
-    allowed by the #17 schema yet (done: additionalProperties false) -> contract question, see README."""
-    res = json.load(open(os.path.join(FIX131, "result-fatal.json"), encoding="utf-8"))
-    assert not _errs(V131["sb-result/1"], res)
-    evs = [json.loads(l) for l in open(os.path.join(FIX131, "progress-fatal.jsonl"), encoding="utf-8") if l.strip()]
-    assert all(not _errs(V131["sb-progress/1"], e) for e in evs)
-    assert "exit_code" not in evs[-1] and _errs(V131["sb-progress/1"], dict(evs[-1], exit_code=1))
+    """The #17 (a4287fa) examples are valid against the #17 schema; our 1.3.1 demo result too. done.exit_code: 0-4 only."""
+    for name, code in (("fatal", 1), ("partial", 3)):
+        res = json.load(open(os.path.join(FIX131, f"result-{name}.json"), encoding="utf-8"))
+        assert not _errs(V131["sb-result/1"], res)
+        evs = _fix_events(name)
+        assert all(not _errs(V131["sb-progress/1"], e) for e in evs)
+        assert evs[-1]["ev"] == "done" and evs[-1]["exit_code"] == code and evs[-1]["aborted"] is (code == 3)
+        for c in range(5):
+            assert not _errs(V131["sb-progress/1"], dict(evs[-1], exit_code=c))
+        for bad in (5, -1, "1", 1.5, None):
+            assert _errs(V131["sb-progress/1"], dict(evs[-1], exit_code=bad)), bad
     assert not _errs(V131["sb-result/1"], json.load(open(os.path.join(GUI, "demo", "contract-1.3.1", "result-m2-smt.json"), encoding="utf-8")))
 
 
@@ -827,7 +835,7 @@ def test_progress_fatal_fixture_replay(qapp):
 
 def test_mock_131_one_fatal_and_done_exit_code(mock_env, V131):
     """Mock in 1.3.1 mode: exit 1, aborted false, exactly one fatal: true (first entry of the last, partial test),
-    done.exit_code = 1. Valid against the #17 schema except done.exit_code (not in #17 yet)."""
+    done.exit_code = 1. The whole stream (incl. done.exit_code) is valid against the #17 schema."""
     st = [{"type": "cpu", "threads": 1, "workload": "int", "warmup_s": 0, "duration_s": 1},
           {"type": "cpu", "threads": 2, "workload": "int", "warmup_s": 0, "duration_s": 3},
           {"type": "cpu", "threads": 1, "workload": "float", "warmup_s": 0, "duration_s": 1}]
@@ -845,8 +853,8 @@ def test_mock_131_one_fatal_and_done_exit_code(mock_env, V131):
     evs = [json.loads(l) for l in prog.read_text(encoding="utf-8").splitlines() if l.strip()]
     done = evs[-1]
     assert done["ev"] == "done" and done["exit_code"] == 1 and done["aborted"] is False
-    assert all(not _errs(V131["sb-progress/1"], e) for e in evs[:-1])
-    assert not _errs(V131["sb-progress/1"], {k: v for k, v in done.items() if k != "exit_code"})
+    assert all(not _errs(V131["sb-progress/1"], e) for e in evs)
+    assert any(e["ev"] == "error" for e in evs)                       # validator rule: exit 1 has a prior error event
     assert model.run_outcome(res, done["exit_code"]) == "failed" and model.fallback_exit_code(res) == 1
 
 
@@ -872,3 +880,45 @@ def test_tail_session_exit_code_order(qapp, tmp_path):
                                                  {"partial": True, "errors": [{"code": "E_IO", "msg": "y", "fatal": True}]}]}, 1)):
         rp.write_text(json.dumps(r), encoding="utf-8")
         assert ts._exit_code() == want, r
+
+
+@pytest.mark.parametrize("name,code,outcome,chip", [
+    ("fatal", 1, "failed", "Laufzeitfehler · Teilergebnis"),
+    ("partial", 3, "aborted", "abgebrochen · Teilergebnis"),
+])
+def test_progress_examples_done_exit_code(qapp, tmp_path, name, code, outcome, chip):
+    """Replay of the #17 progress examples: done.exit_code (no index entry) decides Laufzeitfehler vs. abgebrochen."""
+    from sbgui.pages.live import LiveView
+    from sbgui.pages.results import ResultsPage
+    from sbgui.sbench import Replay, TailSession
+    job = {"schema": "sb-job/1", "name": name, "tests": [{"type": "cpu", "threads": 1, "workload": "int", "duration_s": 5}] +
+           [{"type": "cpu", "threads": 8, "workload": "mixed", "duration_s": 5, "numa_node": 1}] * 3}
+    live = LiveView(); live.resize(1300, 700); live.show()
+    done = []; rep = Replay(os.path.join(FIX131, f"progress-{name}.jsonl"))
+    rep.event.connect(lambda e: done.append(e) if e.get("ev") == "done" else None)
+    live.attach(rep, job, tick_ms=1000); rep.feed(); live.refresh(); live.timer.stop(); live.close()
+    assert done and model.done_exit_code(done[0]) == code
+    res_f = os.path.join(FIX131, f"result-{name}.json")
+    res = json.load(open(res_f, encoding="utf-8"))
+    assert model.run_outcome(res, model.done_exit_code(done[0])) == outcome
+    (tmp_path / "runs").mkdir(); prog = tmp_path / "runs" / "x.jsonl"; prog.write_text("", encoding="utf-8")
+    ts = TailSession({"run_id": "x", "progress_file": str(prog), "out": res_f})
+    ts.done = dict(done[0], result=res_f)
+    assert ts._exit_code() == code
+    rp = ResultsPage([res_f], {res["run_id"]: ts._exit_code()}); rp.show(); rp.select_file(res_f)
+    assert rp.outcome == outcome and rp.state.text() == chip and rp.state.toolTip().startswith("Exit-Code")
+    rp.close()
+
+
+@pytest.mark.parametrize("val,want", [(0, 0), (1, 1), (2, 2), (3, 3), (4, 4),
+                                      (5, None), (-1, None), (True, None), (1.0, None), ("1", None), (None, None)])
+def test_done_exit_code_range(qapp, tmp_path, val, want):
+    """GUI accepts done.exit_code 0-4 (in practice 0/1/3); out of range / non-int is ignored -> derivation from the result."""
+    from sbgui.sbench import TailSession
+    assert model.done_exit_code({"ev": "done", "exit_code": val}) == want
+    assert model.done_exit_code({"ev": "done"}) is None and model.done_exit_code(None) is None
+    res_f = os.path.join(FIX131, "result-fatal.json")                     # derivation -> 1 (fatal entry)
+    (tmp_path / "runs").mkdir(); prog = tmp_path / "runs" / "x.jsonl"; prog.write_text("", encoding="utf-8")
+    ts = TailSession({"run_id": "x", "progress_file": str(prog), "out": res_f})
+    ts.done = {"ev": "done", "result": res_f, "aborted": False, "exit_code": val}
+    assert ts._exit_code() == (1 if want is None else want)
