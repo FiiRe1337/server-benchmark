@@ -135,7 +135,7 @@ def screenshots(a):
     shot("03_live_run")
     win.show_page("dashboard")
     win.offer_reattach([{"run_id": "20261020-091500-demo", "pid": 7412, "started_utc": "2026-10-20T07:15:00.120Z",
-                         "out": "C:\\Users\\michi\\AppData\\Local\\sbench-gui\\results\\20261020-091500-demo.json",
+                         "out": "C:\\Users\\bench-user\\AppData\\Local\\sbench-gui\\results\\20261020-091500-demo.json",
                          "progress_file": "C:\\Tools\\sbench\\data\\runs\\20261020-091500-demo.jsonl"}])
     shot("03d_reattach_offer"); close_overlays()
     _m2_shots(win, live, shot)
@@ -143,7 +143,7 @@ def screenshots(a):
     win.show_page("export"); shot("05_export")
     win.support_bundle([], anonymize=True); shot("06_support_dialog"); close_overlays()
     win.toast.show_msg("Support-Paket erstellt", "sbench-support.zip · 17 Dateien inkl. manifest.json (SHA-256) · anonymisiert\n"
-                       "C:\\Users\\michi\\Desktop", "."); shot("07_support_export_done")
+                       "C:\\Users\\bench-user\\Desktop", "."); shot("07_support_export_done")
     _emit({"ok": True, "scale": a.scale, "size": a.size, "min_size": [win.minimumWidth(), win.minimumHeight()],
            "files": saved, "layout": layout}, a.report)
     return 0
