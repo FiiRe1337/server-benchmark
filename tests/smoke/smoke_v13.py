@@ -5,6 +5,7 @@
     auch bei threads = 0; SMT-Geschwister passen zu meta.cpu.cores
   * meta.cpu_score, summary.score_reference, summary.proc_cpu_pct, timeseries.proc_cpu_pct, tick_ms
   * preparing-Fortschritt memory: total = threads × buffer_size_bytes (auch copy), letztes done = total
+  * Vertrag 1.3.1: Stopp -> aborted true ohne errors[].fatal (Laufzeitfehler: Unit-Test test_v131_fatal)
   * Vertrag 1.3.1: tests[].cpus im Ergebnis = phase.cpus (cpu, memory, auch Teilergebnisse)
   * Teilergebnis: Stopp in warmup (cpu) und früh in preparing/warmup (memory) -> partial: true,
     stopped_in = letzte Phase, Messwerte null, Listen leer
@@ -134,6 +135,10 @@ def run_v13(h, sbench: Path, work: Path, info: dict, quick: bool, cprog: Path, c
                              "warmup", 0.5)
     check(rc == 3, f"Stopp in warmup: Exit 3 (ist {rc})")
     if res:
+        check(res.get("aborted") is True and not any(e.get("fatal") for t in res["tests"] for e in t["errors"]),
+              "Stopp: aborted true, kein errors[].fatal (Vertrag 1.3.1)")
+        dn = [e for e in evs if e["ev"] == "done"]
+        check(dn and dn[-1].get("aborted") is True, "Stopp: done.aborted true")
         T = res["tests"]
         check(len(T) == 1 and T[0]["index"] == 0, f"nicht begonnener Test fehlt im Ergebnis ({[t['index'] for t in T]})")
         if T:

@@ -10,6 +10,8 @@ Prüft:
     < Anzahl Tests im Job, disjunkte NUMA-CPU-Listen),
   * Vertrag 1.3: partial/stopped_in und null-Messwerte (check_partial), Progress-Regeln
     (check_progress_v13: tick.metric, workers[] vollständig/sortiert, phase.threads/cpus),
+  * Vertrag 1.3.1: errors[].fatal höchstens einmal, im letzten Test, partial: true, aborted false
+    (check_fatal),
   * Vertrag 1.3.1: tests[].cpus bei cpu/memory (check_cpu_list, gleiche Regeln wie phase.cpus, passend
     zu summary.cpus und per_worker[].node),
   * einen Selbsttest der semantischen Regeln mit absichtlich falschen Dokumenten.
@@ -50,6 +52,7 @@ RESULT_JOBS = {
     "result-gaps.json": "job-mixed-gaps.json",
     "result-compute.json": "job-compute.json",
     "result-partial.json": "job-compute.json",
+    "result-fatal.json": "job-compute.json",
 }
 
 
@@ -236,6 +239,24 @@ def check_progress_v13(events: list[dict]) -> list[str]:
     return errs
 
 
+def check_fatal(doc: dict) -> list[str]:
+    """Vertrag 1.3.1: höchstens ein errors[]-Eintrag mit fatal: true im ganzen Ergebnis. Er steht im
+    letzten Test, der Test hat partial: true, und aborted ist false (aborted nur bei Stopp)."""
+    errs: list[str] = []
+    tests = doc.get("tests", [])
+    hits = [(i, k) for i, t in enumerate(tests) for k, e in enumerate(t.get("errors", [])) if e.get("fatal")]
+    if len(hits) > 1:
+        errs.append(f"/tests: {len(hits)} Einträge mit fatal: true, erlaubt ist höchstens einer ({hits})")
+    for i, k in hits[:1]:
+        if i != len(tests) - 1:
+            errs.append(f"/tests/{i}/errors/{k}: fatal, aber es folgen weitere Tests")
+        if tests[i].get("partial") is not True:
+            errs.append(f"/tests/{i}: fatal-Fehler, aber partial ist nicht true")
+        if doc.get("aborted") is True:
+            errs.append(f"/tests/{i}/errors/{k}: fatal (Laufzeitfehler), aber aborted = true (nur bei Stopp)")
+    return errs
+
+
 def semantic_checks(kind: str, doc, job: dict | None = None) -> list[str]:
     """Regeln außerhalb von JSON Schema (entsprechen den Prüfungen von 'sbench validate')."""
     errs: list[str] = []
@@ -258,6 +279,7 @@ def semantic_checks(kind: str, doc, job: dict | None = None) -> list[str]:
         check_tests([t["config"] for t in doc["tests"]], "/tests/*/config")
         errs += check_result_indices(doc, job)
         errs += check_numa(doc.get("meta", {}))
+        errs += check_fatal(doc)
         for i, t in enumerate(doc["tests"]):
             if t["type"] != t["config"]["type"]:
                 errs.append(f"/tests/{i}: type passt nicht zu config.type")
@@ -304,6 +326,11 @@ def _tk(metric: str, ids: list[int], key: str | None = None) -> dict:
     return {"ev": "tick", "test": 0, "t": 1.0, "metric": metric, k: 1.0, "workers": [{"id": i, k: 0.5} for i in ids]}
 
 
+def _fd() -> dict:
+    return {"aborted": False, "tests": [{"partial": False, "errors": []},
+                                        {"partial": True, "errors": [{"code": "E_IO", "count": 3}, {"code": "E_IO", "fatal": True}]}]}
+
+
 def selftest() -> list[str]:
     """Die semantischen Regeln müssen falsche Dokumente erkennen und Lücken zulassen."""
     bad: list[str] = []
@@ -342,6 +369,12 @@ def selftest() -> list[str]:
         ("workers unvollständig", check_progress_v13([_ph(2), _tk("ops_per_s", [0])]), True),
         ("cpus != threads", check_progress_v13([dict(_ph(2), threads=3)]), True),
         ("SMT anderer Kern", check_progress_v13([_ph(2, core1=5)]), True),
+        # Vertrag 1.3.1: fatal / aborted
+        ("fatal ok", check_fatal(_fd()), False),
+        ("fatal mit aborted", check_fatal(dict(_fd(), aborted=True)), True),
+        ("fatal nicht im letzten Test", check_fatal({"aborted": False, "tests": _fd()["tests"] + [{"partial": False, "errors": []}]}), True),
+        ("fatal doppelt", check_fatal({"aborted": False, "tests": [{"partial": True, "errors": [{"fatal": True}, {"fatal": True}]}]}), True),
+        ("fatal ohne partial", check_fatal({"aborted": False, "tests": [{"partial": False, "errors": [{"fatal": True}]}]}), True),
         # Vertrag 1.3.1: tests[].cpus
         ("result cpus ok", check_compute(0, dict(_ct(), cpus=_ph(2)["cpus"]), _M2), False),
         ("result cpus != threads", check_compute(0, dict(_ct(), cpus=_ph(1)["cpus"]), _M2), True),

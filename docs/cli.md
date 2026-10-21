@@ -41,9 +41,11 @@ CSV-Spalten `partial,stopped_in`. **Einzige Lockerung:** Messwerte der `summary`
 sein, aber nur bei `partial: true` mit `stopped_in` `preparing`/`warmup` (Test vor der
 Messphase beendet); vorher stand dort 0.
 
-**Vertragsstand 1.3.1.** Ein zusätzliches, optionales Feld: `tests[].cpus` im Ergebnis
-(cpu/memory), gleiches Format wie `phase.cpus` (Abschnitt
-[Vertrag 1.3.1](#vertrag-131-cpus-im-ergebnis)). Formatversionen unverändert.
+**Vertragsstand 1.3.1.** Zwei zusätzliche, optionale Felder: `tests[].cpus` im Ergebnis
+(cpu/memory), gleiches Format wie `phase.cpus`, und `errors[].fatal`. Geändert: `aborted`
+(Ergebnis und `done`) ist nur noch bei einem Stopp (Exit 3) `true`, bei einem Laufzeitfehler
+(Exit 1) `false` (Abschnitt [Vertrag 1.3.1](#vertrag-131-cpus-im-ergebnis-aborted-und-fatal)).
+Formatversionen unverändert.
 
 ## Allgemeines
 
@@ -456,7 +458,8 @@ in `errors[]`); `stopped_in` nennt die Phase (`preparing`, `warmup`, `measure`, 
 | `measure` | steht drin, `partial: true` | Werte über die tatsächlich gemessene Zeit (Raten bezogen auf diese Zeit) |
 | – | `partial: false` | vollständig |
 
-Nach dem abgebrochenen Test folgende Tests fehlen. `aborted` im Dokument bleibt wie bisher.
+Nach dem abgebrochenen Test folgende Tests fehlen. `aborted` ist ab Vertrag 1.3.1 nur bei einem
+Stopp `true`, bei einem Laufzeitfehler `false` (siehe [Vertrag 1.3.1](#vertrag-131-cpus-im-ergebnis-aborted-und-fatal)).
 Ein `null`-Messwert kommt nur bei `partial: true` mit `stopped_in` `preparing`/`warmup` vor.
 
 ### Score und Referenzwerte
@@ -484,7 +487,9 @@ score_reference × 1000`. Die GUI muss keine Werte aus `docs/core.md` übernehme
 
 `warmup`: storage etwa jede Sekunde, cpu/memory etwa alle 0,5 s (`unit: "s"`).
 
-## Vertrag 1.3.1: `cpus` im Ergebnis
+## Vertrag 1.3.1: `cpus` im Ergebnis, `aborted` und `fatal`
+
+### `cpus` im Ergebnis
 
 Bei cpu- und memory-Tests steht `cpus[]` zusätzlich direkt im Testobjekt des Ergebnisses
 (`tests[].cpus`, neben `summary`), mit demselben Inhalt wie `phase.cpus` im ersten
@@ -501,6 +506,22 @@ die GUI SMT-Geschwister und NUMA-Knoten auch nachträglich, ohne Progress-Strom,
 - Beispiele: [`result-compute.json`](../schema/examples/result-compute.json),
   [`result-partial.json`](../schema/examples/result-partial.json).
 
+### `aborted` und `errors[].fatal`
+
+| Ende des Laufs | Exit | `aborted` (Ergebnis, `done`) | betroffener Test | folgende Tests |
+|---|---|---|---|---|
+| vollständig | 0 | `false` | – | – |
+| Stopp (`sbench stop`, Strg+C) | 3 | `true` | `partial: true`, `stopped_in`; kein `fatal` | fehlen |
+| Laufzeitfehler (z. B. `E_TARGET_SIZE`, `E_OUT_OF_MEMORY`, zu viele I/O-Fehler eines Workers) | 1 | **`false`** (bis 1.3: `true`) | `partial: true`, `stopped_in`; genau ein `errors[]`-Eintrag mit `fatal: true` | fehlen, werden nicht mehr ausgeführt |
+
+- `fatal: true` steht an genau dem `errors[]`-Eintrag, der den Test und damit den Lauf beendet
+  hat, also höchstens einmal im Ergebnis und nur im letzten Test. Fehlt das Feld, gilt `false`.
+  Nicht abbrechende Fehler (z. B. einzelne fehlgeschlagene I/Os unter der Abbruchgrenze) haben
+  kein `fatal`. Bei storage kann derselbe Eintrag zusammengefasste I/O-Fehler (`count`) tragen.
+- Das `error`-Event im Progress-Strom bleibt unverändert (ohne `fatal`).
+- Beispiele: [`result-fatal.json`](../schema/examples/result-fatal.json),
+  [`progress-fatal.jsonl`](../schema/examples/progress-fatal.jsonl).
+
 ## Exit-Codes
 
 | Code | Bedeutung |
@@ -512,7 +533,9 @@ die GUI SMT-Geschwister und NUMA-Knoten auch nachträglich, ohne Progress-Strom,
 | 4 | Fehlende Rechte (z. B. `physical`/`volume`-Target ohne Administratorrechte) |
 
 Bei 0 und 3 existiert die Ergebnisdatei immer. Bei 1 wird – soweit möglich – ein
-Teilergebnis mit `aborted: true` und den Fehlern in `tests[].errors` geschrieben.
+Teilergebnis mit den Fehlern in `tests[].errors` geschrieben; ab Vertrag 1.3.1 mit
+`aborted: false` und `fatal: true` an dem Fehler, der den Lauf beendet hat (vorher
+`aborted: true`).
 Bei 2 und 4 wird keine Messung gestartet und keine Ergebnisdatei geschrieben;
 die Ursache steht in einem `error`-Event (mit `field` als JSON Pointer bei 2).
 

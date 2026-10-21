@@ -471,6 +471,52 @@ static void test_v131_result_cpus(void) {
     sb_job_free(&j);
 }
 
+/* Vertrag 1.3.1: errors[].fatal genau an dem Fehler, der den Test beendet hat */
+static int count_fatal(const sb_run_error *e, int n, int *idx) {
+    int c = 0;
+    for (int i = 0; i < n; i++) if (e[i].fatal) { c++; if (idx) *idx = i; }
+    return c;
+}
+
+static void test_v131_fatal(void) {
+    sb_job j; sb_verrs e;
+    /* cpu: NUMA-Knoten ohne Prozessoren (nach der Prüfung gesetzt) -> rc 1, E_NUMA_NODE fatal */
+    int rc = load("{\"schema\":\"sb-job/1\",\"name\":\"t\",\"tests\":[{\"type\":\"cpu\",\"threads\":1,\"duration_s\":0.2}]}", &j, &e);
+    CHECK(rc == 0, "cpu-Job für fatal gültig");
+    if (rc == 0) {
+        sb_storage_opts o; memset(&o, 0, sizeof o);
+        sb_storage_cb cb; memset(&cb, 0, sizeof cb);
+        sb_compute_result r;
+        j.tests[0].numa_node = 1000;
+        int x = sb_compute_run(0, &j.tests[0], &o, &cb, &r);
+        int k = -1;
+        CHECK(x == 1 && count_fatal(r.errs, r.nerrs, &k) == 1 && k == 0 && !strcmp(r.errs[0].code, "E_NUMA_NODE"),
+              "cpu-Laufzeitfehler: rc %d, genau ein fatal (%s)", x, r.nerrs ? r.errs[0].code : "-");
+        CHECK(r.stop_phase != 0, "cpu-Laufzeitfehler: Teilergebnis (stop_phase gesetzt)");
+        sb_compute_result_free(&r);
+    }
+    sb_verrs_free(&e); sb_job_free(&j);
+    /* storage: Testdatei kleiner als block_size (file_size nach der Prüfung verkleinert) -> E_TARGET_SIZE fatal */
+    rc = load("{\"schema\":\"sb-job/1\",\"name\":\"t\",\"tests\":[{\"type\":\"storage\","
+              "\"targets\":[{\"path\":\"%ssbfatal.dat\",\"kind\":\"file\",\"file_size\":\"1MiB\"}],"
+              "\"duration_s\":0.2,\"cache\":\"buffered\","
+              "\"access_specs\":[{\"weight\":100,\"block_size\":\"64KiB\",\"read_pct\":100,\"random_pct\":0}]}]}", &j, &e);
+    CHECK(rc == 0, "storage-Job für fatal gültig");
+    if (rc == 0) {
+        sb_storage_opts o; memset(&o, 0, sizeof o);
+        o.tick_ms = 1000;
+        sb_storage_cb cb; memset(&cb, 0, sizeof cb);
+        sb_storage_result r;
+        j.tests[0].targets[0].file_size = 4096;
+        int x = sb_storage_run(0, &j.tests[0], &o, &cb, &r);
+        int k = -1;
+        CHECK(x == 1 && count_fatal(r.errs, r.nerrs, &k) == 1 && k >= 0 && !strcmp(r.errs[k].code, "E_TARGET_SIZE"),
+              "storage-Laufzeitfehler: rc %d, genau ein fatal (%s)", x, k >= 0 ? r.errs[k].code : "-");
+        sb_storage_result_free(&r);
+    }
+    sb_verrs_free(&e); sb_job_free(&j);
+}
+
 static void test_v13_buffer_bytes(void) {
     CHECK(sb_mem_buffer_bytes(0, 256u << 20) == 256u << 20 && sb_mem_buffer_bytes(0, (1u << 20) + 100) == 1u << 20 &&
           sb_mem_buffer_bytes(0, 12000) == 8192 && sb_mem_buffer_bytes(0, 8192) == 8192,
@@ -615,6 +661,7 @@ int main(void) {
     test_v13_metric_score();
     test_v13_phase_cpus();
     test_v131_result_cpus();
+    test_v131_fatal();
     test_v13_buffer_bytes();
     test_v13_export_partial();
     test_chase();

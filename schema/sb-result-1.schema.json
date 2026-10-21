@@ -35,7 +35,8 @@
       "description": "UTC-Zeitstempel (RFC 3339, Endung Z)."
     },
     "aborted": {
-      "type": "boolean"
+      "type": "boolean",
+      "description": "true nur, wenn der Lauf gestoppt wurde (sbench stop/Strg+C, Exit 3). Ab Vertrag 1.3.1 bei einem Laufzeitfehler (Exit 1) false; der betroffene Test hat partial: true und einen errors[]-Eintrag mit fatal: true, folgende Tests fehlen."
     },
     "tick_ms": {
       "type": "integer",
@@ -1357,6 +1358,11 @@
           "type": "integer",
           "minimum": 1,
           "description": "Anzahl gleichartiger Fehler (zusammengefasst)."
+        },
+        "fatal": {
+          "type": "boolean",
+          "const": true,
+          "description": "Vertrag 1.3.1, optional: true an genau dem Eintrag, der den Test (und damit den Lauf) beendet hat (Laufzeitfehler, Exit 1). Fehlt = false; nicht abbrechende Fehler (z. B. einzelne I/O-Fehler) haben kein fatal."
         }
       },
       "required": [
