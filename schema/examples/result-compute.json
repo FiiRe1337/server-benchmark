@@ -7,7 +7,7 @@
   "aborted": false,
   "tick_ms": 1000,
   "meta": {
-    "host": "SRV-HV01",
+    "host": "DEMO-HV01",
     "os": {
       "name": "Windows Server 2022 Datacenter",
       "version": "21H2",
