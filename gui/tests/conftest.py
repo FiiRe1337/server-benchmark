@@ -63,3 +63,31 @@ def local_job(src, tmp, **test0):
     out = tmp / ("job-" + os.path.basename(src))
     out.write_text(json.dumps(job), encoding="utf-8")
     return str(out)
+
+
+def _close_widgets():
+    """Close and delete leftover top-level widgets (live view, results pages, pyqtgraph plots) and their timers while
+    the QApplication still exists, so interpreter finalization does not tear down Qt objects in random order."""
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance()
+    if app is None:
+        return
+    for w in QApplication.topLevelWidgets():
+        w.close(); w.deleteLater()
+    for _ in range(3):
+        app.processEvents()
+
+
+def pytest_sessionfinish(session, exitstatus):
+    session.config._sb_exitstatus = int(exitstatus)
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_unconfigure(config):
+    """Windows CI: all tests passed, junit XML written, yet python sometimes ended with exit code 1 during Qt/pyqtgraph
+    teardown at interpreter shutdown. Clean up explicitly and, on Windows, end the process with pytest's own exit status
+    (reports are already written at this point)."""
+    _close_widgets()
+    if sys.platform == "win32" and hasattr(config, "_sb_exitstatus"):
+        sys.stdout.flush(); sys.stderr.flush()
+        os._exit(config._sb_exitstatus)
