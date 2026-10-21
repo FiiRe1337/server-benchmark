@@ -7,7 +7,7 @@
  "aborted": true,
  "tick_ms": 1000,
  "meta": {
-  "host": "SRV-HV01",
+  "host": "DEMO-HV01",
   "os": {
    "name": "Windows Server 2022 Datacenter",
    "version": "21H2",
@@ -208,7 +208,7 @@
    {
     "name": "Mellanox ConnectX-5 #1",
     "ipv4": [
-     "10.0.0.10"
+     "192.0.2.10"
     ],
     "ipv6": [
      "fe80::1e34:daff:fe5a:10"
@@ -218,7 +218,7 @@
    {
     "name": "Intel I350 #1",
     "ipv4": [
-     "192.168.10.21"
+     "198.51.100.21"
     ],
     "ipv6": [],
     "link_mbps": 1000

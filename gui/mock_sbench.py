@@ -97,10 +97,22 @@ def utc_now():
 
 
 # ----------------------------------------------------------------------------- info
+# neutral demo names (agreed with Devend): hosts DEMO-*, IPs from RFC 5737 (192.0.2.x servers, 198.51.100.x second net).
+# Applied to the example info.json too, so the mock output stays neutral whatever schema/examples contains.
+DEMO_NAMES = [("SRV-HV01", "DEMO-HV01"), ("SRV-HV02", "DEMO-HV02"), ("SRV-SQL01", "DEMO-SQL01"), ("WIN-SRV01", "DEMO-VM01"),
+              ("10.0.0.10", "192.0.2.10"), ("192.168.10.21", "198.51.100.21")]
+
+
+def _demo_names(txt):
+    for a, b in DEMO_NAMES:
+        txt = re.sub(re.escape(a), lambda m, b=b: b.lower() if m.group(0).islower() else b, txt, flags=re.I)
+    return txt
+
+
 def _example_info():
     for p in (os.path.join(SCHEMA_DIR, "examples", "info.json"), os.path.join(HERE, "demo", "info-host-example.json")):
         if os.path.exists(p):
-            return json.load(open(p, encoding="utf-8"))
+            return json.loads(_demo_names(open(p, encoding="utf-8").read()))
     raise SystemExit("info example missing")
 
 
@@ -121,7 +133,7 @@ def info_doc():
         return _ram_method(info)
     vm = copy.deepcopy(info)
     m = vm["meta"]
-    m["host"] = "VM-BENCH01" if HOSTKIND == "vm" else "VM-SAN02"
+    m["host"] = "DEMO-VM01" if HOSTKIND == "vm" else "DEMO-VM02"
     m["cpu"].update(sockets=1, cores=8, threads=16)
     m["ram_bytes"] = 64 * GIB
     m["ram_free_bytes"] = 41 * GIB
@@ -131,7 +143,7 @@ def info_doc():
                     "sector_logical": 512, "sector_physical": 4096},
                    {"path": "\\\\.\\PhysicalDrive1", "model": "Msft Virtual Disk" if HOSTKIND == "vm" else "Msft Virtual Disk (CSV/SAN)",
                     "size_bytes": 1099511627776, "bus": "SCSI", "sector_logical": 512, "sector_physical": 4096}]
-    m["nics"] = [{"name": "Microsoft Hyper-V Network Adapter", "ipv4": ["10.0.5.31"], "ipv6": [], "link_mbps": 10000}]
+    m["nics"] = [{"name": "Microsoft Hyper-V Network Adapter", "ipv4": ["192.0.2.31"], "ipv6": [], "link_mbps": 10000}]
     vm["targets"] = {"volumes": [{"path": "\\\\.\\C:", "letter": "C", "label": "System", "fs": "NTFS", "size_bytes": 136365211648 - 2**29,
                                   "free_bytes": 81604378624},
                                  {"path": "\\\\.\\D:", "letter": "D", "label": "Daten", "fs": "ReFS", "size_bytes": 1099511627776 - 2**30,

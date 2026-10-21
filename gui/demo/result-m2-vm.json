@@ -7,7 +7,7 @@
  "aborted": false,
  "tick_ms": 1000,
  "meta": {
-  "host": "VM-BENCH01",
+  "host": "DEMO-VM01",
   "os": {
    "name": "Windows Server 2022 Datacenter",
    "version": "21H2",
@@ -80,7 +80,7 @@
    {
     "name": "Microsoft Hyper-V Network Adapter",
     "ipv4": [
-     "10.0.5.31"
+     "192.0.2.31"
     ],
     "ipv6": [],
     "link_mbps": 10000
