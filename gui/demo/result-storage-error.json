@@ -2,8 +2,8 @@
  "schema": "sb-result/1",
  "kern_version": "0.1.0-mock",
  "run_id": "20261020-150000-err1",
- "started_utc": "2026-10-20T17:06:38.766Z",
- "ended_utc": "2026-10-20T17:06:38.852Z",
+ "started_utc": "2026-10-21T09:29:24.050Z",
+ "ended_utc": "2026-10-21T09:29:24.135Z",
  "aborted": false,
  "tick_ms": 1000,
  "meta": {

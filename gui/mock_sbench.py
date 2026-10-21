@@ -98,7 +98,8 @@ def utc_now():
 # neutral demo names (agreed with Devend): hosts DEMO-*, IPs from RFC 5737 (192.0.2.x servers, 198.51.100.x second net).
 # Applied to the example info.json too, so the mock output stays neutral whatever schema/examples contains.
 DEMO_NAMES = [("SRV-HV01", "DEMO-HV01"), ("SRV-HV02", "DEMO-HV02"), ("SRV-SQL01", "DEMO-SQL01"), ("WIN-SRV01", "DEMO-VM01"),
-              ("10.0.0.10", "192.0.2.10"), ("192.168.10.21", "198.51.100.21")]
+              ("VM-BENCH01", "DEMO-VM02"), ("VM-SAN02", "DEMO-VM03"),
+              ("10.0.0.10", "192.0.2.10"), ("10.0.0.20", "192.0.2.20"), ("10.0.5.31", "192.0.2.31"), ("192.168.10.21", "198.51.100.21")]
 
 
 def _demo_names(txt):
@@ -131,7 +132,7 @@ def info_doc():
         return _ram_method(info)
     vm = copy.deepcopy(info)
     m = vm["meta"]
-    m["host"] = "DEMO-VM01" if HOSTKIND == "vm" else "DEMO-VM02"
+    m["host"] = "DEMO-VM02" if HOSTKIND == "vm" else "DEMO-VM03"
     m["cpu"].update(sockets=1, cores=8, threads=16)
     m["ram_bytes"] = 64 * GIB
     m["ram_free_bytes"] = 41 * GIB
