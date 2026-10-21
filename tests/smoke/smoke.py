@@ -796,10 +796,10 @@ def main() -> int:
     user = os.environ.get("USERNAME", "runneradmin")
     gui = work / "gui-logs"
     (gui / "sub").mkdir(parents=True)
-    (gui / "gui.log").write_text(f"2026-10-20T08:00:00Z verbunden mit {host} (192.168.17.4, fe80::1c2b:3a4d:5e6f:7081%12)\n"
+    (gui / "gui.log").write_text(f"2026-10-20T08:00:00Z verbunden mit {host} (203.0.113.4, fe80::1c2b:3a4d:5e6f:7081%12)\n"
                                  f"Profil C:\\Users\\{user}\\AppData\\sbench MAC 00-15-5D-01-02-03 Zeit 12:34:56\n",
                                  encoding="utf-8")
-    (gui / "sub" / "profil.json").write_text(json.dumps({"host": host, "ip": "192.168.17.4", "mac": "00:15:5d:01:02:03",
+    (gui / "sub" / "profil.json").write_text(json.dumps({"host": host, "ip": "203.0.113.4", "mac": "00:15:5d:01:02:03",
                                                           "pfad": f"C:\\Users\\{user}\\x.json", "version": "10.0.20348"}),
                                              encoding="utf-8")
     (gui / "bild.bin").write_bytes(b"\x00\x01" + host.encode())
@@ -819,7 +819,7 @@ def main() -> int:
                         leaks.append(f"{n}: Hostname")
                     if f"\\{user.lower()}\\" in t.lower() or f"\\\\{user.lower()}\\\\" in t.lower():
                         leaks.append(f"{n}: Benutzername")
-                    if "192.168.17.4" in t or "00:15:5d:01:02:03" in t.lower() or "00-15-5d-01-02-03" in t.lower() or "fe80::1c2b" in t:
+                    if "203.0.113.4" in t or "00:15:5d:01:02:03" in t.lower() or "00-15-5d-01-02-03" in t.lower() or "fe80::1c2b" in t:
                         leaks.append(f"{n}: Adresse")
             check(not leaks, f"anonymisiert: keine Hostnamen/Benutzer/IPs/MACs ({leaks[:5]})")
             g = z.read("extra/gui-logs/gui.log").decode("utf-8")
