@@ -42,7 +42,7 @@ def _stop_run(h, sbench: Path, work: Path, name: str, tests: list[dict], wait_fo
         proc.kill()
         rc = None
     evs = h.read_jsonl(prog) if prog.exists() else []
-    h.check_progress(evs, f"Fortschritt ({name})", expect_aborted=True)
+    h.check_progress(evs, f"Fortschritt ({name})", expect_aborted=True, rc=rc)
     res = h.check_result(out, f"Teilergebnis ({name})", expect_aborted=True)
     return rc, evs, res
 

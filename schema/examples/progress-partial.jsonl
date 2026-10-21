@@ -12,4 +12,4 @@
 {"ev":"phase","test":1,"name":"preparing","threads":8,"cpus":[{"id":0,"cpu":64,"group":1,"number":0,"numa_node":1,"core":32,"smt_sibling_of":null},{"id":1,"cpu":66,"group":1,"number":2,"numa_node":1,"core":33,"smt_sibling_of":null},{"id":2,"cpu":68,"group":1,"number":4,"numa_node":1,"core":34,"smt_sibling_of":null},{"id":3,"cpu":70,"group":1,"number":6,"numa_node":1,"core":35,"smt_sibling_of":null},{"id":4,"cpu":72,"group":1,"number":8,"numa_node":1,"core":36,"smt_sibling_of":null},{"id":5,"cpu":74,"group":1,"number":10,"numa_node":1,"core":37,"smt_sibling_of":null},{"id":6,"cpu":76,"group":1,"number":12,"numa_node":1,"core":38,"smt_sibling_of":null},{"id":7,"cpu":78,"group":1,"number":14,"numa_node":1,"core":39,"smt_sibling_of":null}]}
 {"ev":"phase","test":1,"name":"warmup","duration_s":1}
 {"ev":"phase","test":1,"name":"cleanup"}
-{"ev":"done","result":"C:\\Tools\\sbench\\data\\results\\20261020-151000-e5f6.json","aborted":true}
+{"ev":"done","result":"C:\\Tools\\sbench\\data\\results\\20261020-151000-e5f6.json","aborted":true,"exit_code":3}

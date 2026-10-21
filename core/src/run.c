@@ -762,6 +762,8 @@ int sb_run(const sb_run_options *o) {
             cJSON_AddStringToObject(ev, "ev", "done");
             cJSON_AddStringToObject(ev, "result", out_path);
             cJSON_AddBoolToObject(ev, "aborted", aborted);
+            /* Vertrag 1.3.1: rc steht hier fest und ist der Exit-Code des Prozesses */
+            cJSON_AddNumberToObject(ev, "exit_code", rc);
             sb_progress_emit(&pr, ev);
             cJSON_Delete(ev);
         }

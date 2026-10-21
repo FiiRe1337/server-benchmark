@@ -104,7 +104,7 @@ def run_m2(h, sbench: Path, work: Path, info: dict, quick: bool) -> dict:
     p = run(sbench, "run", "--job", cj, "--out", cout, "--progress", f"file:{cprog}", "--tick-ms", 500, timeout=300)
     check(p.returncode == 0, f"cpu-Lauf: Exit 0 (ist {p.returncode})")
     evs = h.read_jsonl(cprog) if cprog.exists() else []
-    h.check_progress(evs, "Fortschritt (cpu)", expect_aborted=False)
+    h.check_progress(evs, "Fortschritt (cpu)", expect_aborted=False, rc=p.returncode)
     res = h.check_result(cout, "Ergebnis (cpu)", expect_aborted=False)
     out["cpu"] = cout
     if res:
@@ -163,7 +163,7 @@ def run_m2(h, sbench: Path, work: Path, info: dict, quick: bool) -> dict:
     p = run(sbench, "run", "--job", mj, "--out", mout, "--progress", f"file:{mprog}", "--tick-ms", 500, timeout=600)
     check(p.returncode == 0, f"memory-Lauf: Exit 0 (ist {p.returncode})")
     evs = h.read_jsonl(mprog) if mprog.exists() else []
-    h.check_progress(evs, "Fortschritt (memory)", expect_aborted=False)
+    h.check_progress(evs, "Fortschritt (memory)", expect_aborted=False, rc=p.returncode)
     check(any(e["ev"] == "progress" and e["phase"] == "preparing" and e["unit"] == "bytes" for e in evs),
           "memory: progress-Events beim Anlegen der Puffer")
     res = h.check_result(mout, "Ergebnis (memory)", expect_aborted=False)
@@ -206,7 +206,7 @@ def run_m2(h, sbench: Path, work: Path, info: dict, quick: bool) -> dict:
         rc = None
     check(rc == 3, f"cpu nach stop: Exit 3 (ist {rc}, Reaktionszeit {time.time() - ts:.2f} s)")
     if sprog.exists():
-        h.check_progress(h.read_jsonl(sprog), "Fortschritt (cpu stop)", expect_aborted=True)
+        h.check_progress(h.read_jsonl(sprog), "Fortschritt (cpu stop)", expect_aborted=True, rc=rc)
     sres = h.check_result(sout, "Teilergebnis (cpu stop)", expect_aborted=True)
     if sres and sres["tests"]:
         check(sres["tests"][0]["summary"]["ops_per_s"] > 0, "Teilergebnis cpu enthält Messwerte")

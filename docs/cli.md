@@ -41,8 +41,8 @@ CSV-Spalten `partial,stopped_in`. **Einzige Lockerung:** Messwerte der `summary`
 sein, aber nur bei `partial: true` mit `stopped_in` `preparing`/`warmup` (Test vor der
 Messphase beendet); vorher stand dort 0.
 
-**Vertragsstand 1.3.1.** Zwei zusätzliche, optionale Felder: `tests[].cpus` im Ergebnis
-(cpu/memory), gleiches Format wie `phase.cpus`, und `errors[].fatal`. Geändert: `aborted`
+**Vertragsstand 1.3.1.** Drei zusätzliche, optionale Felder: `tests[].cpus` im Ergebnis
+(cpu/memory), gleiches Format wie `phase.cpus`, `errors[].fatal` und `done.exit_code`. Geändert: `aborted`
 (Ergebnis und `done`) ist nur noch bei einem Stopp (Exit 3) `true`, bei einem Laufzeitfehler
 (Exit 1) `false` (Abschnitt [Vertrag 1.3.1](#vertrag-131-cpus-im-ergebnis-aborted-und-fatal)).
 Formatversionen unverändert.
@@ -521,6 +521,30 @@ die GUI SMT-Geschwister und NUMA-Knoten auch nachträglich, ohne Progress-Strom,
 - Das `error`-Event im Progress-Strom bleibt unverändert (ohne `fatal`).
 - Beispiele: [`result-fatal.json`](../schema/examples/result-fatal.json),
   [`progress-fatal.jsonl`](../schema/examples/progress-fatal.jsonl).
+
+### `done.exit_code`
+
+Das `done`-Event trägt ab 1.3.1 `exit_code` (Integer), genau den Exit-Code, mit dem sbench
+direkt danach endet. `done` wird nur geschrieben, wenn die Ergebnisdatei geschrieben ist,
+deshalb kommen dort praktisch nur 0, 1 und 3 vor (2 und 4 enden ohne `done`); das Schema
+erlaubt 0–4.
+
+- `exit_code: 3` genau dann, wenn `aborted: true`.
+- `exit_code: 1` genau dann, wenn das Ergebnis einen `errors[]`-Eintrag mit `fatal: true`
+  hat; im Progress-Strom steht davor das zugehörige `error`-Event.
+- Optional im Schema; ältere sbench-Versionen (bis 1.3) schreiben es nicht.
+- Beispiele: [`progress-fatal.jsonl`](../schema/examples/progress-fatal.jsonl) (1),
+  [`progress-partial.jsonl`](../schema/examples/progress-partial.jsonl) (3).
+
+Empfohlene Reihenfolge für Clients (z. B. die GUI, wenn sie den Prozess nicht selbst
+gestartet hat oder sein Exit-Code nicht verfügbar ist, etwa bei `runas`):
+
+1. `exit_code` der Zeile zum Lauf in `<data_dir>\runs\index.jsonl`.
+2. Sonst `done.exit_code` aus dem Progress-Strom bzw. der Fortschrittsdatei.
+3. Sonst Ableitung aus dem Ergebnis (bzw. `done.aborted` bei Läufen bis 1.3):
+   `aborted: true` → 3; ein `errors[]`-Eintrag mit `fatal: true` → 1; sonst 0. Bei
+   Ergebnissen bis 1.3 bedeutet `aborted: true` Stopp **oder** Laufzeitfehler; unterscheiden
+   lässt sich das dann nur über die Fehler in `tests[].errors`.
 
 ## Exit-Codes
 

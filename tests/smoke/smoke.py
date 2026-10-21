@@ -99,7 +99,7 @@ def read_jsonl(path: Path) -> list[dict]:
     return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
 
 
-def check_progress(events: list[dict], what: str, expect_aborted: bool | None = None) -> None:
+def check_progress(events: list[dict], what: str, expect_aborted: bool | None = None, rc: int | None = None) -> None:
     bad = 0
     for i, ev in enumerate(events):
         errs = list(V["sb-progress-1.schema.json"].iter_errors(ev))
@@ -113,6 +113,9 @@ def check_progress(events: list[dict], what: str, expect_aborted: bool | None = 
     check(bool(evs) and evs[-1] == "done" and evs.count("done") == 1, f"{what}: letztes Event ist done (genau einmal)")
     if expect_aborted is not None and evs and evs[-1] == "done":
         check(events[-1]["aborted"] is expect_aborted, f"{what}: done.aborted = {expect_aborted}")
+    if rc is not None and evs and evs[-1] == "done":
+        # Vertrag 1.3.1: done.exit_code = tatsächlicher Exit-Code des Prozesses
+        check(events[-1].get("exit_code") == rc, f"{what}: done.exit_code {events[-1].get('exit_code')} = Prozess-Exit-Code {rc}")
     # Ticks nur in measure
     phase = None
     tick_ok = True
@@ -443,7 +446,7 @@ def main() -> int:
             "--tick-ms", "1000", timeout=600)
     check(p.returncode == 0, f"run Exit 0 (ist {p.returncode}, {time.time() - t0:.1f} s)")
     events = read_jsonl(prog)
-    check_progress(events, "Fortschritt (file:)", expect_aborted=False)
+    check_progress(events, "Fortschritt (file:)", expect_aborted=False, rc=p.returncode)
     ticks = [e for e in events if e["ev"] == "tick"]
     check(len(ticks) >= 4, f"mindestens 4 Ticks bei 5 s / 1000 ms (ist {len(ticks)})")
     progs = [e for e in events if e["ev"] == "progress"]
@@ -598,7 +601,7 @@ def main() -> int:
         proc.kill()
         rc = None
     check(rc == 3, f"run nach stop: Exit 3 (ist {rc}, Reaktionszeit {time.time() - ts:.2f} s)")
-    check_progress(read_jsonl(sprog), "Fortschritt (stop)", expect_aborted=True)
+    check_progress(read_jsonl(sprog), "Fortschritt (stop)", expect_aborted=True, rc=rc)
     sres = check_result(sout, "Teilergebnis (stop)", expect_aborted=True)
     if sres and sres["tests"]:
         s = sres["tests"][0]["summary"]
@@ -645,7 +648,7 @@ def main() -> int:
     p = run(sbench, "run", "--job", ni, "--out", nout, "--progress", f"file:{nprog}")
     check(p.returncode == 0, f"Job mit net/hyperv_info: Exit 0 (ist {p.returncode})")
     nevs = read_jsonl(nprog)
-    check_progress(nevs, "Fortschritt (not implemented)", expect_aborted=False)
+    check_progress(nevs, "Fortschritt (not implemented)", expect_aborted=False, rc=p.returncode)
     nis = [e for e in nevs if e["ev"] == "error" and e["code"] == "E_NOT_IMPLEMENTED"]
     check(sorted(e["test"] for e in nis) == [0, 2], "E_NOT_IMPLEMENTED für Tests 0 und 2 (net_client, hyperv_info)")
     nres = check_result(nout, "Ergebnis (not implemented)", expect_aborted=False, job=ni)

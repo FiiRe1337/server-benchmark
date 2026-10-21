@@ -478,6 +478,40 @@ static int count_fatal(const sb_run_error *e, int n, int *idx) {
     return c;
 }
 
+/* Vertrag 1.3.1: done.exit_code = Rückgabewert von sb_run (= Prozess-Exit-Code von sbench run) */
+static void test_v131_exit_code(void) {
+    char dd[MAX_PATH], jp[MAX_PATH], op[MAX_PATH], pp[MAX_PATH], prog[MAX_PATH + 8], lp[MAX_PATH];
+    snprintf(dd, sizeof dd, "%ssb131-data", g_tmpdir);
+    snprintf(jp, sizeof jp, "%ssb131-job.json", g_tmpdir);
+    snprintf(op, sizeof op, "%ssb131-result.json", g_tmpdir);
+    snprintf(pp, sizeof pp, "%ssb131-progress.jsonl", g_tmpdir);
+    snprintf(lp, sizeof lp, "%ssb131.log", g_tmpdir);
+    snprintf(prog, sizeof prog, "file:%s", pp);
+    CreateDirectoryA(dd, NULL);
+    CHECK(sb_set_data_directory(dd) == 0, "Datenverzeichnis %s", dd);
+    const char *job = "{\"schema\":\"sb-job/1\",\"name\":\"exit\",\"tests\":[{\"type\":\"cpu\",\"threads\":1,"
+                      "\"warmup_s\":0,\"duration_s\":0.3}]}";
+    CHECK(sb_write_file(jp, job, strlen(job)) == 0, "Job schreiben");
+    DeleteFileA(pp);
+    sb_run_options o; memset(&o, 0, sizeof o);
+    o.job_path = jp; o.out_path = op; o.progress = prog; o.log_path = lp; o.id = "unit-exit-code"; o.tick_ms = 100;
+    int rc = sb_run(&o);
+    char *txt = NULL; size_t n = 0;
+    cJSON *done = NULL;
+    if (sb_read_file(pp, &txt, &n) == 0) {
+        /* letzte nicht leere Zeile */
+        while (n && (txt[n - 1] == '\n' || txt[n - 1] == '\r')) txt[--n] = 0;
+        char *last = strrchr(txt, '\n');
+        done = cJSON_Parse(last ? last + 1 : txt);
+    }
+    const cJSON *ev = cJSON_GetObjectItem(done, "ev"), *ec = cJSON_GetObjectItem(done, "exit_code");
+    CHECK(rc == 0, "sb_run cpu 0,3 s: rc %d", rc);
+    CHECK(cJSON_IsString(ev) && !strcmp(ev->valuestring, "done"), "letztes Event ist done");
+    CHECK(cJSON_IsNumber(ec) && ec->valueint == rc, "done.exit_code %d = rc %d", cJSON_IsNumber(ec) ? ec->valueint : -1, rc);
+    cJSON_Delete(done); free(txt);
+    DeleteFileA(jp); DeleteFileA(op); DeleteFileA(pp); DeleteFileA(lp);
+}
+
 static void test_v131_fatal(void) {
     sb_job j; sb_verrs e;
     /* cpu: NUMA-Knoten ohne Prozessoren (nach der Prüfung gesetzt) -> rc 1, E_NUMA_NODE fatal */
@@ -662,6 +696,7 @@ int main(void) {
     test_v13_phase_cpus();
     test_v131_result_cpus();
     test_v131_fatal();
+    test_v131_exit_code();
     test_v13_buffer_bytes();
     test_v13_export_partial();
     test_chase();

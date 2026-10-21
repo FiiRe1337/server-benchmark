@@ -11,7 +11,7 @@ Prüft:
   * Vertrag 1.3: partial/stopped_in und null-Messwerte (check_partial), Progress-Regeln
     (check_progress_v13: tick.metric, workers[] vollständig/sortiert, phase.threads/cpus),
   * Vertrag 1.3.1: errors[].fatal höchstens einmal, im letzten Test, partial: true, aborted false
-    (check_fatal),
+    (check_fatal); done.exit_code passt zu aborted/fatal (check_exit_code),
   * Vertrag 1.3.1: tests[].cpus bei cpu/memory (check_cpu_list, gleiche Regeln wie phase.cpus, passend
     zu summary.cpus und per_worker[].node),
   * einen Selbsttest der semantischen Regeln mit absichtlich falschen Dokumenten.
@@ -257,6 +257,31 @@ def check_fatal(doc: dict) -> list[str]:
     return errs
 
 
+def check_exit_code(events: list[dict], result: dict | None = None) -> list[str]:
+    """Vertrag 1.3.1: done.exit_code (optional) passt zu aborted (3 genau bei aborted: true), bei 1 gibt
+    es vorher ein error-Event; mit Ergebnis zusätzlich: 1 genau dann, wenn ein errors[]-Eintrag fatal
+    ist, und aborted wie im Ergebnis."""
+    errs: list[str] = []
+    done = [e for e in events if e.get("ev") == "done"]
+    if not done or "exit_code" not in done[-1]:
+        return errs
+    d = done[-1]
+    code, aborted = d["exit_code"], d.get("aborted")
+    if (code == 3) != (aborted is True):
+        errs.append(f"done: exit_code {code} passt nicht zu aborted {aborted} (3 genau bei aborted: true)")
+    if code in (2, 4):
+        errs.append(f"done: exit_code {code} kommt ohne Ergebnis nicht im done-Event vor")
+    if code == 1 and not any(e.get("ev") == "error" for e in events):
+        errs.append("done: exit_code 1 ohne vorheriges error-Event")
+    if result is not None:
+        fatal = any(e.get("fatal") for t in result.get("tests", []) for e in t.get("errors", []))
+        if (code == 1) != fatal:
+            errs.append(f"done: exit_code {code}, aber errors[].fatal im Ergebnis ist {fatal}")
+        if result.get("aborted") != aborted:
+            errs.append(f"done.aborted {aborted} != aborted im Ergebnis {result.get('aborted')}")
+    return errs
+
+
 def semantic_checks(kind: str, doc, job: dict | None = None) -> list[str]:
     """Regeln außerhalb von JSON Schema (entsprechen den Prüfungen von 'sbench validate')."""
     errs: list[str] = []
@@ -375,6 +400,16 @@ def selftest() -> list[str]:
         ("fatal nicht im letzten Test", check_fatal({"aborted": False, "tests": _fd()["tests"] + [{"partial": False, "errors": []}]}), True),
         ("fatal doppelt", check_fatal({"aborted": False, "tests": [{"partial": True, "errors": [{"fatal": True}, {"fatal": True}]}]}), True),
         ("fatal ohne partial", check_fatal({"aborted": False, "tests": [{"partial": False, "errors": [{"fatal": True}]}]}), True),
+        # Vertrag 1.3.1: done.exit_code
+        ("exit 3 bei Stopp", check_exit_code([{"ev": "done", "aborted": True, "exit_code": 3}]), False),
+        ("exit 0 bei Stopp", check_exit_code([{"ev": "done", "aborted": True, "exit_code": 0}]), True),
+        ("exit 3 ohne aborted", check_exit_code([{"ev": "done", "aborted": False, "exit_code": 3}]), True),
+        ("exit 1 mit fatal", check_exit_code([{"ev": "error"}, {"ev": "done", "aborted": False, "exit_code": 1}], _fd()), False),
+        ("exit 1 ohne fatal", check_exit_code([{"ev": "error"}, {"ev": "done", "aborted": False, "exit_code": 1}],
+                                              {"aborted": False, "tests": [{"errors": []}]}), True),
+        ("exit 0 mit fatal", check_exit_code([{"ev": "done", "aborted": False, "exit_code": 0}], _fd()), True),
+        ("exit 1 ohne error-Event", check_exit_code([{"ev": "done", "aborted": False, "exit_code": 1}]), True),
+        ("ohne exit_code (1.3)", check_exit_code([{"ev": "done", "aborted": True}]), False),
         # Vertrag 1.3.1: tests[].cpus
         ("result cpus ok", check_compute(0, dict(_ct(), cpus=_ph(2)["cpus"]), _M2), False),
         ("result cpus != threads", check_compute(0, dict(_ct(), cpus=_ph(1)["cpus"]), _M2), True),
@@ -431,6 +466,9 @@ def main() -> int:
             if not evs or evs[-1] != "done" or evs.count("done") != 1:
                 extra.append("letztes (und einziges) 'done'-Event fehlt")
             extra += check_progress_v13([d for _, d in docs])
+            # Vertrag 1.3.1: progress-X.jsonl gehört zu result-X.json (falls vorhanden)
+            rp = EXAMPLE_DIR / p.name.replace("progress-", "result-").replace(".jsonl", ".json")
+            extra += check_exit_code([d for _, d in docs], load_json(rp) if rp.exists() else None)
         else:
             doc = load_json(p)
             docs = [("", doc)]

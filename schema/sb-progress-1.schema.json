@@ -390,6 +390,16 @@
         "aborted": {
           "type": "boolean",
           "description": "Wie aborted im Ergebnis: true nur bei Stopp (Exit 3), ab Vertrag 1.3.1 bei Laufzeitfehler (Exit 1) false."
+        },
+        "exit_code": {
+          "enum": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "description": "Vertrag 1.3.1, optional: Exit-Code, mit dem sbench gleich endet (0 ok, 1 Laufzeitfehler, 3 Stopp; 2 und 4 kommen ohne Ergebnis nicht im done-Event vor). 3 genau bei aborted: true; 1 bei einem Laufzeitfehler (Ergebnis mit errors[].fatal)."
         }
       },
       "required": [
