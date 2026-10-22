@@ -1,0 +1,61 @@
+{
+ "schema": "sb-job/1",
+ "name": "CPU + RAM (M2)",
+ "tests": [
+  {
+   "type": "cpu",
+   "name": "CPU mixed alle Threads",
+   "threads": 0,
+   "workload": "mixed",
+   "warmup_s": 2,
+   "duration_s": 10
+  },
+  {
+   "type": "cpu",
+   "name": "CPU int 1 Thread",
+   "threads": 1,
+   "workload": "int",
+   "warmup_s": 1,
+   "duration_s": 5
+  },
+  {
+   "type": "memory",
+   "name": "RAM lesen",
+   "mode": "bandwidth",
+   "op": "read",
+   "threads": 0,
+   "buffer_size": "1GiB",
+   "warmup_s": 1,
+   "duration_s": 10
+  },
+  {
+   "type": "memory",
+   "name": "RAM schreiben NT",
+   "mode": "bandwidth",
+   "op": "write",
+   "threads": 0,
+   "buffer_size": "512MiB",
+   "nontemporal": true,
+   "warmup_s": 1,
+   "duration_s": 5
+  },
+  {
+   "type": "memory",
+   "name": "RAM copy",
+   "mode": "bandwidth",
+   "op": "copy",
+   "threads": 0,
+   "buffer_size": "512MiB",
+   "warmup_s": 1,
+   "duration_s": 5
+  },
+  {
+   "type": "memory",
+   "name": "RAM-Latenz",
+   "mode": "latency",
+   "buffer_size": "1GiB",
+   "warmup_s": 1,
+   "duration_s": 5
+  }
+ ]
+}

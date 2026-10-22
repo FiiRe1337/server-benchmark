@@ -79,7 +79,7 @@ def list_running():
 
 
 def import_icf(icf_path, out_path):
-    """M2: `sbench import-icf <f> --out <job>` -> (exit code, sb-validate/1 with W_ICF_UNSUPPORTED warnings or None)."""
+    """M2: `sbench import-icf <f> --out <job>` -> (exit code, sb-validate/1 with W_ICF_* warnings or None)."""
     code, out = run_sync(["import-icf", icf_path, "--out", out_path], 20000)
     try:
         res = json.loads(out); res.setdefault("warnings", [])
@@ -231,7 +231,15 @@ class TailSession(EventSource):
                     return int(e["exit_code"])
         except (OSError, ValueError, KeyError):
             pass
-        return 3 if self.done.get("aborted") else 0
+        # 2. done.exit_code (announced for 1.3.1); 3. derive from the result: fatal / errors[] in a partial test => 1 (also
+        # for the 1.3 core that writes aborted: true on runtime errors), aborted => 3, else 0
+        from .model import done_exit_code, fallback_exit_code
+        if done_exit_code(self.done) is not None:
+            return done_exit_code(self.done)
+        try:
+            return fallback_exit_code(json.load(open(self.done.get("result") or self.out_path, encoding="utf-8")))
+        except (OSError, ValueError, TypeError):
+            return 3 if self.done.get("aborted") else 0
 
     def stop(self):
         stop_run(self.run_id)

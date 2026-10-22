@@ -8,6 +8,7 @@ from .pages.dashboard import Dashboard
 from .pages.profiles import ProfileEditor
 from .pages.live import LiveView
 from .pages.compare import Compare
+from .pages.results import ResultsPage
 from .pages.export import ExportPage
 from .overlay import ReattachOffer, SupportDialog, Overlay
 from . import theme as T, sbench
@@ -16,7 +17,7 @@ from .sbench import ROOT
 from .core import gui_version, build_info, CoreError
 
 GUI_VERSION = gui_version()        # from sbgui/_build_info.py (CI build) or 0.1.0-dev (source)
-NAV = [("dashboard", "Übersicht"), ("profiles", "Testprofile"), ("live", "Live-Lauf"), ("compare", "Vergleich"), ("export", "Export")]
+NAV = [("dashboard", "Übersicht"), ("profiles", "Testprofile"), ("live", "Live-Lauf"), ("results", "Ergebnisse"), ("compare", "Vergleich"), ("export", "Export")]
 MIN_W, MIN_H = 1280, 720          # logical px; RDP 1366x768 must fit
 COLLAPSE_BELOW = 1400             # sidebar auto-collapses below this window width
 SIDEBAR_W, SIDEBAR_MINI = 232, 64
@@ -91,8 +92,10 @@ class MainWindow(QMainWindow):
         gd = sbench.gui_dir()
         self.pages = {
             "dashboard": Dashboard(info, kern_version),
-            "profiles": ProfileEditor([os.path.join(ROOT, "profiles"), os.path.join(gd, "profiles")], elevated=self.elevated),
+            "profiles": ProfileEditor([os.path.join(ROOT, "profiles"), os.path.join(gd, "profiles")], elevated=self.elevated,
+                                      numa_nodes=((info or {}).get("meta") or {}).get("numa_nodes")),
             "live": LiveView(),
+            "results": ResultsPage(result_files, self.run_exit_codes),
             "compare": Compare(result_files),
             "export": ExportPage(result_files, os.path.join(gd, "export")),
         }
@@ -104,12 +107,18 @@ class MainWindow(QMainWindow):
         self._set_collapsed(False)
 
         self.result_files = list(result_files)
+        self.pages["live"].cpu_score = ((info or {}).get("meta") or {}).get("cpu_score")   # contract 1.3 (sbench info)
         self.pages["profiles"].run_requested.connect(self.start_run)
         self.pages["profiles"].info_provider = self._target_info
         self.pages["dashboard"].quickstart.connect(self._quickstart)
         self.pages["live"].stop_requested.connect(self.stop_run)
         self.pages["live"].elevate_requested.connect(self.offer_elevation)
         self._connect_result_pages()
+
+    def run_exit_codes(self):
+        """{run_id: exit_code} from <data_dir>/runs/index.jsonl (abort vs. failure is decided by the exit code)."""
+        from .model import read_run_index
+        return read_run_index(os.path.join(self.data_dir, "runs", "index.jsonl")) if self.data_dir else {}
 
     def _connect_result_pages(self):
         self.pages["compare"].export_selected.connect(self.support_bundle)
@@ -128,11 +137,13 @@ class MainWindow(QMainWindow):
             except (OSError, ValueError):
                 pass
         keys = [k for k, _ in NAV]
-        for key, page in (("compare", lambda: Compare(files)), ("export", lambda: ExportPage(files, os.path.join(sbench.gui_dir(), "export")))):
+        for key, page in (("results", lambda: ResultsPage(files, self.run_exit_codes)), ("compare", lambda: Compare(files)), ("export", lambda: ExportPage(files, os.path.join(sbench.gui_dir(), "export")))):
             i = keys.index(key); old = self.stack.widget(i); cur = self.stack.currentIndex()
             self.pages[key] = page(); self.stack.removeWidget(old); self.stack.insertWidget(i, scroll(self.pages[key])); old.deleteLater()
             self.stack.setCurrentIndex(cur)
         self._connect_result_pages()
+        if new and new[0] in files:
+            self.pages["results"].select_file(new[0])       # newest run (also a partial result after Stop) in "Ergebnisse"
 
     # --------------------------------------------------------------- layout
     def _nav_icons(self):
@@ -166,14 +177,19 @@ class MainWindow(QMainWindow):
             ov.setGeometry(self.centralWidget().rect())
 
     QUICK = {"quad": ("Four Corners", "four-corners", None), "storage4k": ("Storage 4K random", "four-corners", 2),
-             "storage1m": ("Storage 1M sequenziell", None, None), "hyperv": ("Hyper-V Info", None, None), "cpu": ("CPU", None, None),
-             "memory": ("RAM", None, None), "net": ("Netzwerk", None, None), "full": ("Vollständiger Lauf", None, None)}
+             "storage1m": ("Storage 1M sequenziell", None, None), "hyperv": ("Hyper-V Info", None, None), "cpu": ("CPU", "cpu-ram", None),
+             "memory": ("RAM", "cpu-ram", None), "net": ("Netzwerk", None, None), "full": ("Vollständiger Lauf", None, None)}
 
     def _quickstart(self, key):
         """Dashboard 'Schnellstart': open the matching profile, or say clearly that it is not available yet."""
         name, stem, ti = self.QUICK.get(key, (key, None, None))
         pe = self.pages["profiles"]
-        if stem and pe.open_profile(stem, ti):
+        if key in ("cpu", "memory"):           # M2: cpu-ram.json on its first test of that type
+            if pe.list.count() == 0:
+                pe._load_list()
+            if pe.open_quick(key):
+                self.show_page("profiles"); return True
+        elif stem and pe.open_profile(stem, ti):
             self.show_page("profiles"); return True
         QMessageBox.information(self, "Schnellstart", f"»{name}« ist in dieser Version noch nicht als Schnellstart verfügbar.\n\n"
                                 "Bitte unter »Testprofile« ein Profil wählen oder mit »+ Neu« anlegen.")
@@ -207,7 +223,8 @@ class MainWindow(QMainWindow):
     def _attach(self, session, job, rid, tick_ms=250, reattached=False):
         self.pages["live"].attach(session, job, tick_ms=tick_ms, reattached=reattached)
         session.finished.connect(lambda c, t: self.run_mini.setText(f"letzter Lauf: {t}"))
-        session.finished.connect(lambda c, t: c in (0, 3) and self.reload_results())
+        # exit 1 (runtime error) also writes a (partial) result
+        session.finished.connect(lambda c, t: c in (0, 1, 3) and self.reload_results())
         session.start(); self.run_mini.setText(f"● läuft · {rid}"); self.run_mini.setObjectName("chipAccent")
         self.run_mini.style().polish(self.run_mini)
         self.show_page("live")

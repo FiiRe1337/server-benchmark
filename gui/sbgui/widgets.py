@@ -1,5 +1,5 @@
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QColor, QFont, QPainter
 from PySide6.QtWidgets import (QFrame, QLabel, QVBoxLayout, QHBoxLayout, QWidget, QTableWidget, QTableWidgetItem,
                                QHeaderView, QAbstractItemView, QSizePolicy)
 import pyqtgraph as pg
@@ -26,8 +26,8 @@ class Card(QFrame):
         if title:
             h = QHBoxLayout(); h.setSpacing(8)
             v = QVBoxLayout(); v.setSpacing(1); self.title_label = label(title, "h2"); v.addWidget(self.title_label)
-            if subtitle:
-                v.addWidget(label(subtitle, "muted"))
+            self.subtitle_label = label(subtitle or "", "muted"); v.addWidget(self.subtitle_label)
+            self.subtitle_label.setVisible(bool(subtitle))
             h.addLayout(v); h.addStretch(1)
             for w in (right or []):
                 h.addWidget(w)
@@ -41,22 +41,41 @@ class Card(QFrame):
         return w
 
 
+class ElideLabel(QLabel):
+    """Single-line label that elides with "…" instead of clipping mid-glyph; text() keeps the full text (tooltip shows it)."""
+
+    def __init__(self, text="", name=None):
+        super().__init__(text)
+        if name:
+            self.setObjectName(name)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred); self.setMinimumWidth(0)
+
+    def paintEvent(self, _):
+        p = QPainter(self); p.setPen(self.palette().color(self.foregroundRole())); p.setFont(self.font())
+        r = self.contentsRect()
+        p.drawText(r, int(self.alignment()) | Qt.AlignVCenter, self.fontMetrics().elidedText(self.text(), Qt.ElideRight, r.width()))
+
+
 class Kpi(QFrame):
     def __init__(self, title, unit, color=T.ACCENT):
         super().__init__(); self.setObjectName("kpi")
         self.setStyleSheet(f"QFrame#kpi {{ border-top: 2px solid {color}; }}")
         v = QVBoxLayout(self); v.setContentsMargins(16, 12, 16, 12); v.setSpacing(2)
-        v.addWidget(label(title.upper(), "kpiLabel"))
+        self.title_lbl = label(title.upper(), "kpiLabel"); v.addWidget(self.title_lbl)
         h = QHBoxLayout(); h.setSpacing(6)
         self.value = label("–", "kpiValue"); h.addWidget(self.value, 0, Qt.AlignBottom)
         self.unit = label(unit, "kpiUnit"); h.addWidget(self.unit, 0, Qt.AlignBottom); h.addStretch(1)
         v.addLayout(h)
-        self.sub = label(" ", "dim"); v.addWidget(self.sub)
+        # long sub texts (cpu/memory facts, score reference) must never widen the KPI row (1280x720 / RDP): elide with "…"
+        self.sub = ElideLabel(" ", "dim"); v.addWidget(self.sub)
+
+    def set_title(self, title, unit):
+        self.title_lbl.setText(title.upper()); self.unit.setText(unit)
 
     def set(self, value, sub=None):
         self.value.setText(value)
         if sub is not None:
-            self.sub.setText(sub)
+            self.sub.setText(sub); self.sub.setToolTip(sub.strip())
 
 
 def table(headers, rows=(), stretch_col=0, mono_cols=()):
@@ -172,6 +191,10 @@ def nav_icon(kind, color, size=18):
         elif kind == "export":
             p.drawLine(QPointF(9, 2), QPointF(9, 11)); p.drawLine(QPointF(5.5, 7.5), QPointF(9, 11)); p.drawLine(QPointF(12.5, 7.5), QPointF(9, 11))
             path = QPainterPath(QPointF(2.5, 11)); path.lineTo(2.5, 15.5); path.lineTo(15.5, 15.5); path.lineTo(15.5, 11); p.drawPath(path)
+        elif kind == "results":
+            p.drawRoundedRect(QRectF(3, 2, 12, 14), 2, 2)
+            for y, x2 in ((6, 12), (9, 12), (12, 9)):
+                p.drawLine(QPointF(6, y), QPointF(x2, y))
         elif kind == "support":
             p.drawRoundedRect(QRectF(2.5, 6, 13, 9.5), 1.5, 1.5); p.drawLine(QPointF(9, 1.5), QPointF(9, 10))
             p.drawLine(QPointF(6, 4.5), QPointF(9, 1.5)); p.drawLine(QPointF(12, 4.5), QPointF(9, 1.5))

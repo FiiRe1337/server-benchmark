@@ -44,6 +44,7 @@ def guide_job(name, target, workers, qd, duration_s=12, warmup_s=3, file_size="5
 def run(a):
     from .app import make_app, build_window
     from . import sbench, core
+    from .model import sval, run_outcome, EXIT_OUTCOME
     out = os.path.abspath(a.guide); os.makedirs(out, exist_ok=True)
     w, h = (int(x) for x in a.size.split("x"))
     target = a.guide_target or os.path.join(tempfile.gettempdir(), "sbench-anleitung.dat")
@@ -156,8 +157,11 @@ def run(a):
             rep["runs"][key + ("-stop" if stop_after is not None else "")] = {
                 "run_id": s.run_id, "exit": fin[0][0], "text": fin[0][1], "result": s.out_path if res else None,
                 "aborted": res.get("aborted") if res else None,
-                "tests": [{"name": t["config"].get("name"), "iops": t["summary"]["iops"], "mbps": t["summary"]["mbps"],
-                           "lat_mean_us": t["summary"]["lat_us"]["mean"], "io_count": t["summary"]["io_count"]}
+                "outcome": run_outcome(res, fin[0][0]) if res else EXIT_OUTCOME.get(fin[0][0]),   # exit code decides
+                # contract 1.3: a test stopped in preparing/warmup has null summary values (partial/stopped_in)
+                "tests": [{"name": t["config"].get("name"), "iops": sval(t, "summary", "iops"), "mbps": sval(t, "summary", "mbps"),
+                           "lat_mean_us": sval(t, "summary", "lat_us", "mean"), "io_count": sval(t, "summary", "io_count"),
+                           "partial": t.get("partial"), "stopped_in": t.get("stopped_in")}
                           for t in (res or {}).get("tests", []) if t["type"] == "storage"]}
             save_report()
             return s, fin[0][0], res

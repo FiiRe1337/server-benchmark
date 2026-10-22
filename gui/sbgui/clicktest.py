@@ -14,10 +14,14 @@ A button is
   dead        -> no receiver for clicked/toggled/pressed, no menu, not in a QButtonGroup        (failure)
   failed      -> an exception reached sys.excepthook while it ran                                (failure)
   observable  -> page, overlay, dialog/message call, table/list rows, chip text or run request changed
-Buttons in EXPECT must be observable (failure otherwise). Page signals (e.g. Dashboard.quickstart) must be connected."""
+Buttons in EXPECT must be observable (failure otherwise). Page signals (e.g. Dashboard.quickstart) must be connected.
+Pages may offer click_setup() (called once when the page is shown, e.g. results: a result with an error toggle) and
+click_prepare(button) (called before each button, e.g. profile editor: select a storage test for '+ Datei', a cpu/memory test
+for the cpu/memory form)."""
 import json, os, tempfile, time
 
 EXPECT = {"+ Datei", "+ Volume", "+ Disk", "Entfernen", "+ Spec", "Duplizieren", "+ Neu", "Validieren", "Speichern",
+          "+ CPU", "+ RAM", "Test entfernen",                     # M2: cpu/memory tests in the profile editor
           "▶  Test starten", "Exportieren", "…", "Import ▾", "Auswahl für Support exportieren", "Auswahl → Support-Paket",
           "⇪  Ergebnisse für Support exportieren"}
 
@@ -116,7 +120,8 @@ def _fingerprint(win, p):
     ovs = [o for o in win.centralWidget().findChildren(Overlay) if o.isVisible()]
     return (win.stack.currentIndex(), win.collapsed, len(p.calls), len(ovs), pe.targets.rowCount(), pe.specs.rowCount(), pe.list.count(),
             pe.valid_chip.text(), pe.test_box.currentIndex(), pe.title.text(), hash(pe.json.toPlainText()), ex.out.text(),
-            win.toast.isVisible(), win.run_mini.text())
+            win.toast.isVisible(), win.run_mini.text(),
+            tuple(t.isChecked() for t, _ in getattr(win.pages.get("results"), "err_more", [])))
 
 
 def _overlays(win):
@@ -171,6 +176,8 @@ def run(win, timeout_s=120):
         for key, _ in NAV:
             win.show_page(key); _pump()
             page = win.pages[key]
+            if hasattr(page, "click_setup"):       # e.g. results: pick a result whose error box has a toggle
+                page.click_setup(); _pump()
             scope = [page] + ([win.sidebar] if key == NAV[-1][0] else [])
             for root in scope:
                 for b in list(root.findChildren(QAbstractButton)):
@@ -181,6 +188,9 @@ def run(win, timeout_s=120):
                         rep["timeout"] = True; break
                     if key != "dashboard" and win.stack.currentIndex() != [k for k, _ in NAV].index(key):
                         win.show_page(key); _pump()
+                    prep = getattr(page, "click_prepare", None)     # e.g. profile editor: select a storage / cpu test first
+                    if prep is not None:
+                        prep(b); _pump()
                     entry = {"page": key, "text": _btn_text(b), "enabled": b.isEnabled(), "wired": _wired(b)}
                     rep["buttons"].append(entry)
                     if not entry["wired"]:

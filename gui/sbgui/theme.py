@@ -47,7 +47,7 @@ QPushButton#support {{ background: rgba(34,211,238,0.08); color: {ACCENT}; borde
 QPushButton#quick {{ text-align: left; padding: 12px 14px; background: {CARD2}; font-size: 12px; }}
 QLineEdit, QSpinBox, QComboBox, QDoubleSpinBox {{ background: {BG}; border: 1px solid {BORDER}; border-radius: 7px; padding: 5px 8px; font-size: 12px;
                selection-background-color: {ACCENT}; selection-color: #04232a; }}
-QLineEdit[invalid="true"], QSpinBox[invalid="true"] {{ border: 1px solid {RED}; }}
+QLineEdit[invalid="true"], QSpinBox[invalid="true"], QComboBox[invalid="true"] {{ border: 1px solid {RED}; }}
 QComboBox::drop-down {{ border: none; width: 18px; }}
 QSpinBox::up-button, QSpinBox::down-button {{ width: 0px; border: none; }}
 QTableWidget {{ background: transparent; border: none; gridline-color: {BORDER}; font-size: 12px; alternate-background-color: {CARD2}; }}

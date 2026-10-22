@@ -2,9 +2,10 @@ import json, logging, os, shutil
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QListWidgetItem,
                                QCheckBox, QLineEdit, QTextBrowser, QFileDialog, QMessageBox)
-from ..widgets import Card, label, chip, listw, Responsive
-from ..model import host_label, check_schema
+from ..widgets import Card, label, chip, listw, Responsive, ElideLabel
+from ..model import host_label, check_schema, compute_tests
 from ..report import build_html
+from .. import theme as T
 
 log = logging.getLogger("sbench-gui")
 
@@ -34,19 +35,28 @@ class ExportPage(QWidget):
         mid_w = QWidget(); mid = QVBoxLayout(mid_w); mid.setContentsMargins(0, 0, 0, 0); mid.setSpacing(14)
         fc = Card("Formate")
         g = QGridLayout(); g.setHorizontalSpacing(16); g.setVerticalSpacing(10)
-        fmts = (("JSON", "sb-result/1 unverändert", True), ("CSV flat", "sbench export --style flat", True),
-                ("CSV Iometer", "sbench export --style iometer", False), ("HTML-Bericht", "eigenständig, Diagramme als PNG", True),
+        self.fmt_desc = {}
+        fmts = (("JSON", "sb-result/1 unverändert", True), ("CSV flat", "sbench export --style flat · inkl. CPU/RAM, partial/stopped_in", True),
+                ("CSV Iometer", "sbench export --style iometer · nur Storage", False), ("HTML-Bericht", "eigenständig, Diagramme als PNG", True),
                 ("PDF-Bericht", "A4 aus demselben HTML", False))
         self.fmt = {}
         for i, (n, d, on) in enumerate(fmts):
-            cb = QCheckBox(n); cb.setChecked(on); g.addWidget(cb, i, 0); g.addWidget(label(d, "dim"), i, 1); self.fmt[n] = cb
+            cb = QCheckBox(n); cb.setChecked(on); g.addWidget(cb, i, 0); self.fmt[n] = cb
+            dl = ElideLabel(d, "dim"); g.addWidget(dl, i, 1); self.fmt_desc[n] = dl
         g.setColumnStretch(1, 1)
-        fc.add(g); mid.addWidget(fc)
+        fc.add(g)
+        # contract 1.3: the Iometer CSV omits cpu/memory tests by design (Iometer has no such columns). The hint replaces the
+        # Iometer description in place: an extra line would squeeze the support card at 1280x720
+        self.iom_hint = self.fmt_desc["CSV Iometer"]
+        self.fmt["CSV Iometer"].toggled.connect(self._preview)
+        mid.addWidget(fc)
         oc = Card("Optionen")
         g2 = QGridLayout(); g2.setHorizontalSpacing(16); g2.setVerticalSpacing(10)
-        for i, (n, on) in enumerate((("Zeitreihen (1 s)", True), ("Latenz-Histogramm", True),
+        for i, (n, on) in enumerate((("Zeitreihen", True), ("Latenz-Histogramm", True),
                                      ("Systeminfo (meta)", True), ("Anonymisieren", False))):
             cb = QCheckBox(n); cb.setChecked(on); g2.addWidget(cb, i // 2, i % 2)
+            if n == "Zeitreihen":
+                self.ts_cb = cb
             if n == "Anonymisieren":
                 cb.setToolTip("Hostnamen, Benutzer in Pfaden, IP-/MAC-Adressen, Seriennummern im Bericht durch Pseudonyme ersetzen")
         oc.add(g2)
@@ -136,3 +146,17 @@ class ExportPage(QWidget):
     def _preview(self, *_):
         sel = [r for i, (f, r) in enumerate(self.results) if self.list.item(i).checkState() == Qt.Checked]
         self.preview.setHtml(build_html(sel, compact=True))
+        # contract 1.3: timeseries has one point per tick (--tick-ms, result field tick_ms), not a fixed 1 s
+        ticks = sorted({r.get("tick_ms") for r in sel if r.get("tick_ms")})
+        txt = "Zeitreihen (je Tick: " + ", ".join(f"{t} ms" for t in ticks) + ")" if ticks else "Zeitreihen (je Tick)"
+        self.ts_cb.setText(txt)
+        self.ts_cb.setToolTip("Ein Punkt je tick-Event (--tick-ms); Kerne < 1.3 ohne tick_ms: 1 s")
+        ncomp = sum(len(compute_tests(r)) for r in sel)
+        full = (f"Das Iometer-CSV enthält nur Storage-Tests: {ncomp} CPU/RAM-Test(s) der Auswahl fehlen dort (gewollt, Iometer kennt "
+                "keine solchen Spalten). Für CPU/RAM CSV flat, JSON oder den HTML-Bericht nutzen.")
+        on = self.fmt["CSV Iometer"].isChecked()
+        self.iom_hint.setText(f"⚠ nur Storage · {ncomp} CPU/RAM-Test(s) fehlen (gewollt)" if ncomp and on else
+                              ("sbench export --style iometer · nur Storage (CPU/RAM fehlen gewollt)" if ncomp else
+                               "sbench export --style iometer · nur Storage"))
+        self.iom_hint.setStyleSheet(f"color: {T.AMBER};" if ncomp and on else "")
+        self.iom_hint.setToolTip(full if ncomp else "Iometer-kompatibles CSV; CPU/RAM-Tests sind dort nicht enthalten")

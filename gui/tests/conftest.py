@@ -63,3 +63,39 @@ def local_job(src, tmp, **test0):
     out = tmp / ("job-" + os.path.basename(src))
     out.write_text(json.dumps(job), encoding="utf-8")
     return str(out)
+
+
+def _close_widgets():
+    """Close and delete leftover top-level widgets (live view, results pages, pyqtgraph plots) and their timers while
+    the QApplication still exists, so interpreter finalization does not tear down Qt objects in random order."""
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance()
+    if app is None:
+        return
+    for w in QApplication.topLevelWidgets():
+        w.close(); w.deleteLater()
+    for _ in range(3):
+        app.processEvents()
+
+
+def pytest_sessionfinish(session, exitstatus):
+    session.config._sb_exitstatus = int(exitstatus)
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_unconfigure(config):
+    """Windows CI: all tests pass and the junit XML is written, but the process then dies with an access violation while
+    Windows unloads the Qt DLLs at process exit (seen even inside os._exit, faulthandler trace in run 39579246514) and
+    python reports exit code 1. Clean up the Qt objects explicitly and, on Windows, end the process with pytest's own
+    exit status via TerminateProcess, which skips the DLL detach handlers (reports are already written here)."""
+    import faulthandler
+    st = getattr(config, "_sb_exitstatus", None)
+    faulthandler.enable(file=sys.__stderr__, all_threads=True)   # any other teardown crash shows up in the CI log
+    _close_widgets()
+    if sys.platform == "win32" and st is not None:
+        import ctypes
+        sys.stdout.flush(); sys.stderr.flush(); sys.__stdout__.flush(); sys.__stderr__.flush()
+        k32 = ctypes.windll.kernel32
+        k32.GetCurrentProcess.restype = ctypes.c_void_p
+        k32.TerminateProcess(ctypes.c_void_p(k32.GetCurrentProcess()), int(st))
+        os._exit(st)                                              # not reached

@@ -1,13 +1,15 @@
 import json, logging, os, tempfile
 from PySide6.QtCore import Qt, Signal, QDir
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QListWidgetItem, QLineEdit, QSpinBox,
-                               QComboBox, QPlainTextEdit, QAbstractItemView, QMenu, QFileDialog, QFrame, QMessageBox)
+                               QComboBox, QPlainTextEdit, QAbstractItemView, QMenu, QFileDialog, QFrame, QStackedWidget, QCheckBox,
+                               QMessageBox)
 from PySide6.QtGui import QColor
 from ..widgets import Card, label, chip, table, add_row, listw, short_target, Responsive, WrapLabel, ClickChip
 from ..target_picker import TargetPicker, candidates, empty_message
 from ..issue_popup import IssuePopup
 from ..issues import parse_path
-from ..model import derived_spec_label, derived_test_label, check_schema, destructive_targets
+from ..model import (derived_spec_label, derived_test_label, check_schema, destructive_targets, test_label, size_bytes, size_str,
+                     human_bytes, WORKLOADS, MEM_OPS, SIMD)
 from ..overlay import DestructiveConfirm, ElevationOffer, IcfImportResult
 from .. import theme as T, sbench
 
@@ -20,20 +22,53 @@ NEW_PROFILE = {"schema": "sb-job/1", "name": "Neues Profil", "tests": [{
     "type": "storage", "name": "4K Random Read", "targets": [{"path": None, "kind": "file", "file_size": "1GiB"}],
     "workers": 4, "queue_depth": 32, "warmup_s": 2, "duration_s": 10, "cache": "unbuffered",
     "access_specs": [{"weight": 100, "block_size": "4KiB", "read_pct": 100, "random_pct": 100, "align": "4KiB"}]}]}
+TARGETS_ONLY_STORAGE = "Ziele gibt es nur bei Storage-Tests – oben einen Storage-Test wählen"
+
+# Contract 1.2 (sb-job/1 test_cpu / test_memory): presets = the typical M2 measurements (cf. jobs/abnahme-m2/*.json).
+# Each preset is a complete set of job fields of that test type (name excluded); "needs_numa" presets need >= 2 nodes.
+CPU_PRESETS = [
+    ("CPU 1 Thread · int", {"threads": 1, "workload": "int", "warmup_s": 1, "duration_s": 10}),
+    ("CPU alle Threads · mixed", {"threads": 0, "workload": "mixed", "warmup_s": 2, "duration_s": 30}),
+    ("CPU alle Threads · float", {"threads": 0, "workload": "float", "warmup_s": 2, "duration_s": 30}),
+    ("CPU alle Threads · crypto (SHA-256)", {"threads": 0, "workload": "crypto", "warmup_s": 2, "duration_s": 30}),
+    ("CPU 1 Thread · mixed", {"threads": 1, "workload": "mixed", "warmup_s": 1, "duration_s": 10}),
+]
+MEM_PRESETS = [
+    ("RAM-Bandbreite lesen · alle Threads", {"mode": "bandwidth", "op": "read", "threads": 0, "buffer_size": "512MiB", "warmup_s": 1, "duration_s": 10}),
+    ("RAM-Bandbreite schreiben NT · alle Threads", {"mode": "bandwidth", "op": "write", "threads": 0, "buffer_size": "512MiB", "nontemporal": True,
+                                                   "warmup_s": 1, "duration_s": 10}),
+    ("RAM copy · alle Threads", {"mode": "bandwidth", "op": "copy", "threads": 0, "buffer_size": "512MiB", "warmup_s": 1, "duration_s": 10}),
+    ("RAM-Bandbreite 1 Thread", {"mode": "bandwidth", "op": "read", "threads": 1, "buffer_size": "1GiB", "warmup_s": 1, "duration_s": 10}),
+    ("RAM-Latenz (1 GiB)", {"mode": "latency", "buffer_size": "1GiB", "warmup_s": 1, "duration_s": 10}),
+    ("Cache-Latenz L1 (16 KiB)", {"mode": "latency", "buffer_size": "16KiB", "warmup_s": 1, "duration_s": 5}),
+    ("NUMA remote: Latenz Knoten 0 → RAM 1", {"mode": "latency", "buffer_size": "1GiB", "numa_node": 0, "mem_node": 1, "warmup_s": 1,
+                                              "duration_s": 10, "needs_numa": True}),
+    ("NUMA remote: Bandbreite Knoten 0 → RAM 1", {"mode": "bandwidth", "op": "read", "threads": 0, "buffer_size": "512MiB", "numa_node": 0,
+                                                  "mem_node": 1, "warmup_s": 1, "duration_s": 10, "needs_numa": True}),
+]
+BUFFER_SIZES = ["16KiB", "256KiB", "1MiB", "32MiB", "256MiB", "512MiB", "1GiB", "2GiB", "4GiB"]
+COMPUTE_KEYS = ("threads", "workload", "mode", "op", "buffer_size", "simd", "nontemporal", "numa_node", "mem_node")
+
+
+def preset_test(kind, idx=0):
+    """New cpu/memory test from a preset (job fields only)."""
+    name, fields = (CPU_PRESETS if kind == "cpu" else MEM_PRESETS)[idx]
+    return {"type": kind, "name": name, **{k: v for k, v in fields.items() if k != "needs_numa"}}
 
 
 class ProfileEditor(QWidget):
     run_requested = Signal(str, dict)  # job path, {"elevated": bool, "allow_destructive": bool}
 
-    def __init__(self, profiles_dirs, elevated=False):
+    def __init__(self, profiles_dirs, elevated=False, numa_nodes=None):
         super().__init__(); self.setObjectName("page")
         self.dirs = profiles_dirs; self.user_dir = profiles_dirs[-1]; self.job = None; self.elevated = elevated; self.last = None
-        self.ti = 0; self._validated = None
+        self.numa_nodes = [n for n in (numa_nodes or []) if isinstance(n, dict)]; self.ti = 0; self._validated = None
         self.info_provider = None      # MainWindow: callable -> sb-info/1 (volumes/disks for + Volume / + Disk)
         v = QVBoxLayout(self); v.setContentsMargins(28, 24, 28, 24); v.setSpacing(16)
         hdr = QHBoxLayout(); tv = QVBoxLayout(); tv.setSpacing(2)
         self.title = label("Testprofil: Storage", "h1", wrap=True); tv.addWidget(self.title)
-        tv.addWidget(label("Iometer-artig: gewichtete Access Specs, Worker × Queue Depth, Warmup und Messdauer (sb-job/1)", "muted", wrap=True))
+        self.title_sub = label("Iometer-artig: gewichtete Access Specs, Worker × Queue Depth, Warmup und Messdauer (sb-job/1)", "muted", wrap=True)
+        tv.addWidget(self.title_sub)
         hdr.addLayout(tv, 1)
         self.valid_chip = ClickChip("nicht geprüft"); self.valid_chip.setToolTip("Klicken: Liste der Fehler/Warnungen (bzw. jetzt prüfen)")
         self.valid_chip.clicked.connect(self.show_issue_popup); hdr.addWidget(self.valid_chip); hdr.addSpacing(6)
@@ -44,22 +79,39 @@ class ProfileEditor(QWidget):
 
         left = Card("Gespeicherte Profile"); left.setMinimumHeight(150)
         self.list = listw(); left.add(self.list, 1)
-        lb = QHBoxLayout(); bn = QPushButton("+ Neu"); bn.setToolTip("Neues Storage-Profil anlegen"); bn.clicked.connect(self.new_profile); lb.addWidget(bn)
+        lb = QHBoxLayout(); bn = QPushButton("+ Neu"); bn.setToolTip("Neues Storage-Profil anlegen (CPU/RAM-Tests mit »+ CPU« / »+ RAM«)")
+        bn.clicked.connect(self.new_profile); lb.addWidget(bn)
         bi = QPushButton("Import ▾"); m = QMenu(bi)
         m.addAction("Iometer-Profil importieren (.icf) …", self.import_icf_dialog)
         m.addAction("sb-job/1 importieren (.json) …", self.import_json_dialog)
         bi.setMenu(m); lb.addWidget(bi); left.add(lb)
 
         center = QWidget(); cv = QVBoxLayout(center); cv.setContentsMargins(0, 0, 0, 0); cv.setSpacing(14)
-        # a profile can hold several storage tests (Four Corners: 5); the editor shows one at a time
-        self.test_box = QComboBox(); self.test_box.setMinimumWidth(160); self.test_box.currentIndexChanged.connect(self._select_test)
-        self.test_hint = label("", "dim")
+        # tests of the profile (a job can mix storage, cpu and memory tests; contract 1.2)
+        self.test_box = QComboBox(); self.test_box.setMinimumWidth(160)
+        self.test_box.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon); self.test_box.setMinimumContentsLength(16)
+        self.test_box.currentIndexChanged.connect(self._select_test)
+        b_cpu = QPushButton("+ CPU"); b_cpu.setToolTip("CPU-Test hinzufügen (Vorlage wählbar)"); b_cpu.clicked.connect(lambda: self.add_test("cpu"))
+        b_mem = QPushButton("+ RAM"); b_mem.setToolTip("Arbeitsspeicher-Test hinzufügen (Bandbreite oder Latenz)"); b_mem.clicked.connect(lambda: self.add_test("memory"))
+        self.b_del = QPushButton("Test entfernen"); self.b_del.setToolTip("Ausgewählten Test aus dem Profil entfernen")
+        self.b_del.clicked.connect(self.remove_test)
         tsc = Card(margins=12); th = QHBoxLayout(); th.setSpacing(8)
-        th.addWidget(label("Test", "muted")); th.addWidget(self.test_box, 1); th.addWidget(self.test_hint); tsc.add(th); cv.addWidget(tsc)
-        self.b_file = QPushButton("+ Datei"); self.b_file.setToolTip("Testdatei als Ziel wählen"); self.b_file.clicked.connect(lambda: self.add_target("file"))
-        self.b_vol = QPushButton("+ Volume"); self.b_vol.setToolTip("Volume (\\\\.\\X:) aus sbench info wählen"); self.b_vol.clicked.connect(lambda: self.add_target("volume"))
-        self.b_disk = QPushButton("+ Disk"); self.b_disk.setToolTip("Physische Disk aus sbench info wählen"); self.b_disk.clicked.connect(lambda: self.add_target("physical"))
-        self.b_tdel = QPushButton("Entfernen"); self.b_tdel.setToolTip("Ausgewähltes Ziel entfernen"); self.b_tdel.clicked.connect(self.remove_target)
+        th.addWidget(label("Test", "muted")); th.addWidget(self.test_box, 1); th.addWidget(b_cpu); th.addWidget(b_mem); th.addWidget(self.b_del)
+        tsc.add(th); cv.addWidget(tsc)
+        self.editor_stack = QStackedWidget(); cv.addWidget(self.editor_stack, 1)
+        storage_w = QWidget(); sv_ = QVBoxLayout(storage_w); sv_.setContentsMargins(0, 0, 0, 0); sv_.setSpacing(14)
+        self.editor_stack.addWidget(storage_w)
+        self.editor_stack.addWidget(self._build_compute_form())
+        cv = sv_
+        self.storage_w = storage_w
+        self.b_file = QPushButton("+ Datei"); self.b_file.clicked.connect(lambda: self.add_target("file"))
+        self.b_vol = QPushButton("+ Volume"); self.b_vol.clicked.connect(lambda: self.add_target("volume"))
+        self.b_disk = QPushButton("+ Disk"); self.b_disk.clicked.connect(lambda: self.add_target("physical"))
+        self.b_tdel = QPushButton("Entfernen"); self.b_tdel.clicked.connect(self.remove_target)
+        self.target_btns = {self.b_file: "Testdatei als Ziel wählen", self.b_vol: "Volume (\\\\.\\X:) aus sbench info wählen",
+                            self.b_disk: "Physische Disk aus sbench info wählen", self.b_tdel: "Ausgewähltes Ziel entfernen"}
+        for b, tip in self.target_btns.items():
+            b.setToolTip(tip)
         tc = Card("Ziele", "Worker i → Ziel (i mod Anzahl)", right=[self.b_file, self.b_vol, self.b_disk, self.b_tdel])
         self.targets = table(["Pfad", "Art", "Größe", "Worker", "Hinweis"], stretch_col=0)
         self.targets.setFixedHeight(32 * 3 + 36); tc.add(self.targets); cv.addWidget(tc)
@@ -82,13 +134,14 @@ class ProfileEditor(QWidget):
         self.name_edit = QLineEdit(); self.name_edit.textChanged.connect(self._changed)
         g.addWidget(label("Testname", "muted"), 0, 0); g.addWidget(self.name_edit, 0, 1)
         self.f = {}
+        self.f_lbl = {}
         for i, (k, lab) in enumerate((("workers", "Worker"), ("queue_depth", "Queue Depth/Worker"), ("cache", "Cache-Modus"),
                                       ("warmup_s", "Warmup (s)"), ("duration_s", "Messdauer (s)"), ("tick", "Tick-Intervall (ms)")), 1):
             if k == "cache":
                 w = QComboBox(); w.addItems(["unbuffered", "buffered", "writethrough"]); w.currentIndexChanged.connect(self._changed)
             else:
                 w = QSpinBox(); w.setRange(1 if k != "warmup_s" else 0, 100000); w.setAlignment(Qt.AlignRight); w.valueChanged.connect(self._changed)
-            self.f[k] = w; g.addWidget(label(lab, "muted"), i, 0); g.addWidget(w, i, 1)
+            self.f[k] = w; self.f_lbl[k] = label(lab, "muted"); g.addWidget(self.f_lbl[k], i, 0); g.addWidget(w, i, 1)
         self.f["queue_depth"].setMaximum(1024); self.f["tick"].setRange(100, 10000); self.f["tick"].setValue(250)
         rc.add(g)
         self.outstanding = label("", "dim", wrap=True); rc.add(self.outstanding)
@@ -145,7 +198,7 @@ class ProfileEditor(QWidget):
             self.import_icf(p)
 
     def import_icf(self, icf_path):
-        """M2: `sbench import-icf <f> --out <job>`; shows W_ICF_UNSUPPORTED warnings, user decides to keep it."""
+        """M2: `sbench import-icf <f> --out <job>`; shows W_ICF_* warnings (German texts: model.WARN_TXT), user decides to keep it."""
         out = os.path.join(tempfile.gettempdir(), "sbench-gui-import.json")
         code, res = sbench.import_icf(icf_path, out)
         job = json.load(open(out, encoding="utf-8")) if code == 0 and os.path.exists(out) else None
@@ -192,16 +245,16 @@ class ProfileEditor(QWidget):
     def load(self, path, ti=None):
         with open(path, encoding="utf-8") as f:
             self.job = check_schema(json.load(f), "sb-job/1")
-        st = self.storage_indices()
-        if not st:
-            raise ValueError(f"{os.path.basename(path)}: kein Storage-Test im Profil")
-        self.ti = ti if ti in st else st[0]
+        tests = self.job["tests"]
+        self.ti = ti if isinstance(ti, int) and 0 <= ti < len(tests) else next((i for i, t in enumerate(tests) if t["type"] == "storage"), 0)
         self.title.setText(f"Testprofil: {self.job.get('name', os.path.basename(path))}")
         self._reset_validation()
         self._load_test()
 
     def open_profile(self, stem, ti=None):
         """Dashboard quick start: select the profile whose file name contains `stem` (optionally test index ti)."""
+        if self.list.count() == 0:
+            self._load_list()
         for i in range(self.list.count()):
             path = self.list.item(i).data(Qt.UserRole) or ""
             if stem in os.path.basename(path):
@@ -213,26 +266,98 @@ class ProfileEditor(QWidget):
         return [i for i, t in enumerate((self.job or {}).get("tests", [])) if t.get("type") == "storage"]
 
     def _fill_test_box(self):
-        st = self.storage_indices()
         self.test_box.blockSignals(True); self.test_box.clear()
-        for i in st:
-            t = self.job["tests"][i]
-            self.test_box.addItem(f"{i + 1}. {t.get('name') or derived_test_label({**t, 'name': None})}", i)
-        self.test_box.setCurrentIndex(st.index(self.ti)); self.test_box.blockSignals(False)
-        self.test_box.setEnabled(len(st) > 1)
-        n = len(self.job["tests"])
-        self.test_hint.setText((f"{len(st)} Storage-Test{'s' if len(st) != 1 else ''} im Profil") if n == len(st) else f"{len(st)} von {n} Tests editierbar (Storage)")
+        for i, t in enumerate(self.job["tests"]):
+            kind = {"storage": "Storage", "cpu": "CPU", "memory": "RAM"}.get(t["type"], t["type"])
+            self.test_box.addItem(f"{i + 1}. {kind} · {test_label(t)}", i)
+        self.test_box.setCurrentIndex(self.ti); self.test_box.blockSignals(False)
+        self.test_box.setEnabled(len(self.job["tests"]) > 1)
+        self.b_del.setEnabled(len(self.job["tests"]) > 1)
+        storage = self.job["tests"][self.ti]["type"] == "storage"
+        for b, tip in self.target_btns.items():      # targets exist only for storage tests (the card is hidden for cpu/memory)
+            b.setEnabled(storage); b.setToolTip(tip if storage else TARGETS_ONLY_STORAGE)
 
     def _select_test(self, i):
-        ti = self.test_box.itemData(i)
-        if not self.job or ti is None or ti == self.ti:
+        if not self.job or i < 0 or i == self.ti:
             return
         self.job = self.to_job()          # keep the edits of the current test
-        self.ti = ti; self._load_test()
+        self.ti = i; self._load_test()
+
+    def add_test(self, kind, preset=0):
+        """+ CPU / + RAM: append a contract-1.2 test from a preset and edit it."""
+        if not self.job:
+            QMessageBox.information(self, "Test hinzufügen", "Bitte zuerst links ein Profil wählen oder mit »+ Neu« anlegen."); return None
+        self.job = self.to_job(); self.job["tests"].append(preset_test(kind, preset))
+        self.ti = len(self.job["tests"]) - 1; self._reset_validation(); self._load_test()
+        return self.job["tests"][self.ti]
+
+    def remove_test(self):
+        if self.job and len(self.job["tests"]) > 1:
+            self.job = self.to_job(); removed = self.job["tests"].pop(self.ti)
+            self.ti = min(self.ti, len(self.job["tests"]) - 1); self._reset_validation(); self._load_test()
+            return removed
+        return None
+
+    def click_prepare(self, b):
+        """Click smoke test (clicktest.py): before a button of the storage or cpu/memory editor is pressed, select a test of
+        that kind (adds one from a preset when the profile has none), so every editor button is really exercised."""
+        if not self.job:
+            return
+        tests = self.job["tests"]
+        w = b
+        while w is not None and w is not self:
+            if w is self.storage_w:
+                if tests[self.ti]["type"] != "storage" and self.storage_indices():
+                    self.test_box.setCurrentIndex(self.storage_indices()[0])
+                return
+            if w is self.cc:
+                if tests[self.ti]["type"] not in ("cpu", "memory"):
+                    ci = next((i for i, t in enumerate(tests) if t["type"] in ("cpu", "memory")), None)
+                    self.test_box.setCurrentIndex(ci) if ci is not None else self.add_test("cpu")
+                return
+            w = w.parentWidget()
+
+    def open_quick(self, kind):
+        """Dashboard quick start CPU/RAM: open the M2 profile on its first test of that type."""
+        for i in range(self.list.count()):
+            path = self.list.item(i).data(Qt.UserRole)
+            if path and os.path.basename(path) == "cpu-ram.json":
+                self.list.blockSignals(True); self.list.setCurrentRow(i); self.list.blockSignals(False)
+                self.load(path)
+                ti = next((j for j, t in enumerate(self.job["tests"]) if t["type"] == kind), None)
+                if ti is not None:
+                    self.test_box.setCurrentIndex(ti)
+                return True
+        return False
+
+    def is_compute(self):
+        return bool(self.job) and self.job["tests"][self.ti]["type"] in ("cpu", "memory")
 
     def _load_test(self):
         self._fill_test_box()
         t = self.job["tests"][self.ti]
+        comp = t["type"] in ("cpu", "memory")
+        if t["type"] not in ("storage", "cpu", "memory"):
+            comp = True     # net_* / hyperv_info: not editable here, shown read-only in the JSON
+        self.editor_stack.setCurrentIndex(1 if comp else 0)
+        for k in ("workers", "queue_depth", "cache"):
+            self.f[k].setVisible(not comp); self.f_lbl[k].setVisible(not comp)
+        self.title_sub.setText("Iometer-artig: gewichtete Access Specs, Worker × Queue Depth, Warmup und Messdauer (sb-job/1)" if not comp else
+                               "CPU/RAM (Vertrag 1.2): Threads fest auf logische Prozessoren gebunden, NUMA-Knoten wählbar (sb-job/1)")
+        for w in list(self.f.values()) + [self.name_edit]:
+            w.blockSignals(True)
+        self.name_edit.setText(t.get("name", "")); self.name_edit.setCursorPosition(0); self.name_edit.setPlaceholderText(derived_test_label({**t, "name": None}))
+        self.f["warmup_s"].setValue(int(t.get("warmup_s", 1 if comp else 0))); self.f["duration_s"].setValue(int(t.get("duration_s", 1) or 1))
+        for w in list(self.f.values()) + [self.name_edit]:
+            w.blockSignals(False)
+        if comp:
+            self._fill_compute(t)
+            if self.last is not None:      # the check result belongs to the whole job: keep it when switching tests
+                self.show_validation(self.last)
+            else:
+                self._show_issues(None)
+            self._changed()
+            return
         self._fill_targets(t)
         self.specs.blockSignals(True); self.specs.setRowCount(0)
         for s in t["access_specs"]:
@@ -241,7 +366,6 @@ class ProfileEditor(QWidget):
         self.specs.blockSignals(False)
         for w in list(self.f.values()) + [self.name_edit]:
             w.blockSignals(True)
-        self.name_edit.setText(t.get("name", "")); self.name_edit.setCursorPosition(0); self.name_edit.setPlaceholderText(derived_test_label({**t, "name": None}))
         for k in ("workers", "queue_depth", "warmup_s", "duration_s"):
             self.f[k].setValue(int(t.get(k, 0 if k == "warmup_s" else 1)))
         self.f["cache"].setCurrentText(t.get("cache", "unbuffered"))
@@ -279,11 +403,21 @@ class ProfileEditor(QWidget):
                 return True
         return any(e.get("code") == "E_TARGET_NOT_FOUND" and parse_path(e.get("path"))["test"] == self.ti for e in (self.last or {}).get("errors", []))
 
+    def _storage_test(self, title):
+        """Current test if it is a storage test; otherwise a message (cpu/memory tests have no targets) and None."""
+        if not self.job:
+            QMessageBox.information(self, title, "Bitte zuerst links ein Profil wählen oder mit »+ Neu« anlegen."); return None
+        t = self.job["tests"][self.ti]
+        if t["type"] != "storage":
+            QMessageBox.information(self, title, TARGETS_ONLY_STORAGE + "."); return None
+        return t
+
     def add_target(self, kind):
         """+ Datei: file dialog, + Volume / + Disk: list from sbench info. Always visible: dialog, picker or message."""
-        if not self.job:
-            QMessageBox.information(self, "Ziele", "Bitte zuerst links ein Profil wählen oder mit »+ Neu« anlegen."); return None
-        t = self.job["tests"][self.ti]; items = (); path = ""; size = "16GiB"
+        t = self._storage_test("Ziele")
+        if t is None:
+            return None
+        items = (); path = ""; size = "16GiB"
         if kind == "file":
             cur = next((x for x in t.get("targets", []) if x.get("kind") == "file"), None)
             if cur:
@@ -315,15 +449,16 @@ class ProfileEditor(QWidget):
             elif not any(x.get("path", "").lower() == tg["path"].lower() for x in t["targets"]):
                 t["targets"].append(dict(tg))
         self.job = job; self._reset_validation(); self._load_test()
-        row = next((r for r, x in enumerate(self.job["tests"][self.ti]["targets"]) if x["path"] == tg["path"]), -1)
+        row = next((r for r, x in enumerate(self.job["tests"][self.ti].get("targets", [])) if x["path"] == tg["path"]), -1)
         if row >= 0:
             self.targets.selectRow(row)
         return tg
 
     def remove_target(self):
-        if not self.job:
+        t = self._storage_test("Ziel entfernen")
+        if t is None:
             return None
-        r = self.targets.currentRow(); tgs = self.job["tests"][self.ti]["targets"]
+        r = self.targets.currentRow(); tgs = t["targets"]
         if r < 0 or r >= len(tgs):
             QMessageBox.information(self, "Ziel entfernen", "Bitte zuerst ein Ziel in der Tabelle auswählen."); return None
         if len(tgs) == 1:
@@ -334,7 +469,7 @@ class ProfileEditor(QWidget):
 
     # ------------------------------------------------------------------ access specs (+ Spec / Duplizieren)
     def add_spec(self):
-        if not self.job:
+        if self._storage_test("Access Spec") is None:
             return None
         job = self.to_job(); specs = job["tests"][self.ti]["access_specs"]
         tot = sum(s.get("weight", 0) for s in specs if isinstance(s.get("weight"), int))
@@ -342,7 +477,7 @@ class ProfileEditor(QWidget):
         self.job = job; self._load_test(); self.specs.setCurrentCell(len(specs) - 1, 1); return specs[-1]
 
     def dup_spec(self):
-        if not self.job:
+        if self._storage_test("Access Spec") is None:
             return None
         job = self.to_job(); specs = job["tests"][self.ti]["access_specs"]
         if not specs:
@@ -354,6 +489,139 @@ class ProfileEditor(QWidget):
             cp["name"] = f"{cp['name']} (Kopie)"
         specs.insert(r + 1, cp)
         self.job = job; self._load_test(); self.specs.setCurrentCell(r + 1, 1); return cp
+
+    # ------------------------------------------------------------------ cpu / memory form (contract 1.2)
+    def _build_compute_form(self):
+        self.cc = Card("CPU-Test", "sb-job/1 · test_cpu", margins=14)
+        g = QGridLayout(); g.setHorizontalSpacing(12); g.setVerticalSpacing(8); g.setColumnStretch(1, 1); g.setColumnStretch(3, 1)
+        self.cf, self.cf_lbl = {}, {}
+        self.preset = QComboBox(); self.preset.activated.connect(self._apply_preset)
+        g.addWidget(label("Vorlage", "muted"), 0, 0); g.addWidget(self.preset, 0, 1, 1, 3)
+
+        def add(key, text, w, row, col):
+            self.cf[key] = w; self.cf_lbl[key] = label(text, "muted")
+            g.addWidget(self.cf_lbl[key], row, col * 2); g.addWidget(w, row, col * 2 + 1)
+        wl = QComboBox(); wl.addItems(list(WORKLOADS)); add("workload", "Workload", wl, 1, 0)
+        md = QComboBox(); md.addItem("Bandbreite", "bandwidth"); md.addItem("Latenz", "latency"); add("mode", "Modus", md, 1, 0)
+        op = QComboBox(); op.addItems(list(MEM_OPS)); add("op", "Operation", op, 1, 1)
+        th = QSpinBox(); th.setRange(0, 4096); th.setSpecialValueText("alle"); th.setAlignment(Qt.AlignRight); add("threads", "Threads", th, 2, 0)
+        bs = QComboBox(); bs.setEditable(True); bs.addItems(BUFFER_SIZES); add("buffer_size", "Puffer/Thread", bs, 2, 1)
+        sm = QComboBox(); sm.addItems(list(SIMD)); add("simd", "Befehlssatz", sm, 3, 0)
+        nt = QCheckBox("Non-temporal Stores"); nt.setToolTip("Streaming Stores an den Caches vorbei (nur write/copy, nur x64)"); add("nontemporal", "", nt, 3, 1)
+        nn = QComboBox(); nn.addItem("alle Knoten", None)
+        mn = QComboBox(); mn.addItem("lokal (Knoten des Threads)", None)
+        for n in self.numa_nodes:
+            nn.addItem(f"Knoten {n['id']} · {len(n.get('cpus') or [])} CPUs", n["id"])
+            mn.addItem(f"Knoten {n['id']} · {human_bytes(n.get('ram_bytes', 0))}", n["id"])
+        add("numa_node", "NUMA (Threads)", nn, 4, 0); add("mem_node", "NUMA (Puffer)", mn, 4, 1)
+        for w in self.cf.values():
+            (w.toggled if isinstance(w, QCheckBox) else w.valueChanged if isinstance(w, QSpinBox) else w.currentIndexChanged).connect(self._changed)
+        bs.editTextChanged.connect(self._changed)
+        self.cc.add(g)
+        self.c_hint = WrapLabel("", "dim"); self.cc.add(self.c_hint)
+        self.cc.lay.addStretch(1)
+        return self.cc
+
+    def _fill_compute(self, t):
+        cpu = t["type"] == "cpu"
+        self.cc.title_label.setText("CPU-Test" if cpu else "Arbeitsspeicher-Test")
+        self.cc.subtitle_label.setText("sb-job/1 · test_cpu · Score = ops/s ÷ Referenz-Thread × 1000" if cpu
+                                       else "sb-job/1 · test_memory · Bandbreite (GB/s) oder Latenz (ns)")
+        for w in self.cf.values():
+            w.blockSignals(True)
+        self.preset.clear(); self.preset.addItem("– Vorlage übernehmen –", None)
+        for i, (n, f) in enumerate(CPU_PRESETS if cpu else MEM_PRESETS):
+            if not f.get("needs_numa") or len(self.numa_nodes) > 1:
+                self.preset.addItem(n, i)
+        c = self.cf
+        if t["type"] not in ("cpu", "memory"):
+            for w in c.values():
+                w.blockSignals(False)
+            return
+        c["workload"].setCurrentText(t.get("workload", "mixed"))
+        c["mode"].setCurrentIndex(1 if t.get("mode") == "latency" else 0)
+        c["op"].setCurrentText(t.get("op", "read"))
+        c["threads"].setValue(int(t.get("threads", 0)))
+        c["buffer_size"].setEditText(str(t.get("buffer_size", "512MiB")))
+        c["simd"].setCurrentText(t.get("simd", "auto"))
+        c["nontemporal"].setChecked(bool(t.get("nontemporal")))
+        for k in ("numa_node", "mem_node"):
+            i = c[k].findData(t.get(k)) if k in t else 0
+            if i < 0:            # node from the profile is not on this machine: keep it (validate reports E_NUMA_NODE)
+                c[k].addItem(f"Knoten {t[k]} (nicht vorhanden)", t[k]); i = c[k].count() - 1
+            c[k].setCurrentIndex(i)
+        for w in c.values():
+            w.blockSignals(False)
+        for k in ("workload",):
+            c[k].setVisible(cpu); self.cf_lbl[k].setVisible(cpu)
+        for k in ("mode", "op", "buffer_size", "simd", "nontemporal", "mem_node"):
+            c[k].setVisible(not cpu); self.cf_lbl[k].setVisible(not cpu)
+        self._compute_enable()
+
+    def _compute_enable(self):
+        c = self.cf; lat = c["mode"].currentData() == "latency"
+        for k in ("op", "simd", "threads"):
+            c[k].setEnabled(not lat)
+        c["nontemporal"].setEnabled(not lat and c["op"].currentText() != "read")
+        if c["mem_node"].count() < 2 and c["numa_node"].count() < 2:
+            c["numa_node"].setToolTip("nur ein NUMA-Knoten"); c["numa_node"].setEnabled(False); c["mem_node"].setEnabled(False)
+
+    def _apply_preset(self, i):
+        idx = self.preset.itemData(i)
+        if idx is None or not self.job:
+            return
+        t = self.job["tests"][self.ti]
+        new = preset_test(t["type"], idx)
+        self.job = self.to_job(); self.job["tests"][self.ti] = new
+        self._reset_validation(); self._load_test()
+
+    def _compute_test(self, t):
+        """Form -> cpu/memory test dict (only fields the 1.2 schema allows; defaults omitted where optional)."""
+        c = self.cf; out = {"type": t["type"]}
+        if self.name_edit.text().strip():
+            out["name"] = self.name_edit.text().strip()
+        lat = t["type"] == "memory" and c["mode"].currentData() == "latency"
+        if t["type"] == "cpu":
+            out.update(threads=c["threads"].value(), workload=c["workload"].currentText())
+        else:
+            out["mode"] = c["mode"].currentData()
+            if not lat:
+                out.update(op=c["op"].currentText(), threads=c["threads"].value())
+            txt = c["buffer_size"].currentText().strip()
+            try:
+                out["buffer_size"] = size_str(size_bytes(int(txt) if txt.isdigit() else txt))
+            except ValueError:
+                out["buffer_size"] = txt                 # invalid -> sbench validate reports E_SCHEMA at /buffer_size
+            if not lat and c["simd"].currentText() != "auto":
+                out["simd"] = c["simd"].currentText()
+            if not lat and c["nontemporal"].isChecked() and c["op"].currentText() != "read":
+                out["nontemporal"] = True
+        out["warmup_s"] = self.f["warmup_s"].value(); out["duration_s"] = self.f["duration_s"].value()
+        if c["numa_node"].currentData() is not None:
+            out["numa_node"] = c["numa_node"].currentData()
+        if t["type"] == "memory" and c["mem_node"].currentData() is not None:
+            out["mem_node"] = c["mem_node"].currentData()
+        return out
+
+    def _logical_cpus(self, node=None):
+        nodes = [n for n in self.numa_nodes if node is None or n["id"] == node]
+        return sum(len(n.get("cpus") or []) for n in nodes) or None
+
+    def _compute_summary(self, t):
+        if t["type"] == "cpu":
+            n = t.get("threads", 0) or self._logical_cpus(t.get("numa_node"))
+            return (f"= {n or 'alle'} Thread(s), je einer pro logischem Prozessor (erst ein Thread je Kern, Knoten abwechselnd)  ·  "
+                    f"Gesamtdauer ca. {t.get('warmup_s', 1) + t['duration_s']} s")
+        try:
+            bs = size_bytes(t["buffer_size"])
+        except ValueError:
+            return "Puffergröße ungültig (z. B. 512MiB, 1GiB)"
+        n = 1 if t["mode"] == "latency" else (t.get("threads", 0) or self._logical_cpus(t.get("numa_node")))
+
+        def hb(b):
+            return human_bytes(b, "GiB" if b >= 1 << 30 else "MiB" if b >= 1 << 20 else "KiB")
+        tot = f"{hb(bs * n)} Puffer gesamt" if n else "Puffer gesamt: Threads × Puffer"
+        return f"= {n or 'alle'} Thread(s) × {hb(bs)}  =  {tot}  ·  Gesamtdauer ca. {t.get('warmup_s', 1) + t['duration_s']} s"
 
     def _fill_targets(self, t, issues=None):
         self.targets.setRowCount(0)
@@ -393,6 +661,24 @@ class ProfileEditor(QWidget):
     def _changed(self, *_):
         if not self.job:
             return
+        if self.is_compute():
+            self._compute_enable()
+            job = self.to_job(); t = job["tests"][self.ti]
+            if t["type"] in ("cpu", "memory"):
+                self.outstanding.setText(self._compute_summary(t))
+                lat = t["type"] == "memory" and t.get("mode") == "latency"
+                self.c_hint.setText(
+                    "Workload: int = Ganzzahl, float = Gleitkomma, crypto = SHA-256, mixed = alles gemischt. 0 Threads = alle "
+                    "logischen Prozessoren (des gewählten Knotens)." if t["type"] == "cpu" else
+                    ("Latenz misst immer mit 1 Thread (Pointer Chasing). Puffer ≫ L3-Cache = RAM-Latenz, 16 KiB = L1." if lat else
+                     "Puffer pro Thread; für RAM statt Cache deutlich größer als den L3-Cache wählen (256 MiB – 1 GiB). "
+                     "copy zählt gelesene + geschriebene Bytes. NUMA (Puffer) ≠ NUMA (Threads) misst remote."))
+                if self.test_box.currentIndex() >= 0:
+                    kind = "CPU" if t["type"] == "cpu" else "RAM"
+                    self.test_box.setItemText(self.ti, f"{self.ti + 1}. {kind} · {test_label(t)}")
+            self.json.setPlainText(json.dumps(job, indent=1, ensure_ascii=False))
+            self._check_stale(job)
+            return
         tot, parts = 0, []
         job = self.to_job()
         specs = job["tests"][self.ti]["access_specs"]
@@ -425,11 +711,18 @@ class ProfileEditor(QWidget):
         nw, qd = self.f["workers"].value(), self.f["queue_depth"].value()
         self.outstanding.setText(f"= {nw * qd} ausstehende I/Os gesamt ({nw} × {qd})  ·  Gesamtdauer ca. {self.f['warmup_s'].value() + self.f['duration_s'].value()} s")
         self.json.setPlainText(json.dumps(job, indent=1, ensure_ascii=False))
+        self._check_stale(job)
+
+    def _check_stale(self, job):
         if self.last is not None and self._validated is not None and _key(job) != self._validated:
             self._reset_validation("nicht geprüft (geändert)")
 
     def to_job(self):
         job = json.loads(json.dumps(self.job)); t = job["tests"][self.ti]
+        if t["type"] in ("cpu", "memory"):
+            job["tests"][self.ti] = self._compute_test(t); return job
+        if t["type"] != "storage":
+            return job
         specs = []
         for r in range(self.specs.rowCount()):
             d = {}
@@ -477,10 +770,10 @@ class ProfileEditor(QWidget):
         dlg.focus_requested.connect(self.focus_issue); dlg.open(); return dlg
 
     def focus_issue(self, ptr):
-        """Jump to the field of a validate pointer; returns the focused widget (or None)."""
+        """Jump to the field of a validate pointer (any test type); returns the focused widget (or None)."""
         d = parse_path(ptr)
-        if d["test"] is not None and d["test"] != self.ti and d["test"] in self.storage_indices():
-            self.test_box.setCurrentIndex(self.storage_indices().index(d["test"]))
+        if d["test"] is not None and d["test"] != self.ti and 0 <= d["test"] < self.test_box.count():
+            self.test_box.setCurrentIndex(d["test"])
         if d["test"] is not None and d["test"] != self.ti:
             return None
         if d["area"] == "targets" and d["index"] is not None and d["index"] < self.targets.rowCount():
@@ -491,7 +784,8 @@ class ProfileEditor(QWidget):
                 self.specs.setCurrentCell(d["index"], col)
             self.specs.setFocus(); return self.specs
         if d["area"] == "field":
-            w = self.f.get(d["field"]) or (self.name_edit if d["field"] == "name" else None)
+            w = self.f.get(d["field"]) or (self.cf.get(d["field"]) if self.is_compute() else None) or \
+                (self.name_edit if d["field"] == "name" else None)
             if w:
                 w.setFocus(); return w
         return None
@@ -524,7 +818,7 @@ class ProfileEditor(QWidget):
                 it = self.specs.item(r, c)
                 if it:
                     it.setForeground(QColor(T.TEXT)); it.setToolTip(""); f = it.font(); f.setBold(False); it.setFont(f)
-        for w in self.f.values():
+        for w in list(self.f.values()) + list(self.cf.values()):
             w.setProperty("invalid", False); w.style().polish(w)
         warns = res.get("warnings", [])
         if res["ok"]:
@@ -544,9 +838,12 @@ class ProfileEditor(QWidget):
                     self.sum_chip.setObjectName("chipErr"); self.sum_chip.style().polish(self.sum_chip)
                 elif len(p) >= 4 and p[3] in self.f:
                     self.f[p[3]].setProperty("invalid", True); self.f[p[3]].style().polish(self.f[p[3]])
+                elif len(p) >= 4 and p[2] == str(self.ti) and p[3] in self.cf:     # contract 1.2: E_NUMA_NODE, E_BUFFER_SIZE, ...
+                    w = self.cf[p[3]]; w.setProperty("invalid", True); w.setToolTip(e["msg"]); w.style().polish(w)
         self.valid_chip.style().unpolish(self.valid_chip); self.valid_chip.style().polish(self.valid_chip)
         self.specs.blockSignals(False)
-        self._fill_targets(self.to_job()["tests"][self.ti], [(e["path"], e["code"]) for e in res["errors"] + warns])
+        if not self.is_compute():
+            self._fill_targets(self.to_job()["tests"][self.ti], [(e["path"], e["code"]) for e in res["errors"] + warns])
         self._show_issues(res)
 
     # ------------------------------------------------------------------ start flow

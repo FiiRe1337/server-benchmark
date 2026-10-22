@@ -1,0 +1,54 @@
+{
+ "schema": "sb-job/1",
+ "name": "NUMA lokal vs. remote (M2)",
+ "tests": [
+  {
+   "type": "memory",
+   "name": "Latenz lokal (0→0)",
+   "mode": "latency",
+   "buffer_size": "1GiB",
+   "numa_node": 0,
+   "mem_node": 0,
+   "duration_s": 5
+  },
+  {
+   "type": "memory",
+   "name": "Latenz remote (0→1)",
+   "mode": "latency",
+   "buffer_size": "1GiB",
+   "numa_node": 0,
+   "mem_node": 1,
+   "duration_s": 5
+  },
+  {
+   "type": "memory",
+   "name": "Bandbreite lokal (0→0)",
+   "mode": "bandwidth",
+   "op": "read",
+   "threads": 0,
+   "buffer_size": "512MiB",
+   "numa_node": 0,
+   "mem_node": 0,
+   "duration_s": 5
+  },
+  {
+   "type": "memory",
+   "name": "Bandbreite remote (0→1)",
+   "mode": "bandwidth",
+   "op": "read",
+   "threads": 0,
+   "buffer_size": "512MiB",
+   "numa_node": 0,
+   "mem_node": 1,
+   "duration_s": 5
+  },
+  {
+   "type": "cpu",
+   "name": "CPU mixed Knoten 1",
+   "workload": "mixed",
+   "threads": 0,
+   "numa_node": 1,
+   "duration_s": 5
+  }
+ ]
+}

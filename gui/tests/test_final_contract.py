@@ -59,15 +59,18 @@ def test_runs_job_name_required(mock_env, monkeypatch, V):
         mock("stop", "--id", "runs-test"); p.wait(30)
 
 
-@pytest.fixture(scope="module")
-def mixed_run(tmp_path_factory):
-    """storage + cpu + storage job against the mock (core M1 behaviour): cpu is skipped."""
+@pytest.fixture(scope="module", params=[("1.1", {"type": "cpu", "workload": "int", "duration_s": 5}),
+                                        ("1.2", {"type": "hyperv_info"})], ids=["m1-cpu", "m2-hyperv"])
+def mixed_run(tmp_path_factory, request):
+    """storage + <unimplemented> + storage job against the mock: core M1 (contract 1.1) skips cpu, core M2 (1.2) still
+    skips hyperv_info / net_* (E_NOT_IMPLEMENTED, absent from tests[], index keeps the job position)."""
+    contract, skipped = request.param
     tmp = tmp_path_factory.mktemp("mixed")
-    env = dict(os.environ, SBENCH_DATA_DIR=str(tmp / "data"), SBENCH_MOCK_SPEED="50")
+    env = dict(os.environ, SBENCH_DATA_DIR=str(tmp / "data"), SBENCH_MOCK_SPEED="50", SBENCH_MOCK_CONTRACT=contract)
     env.pop("SBENCH_MOCK_ALL_TYPES", None); env.pop("SBENCH_EXE", None)
     job = json.loads(open(local_job(profile("four-corners.json"), tmp, tests=2, warmup_s=0, duration_s=1), encoding="utf-8").read())
     job["tests"][1].update(warmup_s=0, duration_s=1)
-    job["tests"].insert(1, {"type": "cpu", "workload": "int", "duration_s": 5})
+    job["tests"].insert(1, skipped)
     jp = tmp / "mixed.json"; jp.write_text(json.dumps(job), encoding="utf-8")
     out = tmp / "r.json"
     p = subprocess.run([sys.executable, MOCK, "run", "--job", str(jp), "--out", str(out), "--progress", "stdout", "--tick-ms", "100"],
@@ -116,7 +119,7 @@ def test_gui_handles_missing_tests(qapp, mixed_run, tmp_path):
     rp = tmp_path / "p.jsonl"; rp.write_text("\n".join(json.dumps(e) for e in evs), encoding="utf-8")
     live = LiveView(); rep = Replay(str(rp)); live.attach(rep, job, tick_ms=100)
     total_before = live.total; rep.feed(); live.refresh(); live.timer.stop()
-    assert live.skipped == [1] and live.total == total_before - 5
+    assert live.skipped == [1] and live.total == total_before - job["tests"][1].get("duration_s", 0)
     assert "übersprungen" in live.run_chip.text() or live.phase == "done"
 
 

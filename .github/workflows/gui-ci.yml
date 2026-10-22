@@ -145,7 +145,7 @@ jobs:
 
       - name: Contract check of demo data and profiles (mock output)
         run: |
-          python tools/check_mock.py demo/*.json demo/progress.jsonl profiles/four-corners.json profiles/mix-60-40-example.json
+          python tools/check_mock.py demo/*.json demo/progress.jsonl demo/progress-m2.jsonl profiles/four-corners.json profiles/mix-60-40-example.json profiles/cpu-ram.json profiles/numa-lokal-remote.json
           # oltp-mixed.json must be rejected (raw disk write without allow_destructive -> E_DESTRUCTIVE_NOT_ALLOWED)
           if python tools/check_mock.py profiles/oltp-mixed.json; then echo "oltp-mixed.json unexpectedly valid"; exit 1; fi
 

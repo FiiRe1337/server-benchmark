@@ -49,13 +49,13 @@ def result_files(d, extra_dirs=()):
         files += sorted(glob.glob(os.path.join(e, "*.json")), reverse=True)
     try:
         sys.path.insert(0, ROOT); import sb_contract
-        ex = os.path.join(sb_contract.base_dir(), "examples", "result-storage.json")
+        exs = [os.path.join(sb_contract.base_dir(), "examples", f) for f in ("result-storage.json", "result-compute.json", "result-partial.json")]  # 1.2: cpu/memory + NUMA, 1.3: partial
     except (ImportError, FileNotFoundError):
-        ex = ""
+        exs = []
     quad = [f for f in files if "quad" in f]
     order = [f for h in ("host", "vm.json", "vm-san") for f in quad if f.endswith(f"-{h}" if h != "vm.json" else "-vm.json") or f.endswith(f"-{h}.json")]
     rest = [f for f in files if f not in order]
-    return order + rest + ([ex] if os.path.exists(ex) else [])
+    return order + rest + [ex for ex in exs if os.path.exists(ex)]
 
 
 def make_app(argv_extra=(), scale=1.0):
@@ -140,17 +140,83 @@ def screenshots(a):
     shot("03_live_run")
     win.show_page("dashboard")
     win.offer_reattach([{"run_id": "20261020-091500-demo", "pid": 7412, "started_utc": "2026-10-20T07:15:00.120Z",
-                         "out": "C:\\Users\\michi\\AppData\\Local\\sbench-gui\\results\\20261020-091500-demo.json",
+                         "out": "C:\\Users\\bench-user\\AppData\\Local\\sbench-gui\\results\\20261020-091500-demo.json",
                          "progress_file": "C:\\Tools\\sbench\\data\\runs\\20261020-091500-demo.jsonl"}])
     shot("03d_reattach_offer"); close_overlays()
+    _m2_shots(win, live, shot)
     win.show_page("compare"); shot("04_compare")
     win.show_page("export"); shot("05_export")
     win.support_bundle([], anonymize=True); shot("06_support_dialog"); close_overlays()
     win.toast.show_msg("Support-Paket erstellt", "sbench-support.zip · 17 Dateien inkl. manifest.json (SHA-256) · anonymisiert\n"
-                       "C:\\Users\\michi\\Desktop", "."); shot("07_support_export_done")
+                       "C:\\Users\\bench-user\\Desktop", "."); shot("07_support_export_done")
     _emit({"ok": True, "scale": a.scale, "size": a.size, "min_size": [win.minimumWidth(), win.minimumHeight()],
            "files": saved, "layout": layout}, a.report)
     return 0
+
+
+def _m2_shots(win, live, shot):
+    """Contracts 1.2/1.3 (M2): CPU/RAM live view, results (incl. 1.3 partial), host-vs-VM compare, export hint, profile editor
+    (demo data from tools/make_demo.py)."""
+    from PySide6.QtCore import Qt
+    from .sbench import Replay
+    jp, pp = os.path.join(DEMO, "job-m2.json"), os.path.join(DEMO, "progress-m2.jsonl")
+    if not (os.path.exists(jp) and os.path.exists(pp)):
+        return
+    job = json.load(open(jp, encoding="utf-8"))
+    win.show_page("live")
+    for name, pred in (("08_live_cpu", lambda e: e.get("ev") == "tick" and e["test"] == 0 and e["t"] >= 6),
+                       ("08b_live_ram_preparing", lambda e: e.get("ev") == "progress" and e["phase"] == "preparing" and e["done"] >= e["total"] * 0.45),
+                       ("08c_live_ram_bandwidth", lambda e: e.get("ev") == "tick" and e["test"] == 2 and e["t"] >= 7),
+                       ("08d_live_ram_latency", lambda e: e.get("ev") == "tick" and e["test"] == 5 and e["t"] >= 4)):
+        rep = Replay(pp); live.attach(rep, job, tick_ms=250)
+        rep.feed_until(pred); live.refresh(); live.timer.stop(); shot(name)
+    rp = win.pages["results"]
+    for name, stem in (("09_results_cpu_ram", "result-m2-host"), ("09b_results_numa", "result-m2-numa"),
+                       ("09c_results_partial", "result-m2-partial"), ("09d_results_storage_error", "result-storage-error")):
+        f = next((x for x, _ in rp.results if stem in x), None)
+        if f:
+            rp.select_file(f); win.show_page("results"); shot(name)
+            if rp.err_more:                     # runtime error: also with the follow-up errors expanded
+                rp.err_more[0][0].setChecked(True); shot(name + "_expanded"); rp.err_more[0][0].setChecked(False)
+    smt = os.path.join(DEMO, "contract-1.3.1", "result-m2-smt.json")    # 1.3.1 (announced): SMT from cpus[] per test
+    if os.path.exists(smt) and rp.add_result(smt):
+        rp.select_file(smt); win.show_page("results")
+        sa = rp.parent()
+        while sa is not None and not hasattr(sa, "verticalScrollBar"):
+            sa = sa.parent()
+        if sa is not None:                      # scroll to the per-thread card (after layout)
+            from PySide6.QtCore import QPoint
+            from PySide6.QtWidgets import QApplication
+            QApplication.processEvents()
+            sa.verticalScrollBar().setValue(rp.th_card.mapTo(rp, QPoint(0, 0)).y() - 10); QApplication.processEvents()
+        shot("09e_results_smt_131")
+        if sa is not None:
+            sa.verticalScrollBar().setValue(0)
+    cp = win.pages["compare"]
+    for i in range(cp.list.count()):
+        it = cp.list.item(i); f = cp.results[it.data(Qt.UserRole)][0]
+        it.setCheckState(Qt.Checked if ("result-m2-host" in f or "result-m2-vm" in f) else Qt.Unchecked)
+    win.show_page("compare"); shot("10_compare_cpu_ram")
+    for i in range(cp.list.count()):        # 1.3: host vs. partial run (test stopped in preparing -> "–", † marker)
+        it = cp.list.item(i); f = cp.results[it.data(Qt.UserRole)][0]
+        it.setCheckState(Qt.Checked if ("result-m2-host" in f or "result-m2-partial" in f) else Qt.Unchecked)
+    shot("10b_compare_partial")
+    ep = win.pages.get("export")
+    if ep is not None:                       # 1.3: Iometer CSV omits cpu/memory -> hint; timeseries label from tick_ms
+        for i in range(ep.list.count()):
+            ep.list.item(i).setCheckState(Qt.Checked if "result-m2-host" in ep.results[i][0] else Qt.Unchecked)
+        iom = ep.fmt["CSV Iometer"].isChecked()
+        ep.fmt["CSV Iometer"].setChecked(True); win.show_page("export"); shot("12_export_hint")
+        ep.fmt["CSV Iometer"].setChecked(iom)
+        for i in range(ep.list.count()):     # back to the default selection for 05_export
+            ep.list.item(i).setCheckState(Qt.Checked if i < 2 else Qt.Unchecked)
+    for i in range(cp.list.count()):        # back to the storage selection for 04_compare
+        cp.list.item(i).setCheckState(Qt.Checked if i < 3 else Qt.Unchecked)
+    pe = win.pages["profiles"]
+    for name, kind in (("11_profile_cpu", "cpu"), ("11b_profile_ram", "memory")):
+        if pe.open_quick(kind):
+            win.show_page("profiles"); pe.validate(); shot(name)
+    _select(pe, "mix-60-40")
 
 
 def _select(pe, stem):
@@ -350,7 +416,7 @@ def core_self_test(work):
             check("result_schema", not e, "; ".join(e) or f"run_id={res.get('run_id')}")
             check("result_run_id", res.get("run_id") == rid, f"run_id={res.get('run_id')}")
             st = storage_tests(check_schema(res, "sb-result/1"))
-            n = st[0]["summary"].get("io_count", 0) if st else 0
+            n = (st[0]["summary"].get("io_count") or 0) if st else 0     # 1.3: null if stopped before measure
             check("io_count", n > 0, f"io_count={n} iops={st[0]['summary'].get('iops') if st else None}")
             rep["result_file"] = out_path
             rep["result_summary"] = {"iops": st[0]["summary"].get("iops") if st else None, "io_count": n,
@@ -413,6 +479,16 @@ def self_test_child(plat, a):
         if a.expect_result:   # result of the core self-test run must be parsed by the GUI (compare/export pages)
             files = [f for f, _ in win.pages["compare"].results]
             res["expect_result"] = "geladen" if any(_same_path(f, a.expect_result) for f in files) else f"fehlt in {len(files)} Ergebnissen"
+        # contract 1.3: every loaded result (incl. schema/examples/result-partial.json with null summary values) must
+        # render on the results page, in the compare page and in the HTML report without exceptions
+        from .report import build_html
+        rp = win.pages["results"]; runs = [r for _, r in rp.results]
+        for f, _ in rp.results:
+            rp.select_file(f); QCoreApplication.processEvents()
+        build_html(runs); build_html(runs, compact=True)
+        win.pages["compare"].update()
+        res["results_rendered"] = len(runs)
+        res["partial_rendered"] = sum(1 for r in runs for t in r["tests"] if t.get("partial"))
         if os.name == "nt":
             res["loaded_dlls"] = _loaded_modules()
         res["ok"] = img.width() > 0 and not img.isNull() and res.get("expect_result", "geladen") == "geladen"
