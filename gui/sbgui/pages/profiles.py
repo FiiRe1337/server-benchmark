@@ -1,9 +1,13 @@
-import json, os, tempfile
-from PySide6.QtCore import Qt, Signal
+import json, logging, os, tempfile
+from PySide6.QtCore import Qt, Signal, QDir
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QListWidgetItem, QLineEdit, QSpinBox,
-                               QComboBox, QPlainTextEdit, QAbstractItemView, QMenu, QFileDialog, QFrame, QStackedWidget, QCheckBox)
+                               QComboBox, QPlainTextEdit, QAbstractItemView, QMenu, QFileDialog, QFrame, QStackedWidget, QCheckBox,
+                               QMessageBox)
 from PySide6.QtGui import QColor
-from ..widgets import Card, label, chip, table, add_row, listw, short_target, Responsive, WrapLabel
+from ..widgets import Card, label, chip, table, add_row, listw, short_target, Responsive, WrapLabel, ClickChip
+from ..target_picker import TargetPicker, candidates, empty_message
+from ..issue_popup import IssuePopup
+from ..issues import parse_path
 from ..model import (derived_spec_label, derived_test_label, check_schema, destructive_targets, test_label, size_bytes, size_str,
                      human_bytes, WORKLOADS, MEM_OPS, SIMD)
 from ..overlay import DestructiveConfirm, ElevationOffer, IcfImportResult
@@ -13,6 +17,12 @@ SPEC_COLS = ["Name", "Gewicht", "Block", "% Lesen", "% Rand.", "Align", "Burst",
 SPEC_KEYS = ["name", "weight", "block_size", "read_pct", "random_pct", "align", "burst_len", "delay_ms"]
 KIND_TXT = {"file": "Datei", "volume": "Volume", "physical": "Physische Disk"}
 DERIVED = Qt.UserRole + 1
+log = logging.getLogger("sbench-gui")
+NEW_PROFILE = {"schema": "sb-job/1", "name": "Neues Profil", "tests": [{
+    "type": "storage", "name": "4K Random Read", "targets": [{"path": None, "kind": "file", "file_size": "1GiB"}],
+    "workers": 4, "queue_depth": 32, "warmup_s": 2, "duration_s": 10, "cache": "unbuffered",
+    "access_specs": [{"weight": 100, "block_size": "4KiB", "read_pct": 100, "random_pct": 100, "align": "4KiB"}]}]}
+TARGETS_ONLY_STORAGE = "Ziele gibt es nur bei Storage-Tests – oben einen Storage-Test wählen"
 
 # Contract 1.2 (sb-job/1 test_cpu / test_memory): presets = the typical M2 measurements (cf. jobs/abnahme-m2/*.json).
 # Each preset is a complete set of job fields of that test type (name excluded); "needs_numa" presets need >= 2 nodes.
@@ -52,14 +62,16 @@ class ProfileEditor(QWidget):
     def __init__(self, profiles_dirs, elevated=False, numa_nodes=None):
         super().__init__(); self.setObjectName("page")
         self.dirs = profiles_dirs; self.user_dir = profiles_dirs[-1]; self.job = None; self.elevated = elevated; self.last = None
-        self.numa_nodes = [n for n in (numa_nodes or []) if isinstance(n, dict)]; self.ti = 0
+        self.numa_nodes = [n for n in (numa_nodes or []) if isinstance(n, dict)]; self.ti = 0; self._validated = None
+        self.info_provider = None      # MainWindow: callable -> sb-info/1 (volumes/disks for + Volume / + Disk)
         v = QVBoxLayout(self); v.setContentsMargins(28, 24, 28, 24); v.setSpacing(16)
         hdr = QHBoxLayout(); tv = QVBoxLayout(); tv.setSpacing(2)
         self.title = label("Testprofil: Storage", "h1", wrap=True); tv.addWidget(self.title)
         self.title_sub = label("Iometer-artig: gewichtete Access Specs, Worker × Queue Depth, Warmup und Messdauer (sb-job/1)", "muted", wrap=True)
         tv.addWidget(self.title_sub)
         hdr.addLayout(tv, 1)
-        self.valid_chip = chip("nicht geprüft"); hdr.addWidget(self.valid_chip); hdr.addSpacing(6)
+        self.valid_chip = ClickChip("nicht geprüft"); self.valid_chip.setToolTip("Klicken: Liste der Fehler/Warnungen (bzw. jetzt prüfen)")
+        self.valid_chip.clicked.connect(self.show_issue_popup); hdr.addWidget(self.valid_chip); hdr.addSpacing(6)
         bv = QPushButton("Validieren"); bv.clicked.connect(self.validate); hdr.addWidget(bv)
         bsave = QPushButton("Speichern"); bsave.clicked.connect(self.save); hdr.addWidget(bsave)
         br = QPushButton("▶  Test starten"); br.setObjectName("primary"); br.clicked.connect(self.start_flow); hdr.addWidget(br)
@@ -67,7 +79,8 @@ class ProfileEditor(QWidget):
 
         left = Card("Gespeicherte Profile"); left.setMinimumHeight(150)
         self.list = listw(); left.add(self.list, 1)
-        lb = QHBoxLayout(); bn = QPushButton("+ Neu"); lb.addWidget(bn)
+        lb = QHBoxLayout(); bn = QPushButton("+ Neu"); bn.setToolTip("Neues Storage-Profil anlegen (CPU/RAM-Tests mit »+ CPU« / »+ RAM«)")
+        bn.clicked.connect(self.new_profile); lb.addWidget(bn)
         bi = QPushButton("Import ▾"); m = QMenu(bi)
         m.addAction("Iometer-Profil importieren (.icf) …", self.import_icf_dialog)
         m.addAction("sb-job/1 importieren (.json) …", self.import_json_dialog)
@@ -80,7 +93,8 @@ class ProfileEditor(QWidget):
         self.test_box.currentIndexChanged.connect(self._select_test)
         b_cpu = QPushButton("+ CPU"); b_cpu.setToolTip("CPU-Test hinzufügen (Vorlage wählbar)"); b_cpu.clicked.connect(lambda: self.add_test("cpu"))
         b_mem = QPushButton("+ RAM"); b_mem.setToolTip("Arbeitsspeicher-Test hinzufügen (Bandbreite oder Latenz)"); b_mem.clicked.connect(lambda: self.add_test("memory"))
-        self.b_del = QPushButton("Entfernen"); self.b_del.clicked.connect(self.remove_test)
+        self.b_del = QPushButton("Test entfernen"); self.b_del.setToolTip("Ausgewählten Test aus dem Profil entfernen")
+        self.b_del.clicked.connect(self.remove_test)
         tsc = Card(margins=12); th = QHBoxLayout(); th.setSpacing(8)
         th.addWidget(label("Test", "muted")); th.addWidget(self.test_box, 1); th.addWidget(b_cpu); th.addWidget(b_mem); th.addWidget(self.b_del)
         tsc.add(th); cv.addWidget(tsc)
@@ -89,13 +103,23 @@ class ProfileEditor(QWidget):
         self.editor_stack.addWidget(storage_w)
         self.editor_stack.addWidget(self._build_compute_form())
         cv = sv_
-        tc = Card("Ziele", "Worker i → Ziel (i mod Anzahl)", right=[QPushButton("+ Datei"), QPushButton("+ Volume"), QPushButton("+ Disk")])
+        self.storage_w = storage_w
+        self.b_file = QPushButton("+ Datei"); self.b_file.clicked.connect(lambda: self.add_target("file"))
+        self.b_vol = QPushButton("+ Volume"); self.b_vol.clicked.connect(lambda: self.add_target("volume"))
+        self.b_disk = QPushButton("+ Disk"); self.b_disk.clicked.connect(lambda: self.add_target("physical"))
+        self.b_tdel = QPushButton("Entfernen"); self.b_tdel.clicked.connect(self.remove_target)
+        self.target_btns = {self.b_file: "Testdatei als Ziel wählen", self.b_vol: "Volume (\\\\.\\X:) aus sbench info wählen",
+                            self.b_disk: "Physische Disk aus sbench info wählen", self.b_tdel: "Ausgewähltes Ziel entfernen"}
+        for b, tip in self.target_btns.items():
+            b.setToolTip(tip)
+        tc = Card("Ziele", "Worker i → Ziel (i mod Anzahl)", right=[self.b_file, self.b_vol, self.b_disk, self.b_tdel])
         self.targets = table(["Pfad", "Art", "Größe", "Worker", "Hinweis"], stretch_col=0)
         self.targets.setFixedHeight(32 * 3 + 36); tc.add(self.targets); cv.addWidget(tc)
 
         self.sum_chip = chip("Σ 100 %", "chipOk")
         sc = Card("Access Specifications", "Gewicht = Anteil an allen I/Os · Name optional",
-                  right=[self.sum_chip, QPushButton("+ Spec"), QPushButton("Duplizieren")])
+                  right=[self.sum_chip, self._btn("+ Spec", self.add_spec, "Access Spec hinzufügen"),
+                         self._btn("Duplizieren", self.dup_spec, "Ausgewählte (sonst letzte) Access Spec kopieren")])
         self.specs = table(SPEC_COLS, stretch_col=0, mono_cols=(1, 2, 3, 4, 5, 6, 7)); self.specs.setMinimumHeight(130)
         self.specs.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
         self.specs.itemChanged.connect(self._item_changed)
@@ -133,6 +157,17 @@ class ProfileEditor(QWidget):
         inner = Responsive([(center, 1, None), (right, 0, 290)], breakpoint=880)
         v.addWidget(Responsive([(left, 0, 200), (inner, 1, None)], breakpoint=860), 1)
         self._load_list()
+
+    @staticmethod
+    def _btn(text, slot, tip=None):
+        b = QPushButton(text); b.clicked.connect(lambda: slot())
+        if tip:
+            b.setToolTip(tip)
+        return b
+
+    def _overlay_parent(self):
+        w = self.window()
+        return w.centralWidget() if hasattr(w, "centralWidget") and w.centralWidget() else self
 
     # ------------------------------------------------------------------ profile list / import
     def _load_list(self, select=None):
@@ -179,33 +214,68 @@ class ProfileEditor(QWidget):
         if p:
             self._save_new(check_schema(json.load(open(p, encoding="utf-8")), "sb-job/1"))
 
-    def _save_new(self, job):
+    def _save_new(self, job, unique=False):
         if not job:
-            return
+            return None
         base = "".join(c if c.isalnum() or c in "-_" else "-" for c in job.get("name", "profil")).strip("-").lower() or "profil"
-        p = os.path.join(self.user_dir, base + ".json")
-        json.dump(job, open(p, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
+        os.makedirs(self.user_dir, exist_ok=True)
+        p = os.path.join(self.user_dir, base + ".json"); n = 2
+        while unique and os.path.exists(p):
+            p = os.path.join(self.user_dir, f"{base}-{n}.json"); n += 1
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(job, f, indent=1, ensure_ascii=False)
         self._load_list(select=p)
+        return p
 
     def save(self):
-        if self.job:
-            self._save_new(self.to_job())
+        if not self.job:
+            QMessageBox.information(self, "Speichern", "Kein Profil geladen – bitte links ein Profil wählen oder »+ Neu«."); return None
+        job, last, key, ti = self.to_job(), self.last, self._validated, self.ti
+        p = self._save_new(job)
+        if last is not None and key == _key(job):        # unchanged since the last check: keep the result visible
+            self.ti = ti; self._load_test(); self.show_validation(last); self._validated = key
+        return p
+
+    def new_profile(self):
+        job = json.loads(json.dumps(NEW_PROFILE))
+        job["tests"][0]["targets"][0]["path"] = os.path.join(tempfile.gettempdir(), "sbench-testfile.dat")
+        return self._save_new(job, unique=True)
 
     # ------------------------------------------------------------------ editor
     def load(self, path, ti=None):
-        self.job = check_schema(json.load(open(path, encoding="utf-8")), "sb-job/1")
+        with open(path, encoding="utf-8") as f:
+            self.job = check_schema(json.load(f), "sb-job/1")
         tests = self.job["tests"]
-        self.ti = ti if ti is not None else next((i for i, t in enumerate(tests) if t["type"] == "storage"), 0)
+        self.ti = ti if isinstance(ti, int) and 0 <= ti < len(tests) else next((i for i, t in enumerate(tests) if t["type"] == "storage"), 0)
         self.title.setText(f"Testprofil: {self.job.get('name', os.path.basename(path))}")
+        self._reset_validation()
         self._load_test()
+
+    def open_profile(self, stem, ti=None):
+        """Dashboard quick start: select the profile whose file name contains `stem` (optionally test index ti)."""
+        if self.list.count() == 0:
+            self._load_list()
+        for i in range(self.list.count()):
+            path = self.list.item(i).data(Qt.UserRole) or ""
+            if stem in os.path.basename(path):
+                self.list.blockSignals(True); self.list.setCurrentRow(i); self.list.blockSignals(False)
+                self.load(path, ti); return path
+        return None
+
+    def storage_indices(self):
+        return [i for i, t in enumerate((self.job or {}).get("tests", [])) if t.get("type") == "storage"]
 
     def _fill_test_box(self):
         self.test_box.blockSignals(True); self.test_box.clear()
         for i, t in enumerate(self.job["tests"]):
             kind = {"storage": "Storage", "cpu": "CPU", "memory": "RAM"}.get(t["type"], t["type"])
-            self.test_box.addItem(f"{i + 1}. {kind} · {test_label(t)}")
+            self.test_box.addItem(f"{i + 1}. {kind} · {test_label(t)}", i)
         self.test_box.setCurrentIndex(self.ti); self.test_box.blockSignals(False)
+        self.test_box.setEnabled(len(self.job["tests"]) > 1)
         self.b_del.setEnabled(len(self.job["tests"]) > 1)
+        storage = self.job["tests"][self.ti]["type"] == "storage"
+        for b, tip in self.target_btns.items():      # targets exist only for storage tests (the card is hidden for cpu/memory)
+            b.setEnabled(storage); b.setToolTip(tip if storage else TARGETS_ONLY_STORAGE)
 
     def _select_test(self, i):
         if not self.job or i < 0 or i == self.ti:
@@ -216,14 +286,36 @@ class ProfileEditor(QWidget):
     def add_test(self, kind, preset=0):
         """+ CPU / + RAM: append a contract-1.2 test from a preset and edit it."""
         if not self.job:
-            return
+            QMessageBox.information(self, "Test hinzufügen", "Bitte zuerst links ein Profil wählen oder mit »+ Neu« anlegen."); return None
         self.job = self.to_job(); self.job["tests"].append(preset_test(kind, preset))
-        self.ti = len(self.job["tests"]) - 1; self._load_test()
+        self.ti = len(self.job["tests"]) - 1; self._reset_validation(); self._load_test()
+        return self.job["tests"][self.ti]
 
     def remove_test(self):
         if self.job and len(self.job["tests"]) > 1:
-            self.job = self.to_job(); del self.job["tests"][self.ti]
-            self.ti = min(self.ti, len(self.job["tests"]) - 1); self._load_test()
+            self.job = self.to_job(); removed = self.job["tests"].pop(self.ti)
+            self.ti = min(self.ti, len(self.job["tests"]) - 1); self._reset_validation(); self._load_test()
+            return removed
+        return None
+
+    def click_prepare(self, b):
+        """Click smoke test (clicktest.py): before a button of the storage or cpu/memory editor is pressed, select a test of
+        that kind (adds one from a preset when the profile has none), so every editor button is really exercised."""
+        if not self.job:
+            return
+        tests = self.job["tests"]
+        w = b
+        while w is not None and w is not self:
+            if w is self.storage_w:
+                if tests[self.ti]["type"] != "storage" and self.storage_indices():
+                    self.test_box.setCurrentIndex(self.storage_indices()[0])
+                return
+            if w is self.cc:
+                if tests[self.ti]["type"] not in ("cpu", "memory"):
+                    ci = next((i for i, t in enumerate(tests) if t["type"] in ("cpu", "memory")), None)
+                    self.test_box.setCurrentIndex(ci) if ci is not None else self.add_test("cpu")
+                return
+            w = w.parentWidget()
 
     def open_quick(self, kind):
         """Dashboard quick start CPU/RAM: open the M2 profile on its first test of that type."""
@@ -260,7 +352,11 @@ class ProfileEditor(QWidget):
             w.blockSignals(False)
         if comp:
             self._fill_compute(t)
-            self.last = None; self._show_issues(None); self._changed()
+            if self.last is not None:      # the check result belongs to the whole job: keep it when switching tests
+                self.show_validation(self.last)
+            else:
+                self._show_issues(None)
+            self._changed()
             return
         self._fill_targets(t)
         self.specs.blockSignals(True); self.specs.setRowCount(0)
@@ -275,8 +371,124 @@ class ProfileEditor(QWidget):
         self.f["cache"].setCurrentText(t.get("cache", "unbuffered"))
         for w in list(self.f.values()) + [self.name_edit]:
             w.blockSignals(False)
-        self.last = None; self._show_issues(None)
+        if self.last is not None:
+            self.show_validation(self.last)
+        else:
+            self._show_issues(None)
         self._changed()
+
+    def _reset_validation(self, text="nicht geprüft"):
+        """A new / changed job has no check result: chip, issue list and highlights must agree (beta.1 bug: the chip kept
+        '5 Fehler' from the previous check while the list said 'Noch nicht geprüft.')."""
+        self.last = None; self._validated = None
+        self.valid_chip.set_kind(text, "chip")
+        self._show_issues(None)
+
+    # ------------------------------------------------------------------ targets (+ Datei / + Volume / + Disk)
+    def _target_info(self):
+        """(sb-info/1, error) fresh from the core (disks may have been attached since the start)."""
+        try:
+            info = self.info_provider() if self.info_provider else sbench.info()
+            self.elevated = bool(info.get("meta", {}).get("elevated", self.elevated))
+            return info, None
+        except Exception as e:  # noqa: BLE001 -- shown to the user, logged
+            log.error("sbench info for target list: %s", e)
+            return None, f"{type(e).__name__}: {e}"
+
+    def _targets_missing(self):
+        """Preselect 'replace' when the current targets cannot work here (file dir missing / E_TARGET_NOT_FOUND)."""
+        t = self.job["tests"][self.ti]
+        for tg in t.get("targets", []):
+            if tg.get("kind") == "file" and tg.get("path") and not os.path.isdir(_dir_of(tg["path"])):
+                return True
+        return any(e.get("code") == "E_TARGET_NOT_FOUND" and parse_path(e.get("path"))["test"] == self.ti for e in (self.last or {}).get("errors", []))
+
+    def _storage_test(self, title):
+        """Current test if it is a storage test; otherwise a message (cpu/memory tests have no targets) and None."""
+        if not self.job:
+            QMessageBox.information(self, title, "Bitte zuerst links ein Profil wählen oder mit »+ Neu« anlegen."); return None
+        t = self.job["tests"][self.ti]
+        if t["type"] != "storage":
+            QMessageBox.information(self, title, TARGETS_ONLY_STORAGE + "."); return None
+        return t
+
+    def add_target(self, kind):
+        """+ Datei: file dialog, + Volume / + Disk: list from sbench info. Always visible: dialog, picker or message."""
+        t = self._storage_test("Ziele")
+        if t is None:
+            return None
+        items = (); path = ""; size = "16GiB"
+        if kind == "file":
+            cur = next((x for x in t.get("targets", []) if x.get("kind") == "file"), None)
+            if cur:
+                size = str(cur.get("file_size", size))
+            start = cur["path"] if cur and os.path.isdir(_dir_of(cur["path"])) else os.path.join(os.path.expanduser("~"), "sbench-testfile.dat")
+            p, _ = QFileDialog.getSaveFileName(self, "Testdatei für sbench wählen", start, "Testdatei (*.dat);;Alle Dateien (*)",
+                                               options=QFileDialog.DontConfirmOverwrite)
+            if not p:
+                return None
+            path = QDir.toNativeSeparators(p)
+        else:
+            info, err = self._target_info()
+            items = candidates(info, kind)
+            if not items:
+                QMessageBox.warning(self, "Keine Volumes gefunden" if kind == "volume" else "Keine Disks gefunden",
+                                    empty_message(kind, self.elevated, err))
+                return None
+        dlg = TargetPicker(self._overlay_parent(), kind, items, n_storage=len(self.storage_indices()),
+                           test_name=t.get("name") or derived_test_label({**t, "name": None}), replace=self._targets_missing(),
+                           elevated=self.elevated, path=path, file_size=size)
+        dlg.accepted.connect(self.apply_target); dlg.open(); return dlg
+
+    def apply_target(self, v):
+        tg = dict(v["target"]); job = self.to_job()
+        for i in (self.storage_indices() if v.get("all_tests") else [self.ti]):
+            t = job["tests"][i]
+            if v.get("replace"):
+                t["targets"] = [dict(tg)]
+            elif not any(x.get("path", "").lower() == tg["path"].lower() for x in t["targets"]):
+                t["targets"].append(dict(tg))
+        self.job = job; self._reset_validation(); self._load_test()
+        row = next((r for r, x in enumerate(self.job["tests"][self.ti].get("targets", [])) if x["path"] == tg["path"]), -1)
+        if row >= 0:
+            self.targets.selectRow(row)
+        return tg
+
+    def remove_target(self):
+        t = self._storage_test("Ziel entfernen")
+        if t is None:
+            return None
+        r = self.targets.currentRow(); tgs = t["targets"]
+        if r < 0 or r >= len(tgs):
+            QMessageBox.information(self, "Ziel entfernen", "Bitte zuerst ein Ziel in der Tabelle auswählen."); return None
+        if len(tgs) == 1:
+            QMessageBox.information(self, "Ziel entfernen", "Ein Test braucht mindestens ein Ziel. Neues Ziel mit »+ Datei«, "
+                                    "»+ Volume« oder »+ Disk« hinzufügen und dort »Bisherige Ziele ersetzen« wählen."); return None
+        job = self.to_job(); removed = job["tests"][self.ti]["targets"].pop(r)
+        self.job = job; self._reset_validation(); self._load_test(); return removed
+
+    # ------------------------------------------------------------------ access specs (+ Spec / Duplizieren)
+    def add_spec(self):
+        if self._storage_test("Access Spec") is None:
+            return None
+        job = self.to_job(); specs = job["tests"][self.ti]["access_specs"]
+        tot = sum(s.get("weight", 0) for s in specs if isinstance(s.get("weight"), int))
+        specs.append({"weight": max(0, 100 - tot), "block_size": "4KiB", "read_pct": 100, "random_pct": 100, "align": "4KiB"})
+        self.job = job; self._load_test(); self.specs.setCurrentCell(len(specs) - 1, 1); return specs[-1]
+
+    def dup_spec(self):
+        if self._storage_test("Access Spec") is None:
+            return None
+        job = self.to_job(); specs = job["tests"][self.ti]["access_specs"]
+        if not specs:
+            return self.add_spec()
+        r = self.specs.currentRow()
+        r = r if 0 <= r < len(specs) else len(specs) - 1
+        cp = dict(specs[r])
+        if cp.get("name"):
+            cp["name"] = f"{cp['name']} (Kopie)"
+        specs.insert(r + 1, cp)
+        self.job = job; self._load_test(); self.specs.setCurrentCell(r + 1, 1); return cp
 
     # ------------------------------------------------------------------ cpu / memory form (contract 1.2)
     def _build_compute_form(self):
@@ -361,7 +573,7 @@ class ProfileEditor(QWidget):
         t = self.job["tests"][self.ti]
         new = preset_test(t["type"], idx)
         self.job = self.to_job(); self.job["tests"][self.ti] = new
-        self._load_test()
+        self._reset_validation(); self._load_test()
 
     def _compute_test(self, t):
         """Form -> cpu/memory test dict (only fields the 1.2 schema allows; defaults omitted where optional)."""
@@ -419,6 +631,10 @@ class ProfileEditor(QWidget):
             codes = {c for p, c in (issues or []) if p.startswith(f"/tests/{self.ti}/targets/{k}")}
             if "E_DESTRUCTIVE_NOT_ALLOWED" in codes:
                 hint, col = "Freigabe fehlt", T.RED
+            elif "E_TARGET_NOT_FOUND" in codes:
+                hint, col = "nicht gefunden", T.RED
+            elif any(c.startswith("E_") for c in codes):
+                hint, col = "Fehler: " + ", ".join(sorted(c for c in codes if c.startswith("E_"))), T.RED
             elif tg.get("allow_destructive"):
                 hint, col = "destruktiv freigegeben", T.RED
             elif "W_NEEDS_ADMIN" in codes or tg["kind"] != "file":
@@ -461,6 +677,7 @@ class ProfileEditor(QWidget):
                     kind = "CPU" if t["type"] == "cpu" else "RAM"
                     self.test_box.setItemText(self.ti, f"{self.ti + 1}. {kind} · {test_label(t)}")
             self.json.setPlainText(json.dumps(job, indent=1, ensure_ascii=False))
+            self._check_stale(job)
             return
         tot, parts = 0, []
         job = self.to_job()
@@ -494,6 +711,11 @@ class ProfileEditor(QWidget):
         nw, qd = self.f["workers"].value(), self.f["queue_depth"].value()
         self.outstanding.setText(f"= {nw * qd} ausstehende I/Os gesamt ({nw} × {qd})  ·  Gesamtdauer ca. {self.f['warmup_s'].value() + self.f['duration_s'].value()} s")
         self.json.setPlainText(json.dumps(job, indent=1, ensure_ascii=False))
+        self._check_stale(job)
+
+    def _check_stale(self, job):
+        if self.last is not None and self._validated is not None and _key(job) != self._validated:
+            self._reset_validation("nicht geprüft (geändert)")
 
     def to_job(self):
         job = json.loads(json.dumps(self.job)); t = job["tests"][self.ti]
@@ -527,8 +749,46 @@ class ProfileEditor(QWidget):
 
     # ------------------------------------------------------------------ validation
     def validate(self):
-        res = check_schema(sbench.validate(self.write_job()), "sb-validate/1")
-        self.show_validation(res); return res
+        job = self.to_job()
+        try:
+            res = check_schema(sbench.validate(self.write_job(job)), "sb-validate/1")
+        except Exception as e:  # noqa: BLE001 -- core missing / timeout / no JSON: tell the user instead of a dead button
+            log.error("sbench validate: %s", e)
+            QMessageBox.critical(self, "sbench validate fehlgeschlagen",
+                                 f"Der Job konnte nicht geprüft werden:\n{type(e).__name__}: {e}")
+            return None
+        self.show_validation(res); self._validated = _key(job); return res
+
+    def show_issue_popup(self):
+        """'<n> Fehler' chip: list of every wrong field; 'nicht geprüft' chip: check now."""
+        if not self.job:
+            return None
+        res = self.last if self.last is not None else self.validate()
+        if res is None:
+            return None
+        dlg = IssuePopup(self._overlay_parent(), res, self.to_job())
+        dlg.focus_requested.connect(self.focus_issue); dlg.open(); return dlg
+
+    def focus_issue(self, ptr):
+        """Jump to the field of a validate pointer (any test type); returns the focused widget (or None)."""
+        d = parse_path(ptr)
+        if d["test"] is not None and d["test"] != self.ti and 0 <= d["test"] < self.test_box.count():
+            self.test_box.setCurrentIndex(d["test"])
+        if d["test"] is not None and d["test"] != self.ti:
+            return None
+        if d["area"] == "targets" and d["index"] is not None and d["index"] < self.targets.rowCount():
+            self.targets.selectRow(d["index"]); self.targets.scrollToItem(self.targets.item(d["index"], 0)); return self.targets
+        if d["area"] == "access_specs":
+            col = SPEC_KEYS.index(d["field"]) if d["field"] in SPEC_KEYS else 1
+            if d["index"] is not None and d["index"] < self.specs.rowCount():
+                self.specs.setCurrentCell(d["index"], col)
+            self.specs.setFocus(); return self.specs
+        if d["area"] == "field":
+            w = self.f.get(d["field"]) or (self.cf.get(d["field"]) if self.is_compute() else None) or \
+                (self.name_edit if d["field"] == "name" else None)
+            if w:
+                w.setFocus(); return w
+        return None
 
     def _show_issues(self, res):
         while self.issues.count():
@@ -565,8 +825,10 @@ class ProfileEditor(QWidget):
             self.valid_chip.setText(f"✓ gültig · {len(warns)} Warnung{'en' if len(warns) != 1 else ''}" if warns else "✓ gültig (sb-validate/1)")
             self.valid_chip.setObjectName("chipWarn" if warns else "chipOk")
         else:
-            self.valid_chip.setText(f"{len(res['errors'])} Fehler" + (f" · {len(warns)} Warnungen" if warns else "")); self.valid_chip.setObjectName("chipErr")
+            self.valid_chip.setText(f"{len(res['errors'])} Fehler" + (f" · {len(warns)} Warnungen" if warns else "") + "  ▾"); self.valid_chip.setObjectName("chipErr")
             for e in res["errors"]:
+                if parse_path(e["path"])["test"] != self.ti:      # other test of the profile: listed in the popup only
+                    continue
                 p = e["path"].split("/")
                 if len(p) >= 6 and p[3] == "access_specs" and p[5] in SPEC_KEYS:
                     it = self.specs.item(int(p[4]), SPEC_KEYS.index(p[5]))
@@ -588,9 +850,11 @@ class ProfileEditor(QWidget):
     def start_flow(self):
         """validate -> (destructive confirm: sets allow_destructive + --allow-destructive) -> (elevation offer) -> run."""
         job = self.to_job(); res = self.validate()
-        other = [e for e in res["errors"] if e["code"] != "E_DESTRUCTIVE_NOT_ALLOWED"]
-        if other:
+        if res is None:
             return None
+        other = [e for e in res["errors"] if e["code"] != "E_DESTRUCTIVE_NOT_ALLOWED"]
+        if other:            # beta.1: returned silently (only the chip changed) -> show what blocks the start
+            return self.show_issue_popup()
         dest = destructive_targets(job)
         if dest:
             dlg = DestructiveConfirm(self.window().centralWidget(), job, dest)
@@ -603,8 +867,8 @@ class ProfileEditor(QWidget):
             for ti, k in keys:
                 self.job["tests"][ti]["targets"][k]["allow_destructive"] = True
             res = self.validate()
-            if not res["ok"]:
-                return None
+            if res is None or not res["ok"]:
+                return None if res is None else self.show_issue_popup()
         res = self.last
         need = [w for w in res.get("warnings", []) if w["code"] == "W_NEEDS_ADMIN"]
         if need and not self.elevated:
@@ -614,3 +878,14 @@ class ProfileEditor(QWidget):
             dlg.open(); return dlg
         self.run_requested.emit(self.write_job(), {"elevated": False, "allow_destructive": allow})
         return None
+
+
+def _key(job):
+    return json.dumps(job, sort_keys=True, ensure_ascii=False)
+
+
+def _dir_of(path):
+    """Directory of a target path; Windows paths (D:\\x\\y.dat) are split as such on every OS (tests/CI on Linux)."""
+    import ntpath, re
+    d = ntpath.dirname(path) if ("\\" in path or re.match(r"^[A-Za-z]:", path)) else os.path.dirname(path)
+    return d or "."

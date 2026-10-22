@@ -119,13 +119,28 @@ jobs:
           if ($p.ExitCode -ne 0 -or -not $r.ok -or -not $r.frozen -or $r.core.mode -ne "embedded") { Get-Content $report; exit 1 }
           if ($r.core.expected_sha256 -ne "${{ steps.info.outputs.core_sha256 }}") { throw "eingebetteter SHA-256 weicht vom Build ab" }
 
+      - name: Klick-Test der EXE (jeder Button/jede Aktion, echter Kern, Qt-Plattform windows)
+        run: |
+          # v0.1.0-beta.1 shipped '+ Datei' / '+ Volume' / '+ Disk' without any handler. --self-test-clicks presses every
+          # QPushButton/QToolButton/QAction of every page inside the FROZEN app (dialogs auto-answered, no real benchmark run)
+          # and fails on dead buttons, exceptions, unconnected page signals or known buttons without a visible reaction.
+          $st = Join-Path $env:RUNNER_TEMP "gui-selftest"
+          $report = Join-Path $PWD "build\selftest-clicks.json"
+          $p = Start-Process -FilePath (Join-Path $st "sbench-gui.exe") -ArgumentList @("--self-test-clicks", "--platforms", "windows", "--report", "`"$report`"") -Wait -PassThru -NoNewWindow
+          Write-Host "exit code: $($p.ExitCode)"
+          if (-not (Test-Path $report)) { Write-Host "no report written"; exit 1 }
+          $r = Get-Content $report -Raw | ConvertFrom-Json
+          $r.summary | ForEach-Object { Write-Host $_ }
+          "### Klick-Test`n``````text`n$($r.summary -join "`n")`n``````" >> $env:GITHUB_STEP_SUMMARY
+          if ($p.ExitCode -ne 0 -or -not $r.ok -or -not $r.frozen) { Get-Content $report; exit 1 }
+
       - name: Manipulationstest (falscher Hash -> Start verweigert, Kopie wiederhergestellt)
         run: |
           $st = Join-Path $env:RUNNER_TEMP "gui-selftest"
           $bin = Get-ChildItem (Join-Path $st "data\bin\sbench-*.exe") | Select-Object -First 1
           [IO.File]::WriteAllBytes($bin.FullName, [Text.Encoding]::ASCII.GetBytes("MZ tampered"))
           $report = Join-Path $PWD "build\selftest-tampered.json"
-          $p = Start-Process -FilePath (Join-Path $st "sbench-gui.exe") -ArgumentList @("--self-test", "--platforms", "offscreen", "--report", "`"$report`"") -Wait -PassThru -NoNewWindow
+          $p = Start-Process -FilePath (Join-Path $st "sbench-gui.exe") -ArgumentList @("--self-test", "--platforms", "offscreen", "--no-clicks", "--report", "`"$report`"") -Wait -PassThru -NoNewWindow
           $r = Get-Content $report -Raw | ConvertFrom-Json
           $r.summary | ForEach-Object { Write-Host $_ }
           # startup re-copies a mismatching file before the first launch -> self-test must pass again with the real core

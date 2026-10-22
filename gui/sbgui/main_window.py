@@ -109,6 +109,7 @@ class MainWindow(QMainWindow):
         self.result_files = list(result_files)
         self.pages["live"].cpu_score = ((info or {}).get("meta") or {}).get("cpu_score")   # contract 1.3 (sbench info)
         self.pages["profiles"].run_requested.connect(self.start_run)
+        self.pages["profiles"].info_provider = self._target_info
         self.pages["dashboard"].quickstart.connect(self._quickstart)
         self.pages["live"].stop_requested.connect(self.stop_run)
         self.pages["live"].elevate_requested.connect(self.offer_elevation)
@@ -175,13 +176,34 @@ class MainWindow(QMainWindow):
         for ov in self.centralWidget().findChildren(Overlay):
             ov.setGeometry(self.centralWidget().rect())
 
+    QUICK = {"quad": ("Four Corners", "four-corners", None), "storage4k": ("Storage 4K random", "four-corners", 2),
+             "storage1m": ("Storage 1M sequenziell", None, None), "hyperv": ("Hyper-V Info", None, None), "cpu": ("CPU", "cpu-ram", None),
+             "memory": ("RAM", "cpu-ram", None), "net": ("Netzwerk", None, None), "full": ("Vollständiger Lauf", None, None)}
+
     def _quickstart(self, key):
-        if key in ("cpu", "memory"):
-            pe = self.pages["profiles"]
+        """Dashboard 'Schnellstart': open the matching profile, or say clearly that it is not available yet."""
+        name, stem, ti = self.QUICK.get(key, (key, None, None))
+        pe = self.pages["profiles"]
+        if key in ("cpu", "memory"):           # M2: cpu-ram.json on its first test of that type
             if pe.list.count() == 0:
                 pe._load_list()
             if pe.open_quick(key):
-                self.show_page("profiles")
+                self.show_page("profiles"); return True
+        elif stem and pe.open_profile(stem, ti):
+            self.show_page("profiles"); return True
+        QMessageBox.information(self, "Schnellstart", f"»{name}« ist in dieser Version noch nicht als Schnellstart verfügbar.\n\n"
+                                "Bitte unter »Testprofile« ein Profil wählen oder mit »+ Neu« anlegen.")
+        return False
+
+    def _target_info(self):
+        """sb-info/1 for the target picker: fresh from the core, fallback to the info of the GUI start."""
+        try:
+            info = sbench.info()
+            if info.get("schema") == "sb-info/1":
+                return info
+        except Exception as e:  # noqa: BLE001
+            log.warning("sbench info (Zielauswahl) fehlgeschlagen, nutze Startwerte: %s", e)
+        return self.info
 
     def show_page(self, key):
         i = [k for k, _ in NAV].index(key); self.nav[key].setChecked(True); self.stack.setCurrentIndex(i)

@@ -5,7 +5,10 @@
   sbench-gui --screenshot <dir> [--scale 1.5] [--size 1440x900|1366x768] [--replay progress.jsonl] [--results <dir>] [--info info.json]
   sbench-gui --self-test [--platforms windows,offscreen] [--report f.json] [--no-core]
                                            -> JSON report (stdout and/or --report), exit 0/1. Without --no-core it also
-                                              checks the core: version --json + SHA-256, info, 3 s storage job, bundle --all
+                                              checks the core: version --json + SHA-256, info, 3 s storage job, bundle --all,
+                                              and runs the click smoke test (--self-test-clicks) in a child
+  sbench-gui --self-test-clicks [--platforms offscreen] [--report f.json]
+                                           -> presses every button/action of every page (sbgui/clicktest.py), exit 0/1
 """
 import argparse, glob, json, os, platform, subprocess, sys, time
 
@@ -25,6 +28,8 @@ def parse(argv):
     ap.add_argument("--demo", action="store_true")
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--self-test-child", metavar="PLATFORM")
+    ap.add_argument("--self-test-clicks", action="store_true", help="click smoke test of every button (exit 0/1, JSON via --report)")
+    ap.add_argument("--no-clicks", action="store_true", help="self-test: skip the click smoke test child")
     ap.add_argument("--platforms", default="windows,offscreen" if os.name == "nt" else "offscreen")
     ap.add_argument("--report", metavar="FILE", help="also write the JSON report to FILE (needed for windowed EXE: no stdout)")
     ap.add_argument("--guide", metavar="DIR", help="README guide screenshots with the REAL core (see sbgui/guide.py)")
@@ -266,6 +271,21 @@ def self_test(a):
             res = {"ok": False, "error": "timeout"}
         res["seconds"] = round(time.time() - t0, 2)
         report["platforms"][plat] = res; ok &= bool(res.get("ok"))
+    if not a.no_clicks:     # every button of every page, inside this very build (frozen: real core)
+        t0 = time.time()
+        rf = os.path.join(tempfile.gettempdir(), f"sbench-gui-selftest-{os.getpid()}-clicks.json")
+        try:
+            cp = subprocess.run(me + ["--self-test-clicks", "--platforms", "offscreen", "--report", rf], capture_output=True, text=True,
+                                timeout=180, cwd=ROOT, creationflags=_NO_WINDOW)
+            try:
+                res = json.load(open(rf, encoding="utf-8")); os.remove(rf)
+            except (OSError, ValueError):
+                res = {"ok": False, "exit": cp.returncode, "stderr": (cp.stderr or "")[-1500:]}
+        except subprocess.TimeoutExpired:
+            res = {"ok": False, "error": "timeout"}
+        res["seconds"] = round(time.time() - t0, 2)
+        res.pop("buttons", None)        # full list only in the --self-test-clicks report itself
+        report["clicks"] = res; ok &= bool(res.get("ok"))
     report["ok"] = ok
     report["summary"] = _summary(report)
     _emit(report, a.report)
@@ -287,6 +307,10 @@ def _summary(report):
             lines.append(f"  {'OK    ' if chk.get('ok') else 'FEHLER'} {name}: {chk.get('detail', '')}")
     for plat, r in report.get("platforms", {}).items():
         lines.append(f"  {'OK    ' if r.get('ok') else 'FEHLER'} GUI {plat}: {r.get('error') or r.get('expect_result') or r.get('grab')}")
+    ck = report.get("clicks")
+    if ck:
+        lines.append(f"  {'OK    ' if ck.get('ok') else 'FEHLER'} Klick-Test: {ck.get('count', 0)} Buttons"
+                     + ("" if ck.get("ok") else f" · {'; '.join((ck.get('summary') or [ck.get('error') or ck.get('stderr') or '?'])[1:] or [ck.get('error') or '?'])}"))
     return lines
 
 
@@ -492,6 +516,9 @@ def main(argv=None):
     a = parse(sys.argv[1:] if argv is None else argv)
     if a.self_test_child:
         return self_test_child(a.self_test_child, a)
+    if a.self_test_clicks:
+        from . import clicktest
+        return clicktest.main(a)
     if a.self_test:
         return self_test(a)
     if a.screenshot:
@@ -501,9 +528,10 @@ def main(argv=None):
         return guide.run(a)
     if a.demo:
         return demo(a)
-    from . import sbench, core
+    from . import sbench, core, errors
     logf = sbench.setup_logging()
     app = make_app()
+    errors.install(os.path.join(sbench.gui_dir(), "logs"))   # no slot exception may vanish in the windowed EXE
     import logging
     try:
         logging.getLogger("sbench-gui").info("start GUI %s, log %s, sbench %s", core.gui_version(), logf, sbench.sbench_command())

@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter
 from PySide6.QtWidgets import (QFrame, QLabel, QVBoxLayout, QHBoxLayout, QWidget, QTableWidget, QTableWidgetItem,
                                QHeaderView, QAbstractItemView, QSizePolicy)
@@ -274,3 +274,38 @@ class WrapLabel(QLabel):
         h = self.heightForWidth(self.width())
         if h > 0 and h != self.minimumHeight():
             self.setMinimumHeight(h)
+
+
+class ClickChip(QLabel):
+    """Chip (same QLabel#chip* styles) that can be clicked (mouse, or Enter/Space when focused)."""
+    clicked = Signal()
+
+    def __init__(self, text, kind="chip"):
+        super().__init__(text); self.setObjectName(kind); self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        self.setCursor(Qt.PointingHandCursor); self.setFocusPolicy(Qt.StrongFocus)
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.LeftButton and self.rect().contains(e.position().toPoint()):
+            self.clicked.emit()
+        super().mouseReleaseEvent(e)
+
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
+            self.clicked.emit(); return
+        super().keyPressEvent(e)
+
+    def set_kind(self, text, kind):
+        self.setText(text); self.setObjectName(kind); self.style().unpolish(self); self.style().polish(self)
+
+
+class ClickFrame(QFrame):
+    """Frame that emits clicked (issue rows in the validation popup)."""
+    clicked = Signal()
+
+    def __init__(self):
+        super().__init__(); self.setCursor(Qt.PointingHandCursor)
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mouseReleaseEvent(e)

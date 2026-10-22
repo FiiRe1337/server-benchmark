@@ -57,6 +57,16 @@ langsamer an (Hinweis `W_NEEDS_ADMIN`); Sie können im folgenden Dialog mit **Oh
 fortfahren. (Auf dem CI-Runner läuft die GUI als Administrator, deshalb erscheint der Dialog im Bild nicht.) Testdateien,
 die sbench selbst angelegt hat, löscht es nach dem Test wieder.
 
+> **Hinweis zu den mitgelieferten Profilen:** *Four Corners + 70/30* und die anderen Beispiel- bzw.
+> Demo-Jobs verwenden als Ziel `D:\sbench\testfile.dat` (einige zusätzlich `\\.\PhysicalDrive2`). Sie laufen
+> nur, wenn es Laufwerk und Ordner gibt (z. B. Ordner `D:\sbench` anlegen). Andernfalls das Ziel anpassen:
+> mit **+ Datei** eine Testdatei wählen oder mit **+ Volume** / **+ Disk** ein Laufwerk bzw. eine Disk
+> (Test braucht Administratorrechte; Schreibtests zerstören dort alle Daten und werden vor dem Start
+> extra bestätigt). Die Option *Für alle Storage-Tests übernehmen* ändert alle fünf Four-Corners-Tests
+> auf einmal. Was fehlt, zeigt ein Klick auf den roten Chip **„n Fehler“** (z. B. `E_TARGET_NOT_FOUND`
+> für jedes Ziel); ein Klick auf einen Eintrag springt zum betroffenen Feld. Profile mit mehreren Tests
+> wählen Sie oben über **Test** aus.
+
 ## 4. Live-Lauf beobachten und stoppen
 
 Während des Laufs zeigt **Live-Lauf** die Phasen (Vorbereitung → Warmup → Messung), IOPS, Durchsatz,

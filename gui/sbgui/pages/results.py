@@ -113,6 +113,13 @@ class ResultsPage(QWidget):
         src = self.exit_codes() if callable(self.exit_codes) else (self.exit_codes or {})
         return src.get(r.get("run_id"))
 
+    def click_setup(self):
+        """Click smoke test: show a result whose error box has a '▸ n weitere Fehler' toggle, so it is pressed too."""
+        for f, r in self.results:
+            if any(len(fatal_errors(t)) > 1 for t in r.get("tests", [])):
+                self.select_file(f); return f
+        return None
+
     def select_file(self, path):
         for i in range(self.box.count()):
             if os.path.normcase(os.path.abspath(self.box.itemData(i))) == os.path.normcase(os.path.abspath(path)):
@@ -219,13 +226,13 @@ class ResultsPage(QWidget):
             it = self.err_lay.takeAt(0)
             w = it.widget()
             if w is not None:
-                w.deleteLater()
+                w.hide(); w.setParent(None); w.deleteLater()     # detach now: no stale toggles in findChildren (click test)
             elif it.layout() is not None:
                 lay = it.layout()
                 while lay.count():
                     x = lay.takeAt(0).widget()
                     if x is not None:
-                        x.deleteLater()
+                        x.hide(); x.setParent(None); x.deleteLater()
         self.err_more = []
         for t in tests:
             errs = fatal_errors(t)
