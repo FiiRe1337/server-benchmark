@@ -17,6 +17,8 @@ Versionen (GUI + Kern) stehen im Fenstertitel und unten in der Seitenleiste (Too
 
 Self-Test: `sbench-gui.exe --self-test --report st.json` (ohne Admin) prüft zusätzlich zum GUI-Rendering den Kern: `version --json` (SHA-256 = eingebetteter Wert), `info --json` gegen sb-info/1, 3-s-Storage-Job (4 KiB random read, Datei in `%TEMP%`) mit Exit 0, `io_count > 0`, sb-result/1 und Laden in der GUI, `bundle --all` gegen sb-bundle/1. `--no-core` überspringt den Kern-Teil. Bericht als JSON mit lesbarer `summary`.
 
+Klick-Test: `sbench-gui.exe --self-test-clicks --report clicks.json` drückt jeden Button und jede Menü-Aktion aller Seiten (Dateidialoge und Meldungen werden automatisch beantwortet, kein echter Testlauf) und meldet Buttons ohne Funktion, Ausnahmen, unverbundene Seiten-Signale und bekannte Buttons ohne sichtbare Reaktion (`sbgui/clicktest.py`, auch Teil von `--self-test`, abschaltbar mit `--no-clicks`; in CI nach dem EXE-Build auf windows-2022). Unbehandelte Ausnahmen landen mit Traceback im GUI-Log (`%LOCALAPPDATA%\sbench-gui\logs\gui-JJJJMMTT.log`) und werden als Meldung angezeigt.
+
 ```
 cd gui
 python -m venv .venv && .venv/bin/pip install -r requirements.txt     # Windows: .venv\Scripts\pip
