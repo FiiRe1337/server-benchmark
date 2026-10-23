@@ -116,6 +116,15 @@ def run_m2(h, sbench: Path, work: Path, info: dict, quick: bool) -> dict:
             check(s["ops_per_s"] > 0 and s["score"] > 0, f"cpu {t['config']['name']}: {s['ops_per_s']:.4g} ops/s, Score {s['score']:.0f}")
             check(all("ops_per_s" in e and "cpu_pct" in e for e in ticks) and len(ticks) >= 1,
                   f"cpu {t['config']['name']}: {len(ticks)} Ticks mit ops_per_s")
+            if t["config"].get("threads") == 0 and ticks:
+                # Alle Prozessoren ausgelastet: der Steuer-Thread muss trotzdem im Tick-Takt (500 ms)
+                # laufen; früher 4-8 s Lücken und 2 s Messung -> 4-9 s auf manchen Runnern
+                ts_ = [0.0] + [e["t"] for e in ticks]
+                gap = max(b - a for a, b in zip(ts_, ts_[1:]))
+                dur_ = t["config"]["duration_s"]
+                check(gap <= 1.5 and ticks[-1]["t"] <= dur_ + 1.0,
+                      f"cpu {t['config']['name']}: Steuer-Thread nicht ausgehungert (max. Tick-Abstand {gap:.2f} s, "
+                      f"Messung {ticks[-1]['t']:.2f} s für {dur_} s)")
         st = {t["config"]["name"]: t["summary"] for t in T}
         n_all = st["mixed alle"]["threads"]
         check(n_all == ncpu, f"threads = 0 -> {n_all} Threads = logische Prozessoren {ncpu}")
@@ -204,7 +213,10 @@ def run_m2(h, sbench: Path, work: Path, info: dict, quick: bool) -> dict:
     except subprocess.TimeoutExpired:
         proc.kill()
         rc = None
-    check(rc == 3, f"cpu nach stop: Exit 3 (ist {rc}, Reaktionszeit {time.time() - ts:.2f} s)")
+    react = time.time() - ts
+    check(rc == 3, f"cpu nach stop: Exit 3 (ist {rc}, Reaktionszeit {react:.2f} s)")
+    # inkl. Start von 'sbench stop' unter Volllast; früher 20-60 s auf manchen Runnern
+    check(rc == 3 and react < 5, f"cpu nach stop: Reaktionszeit {react:.2f} s < 5 s")
     if sprog.exists():
         h.check_progress(h.read_jsonl(sprog), "Fortschritt (cpu stop)", expect_aborted=True, rc=rc)
     sres = h.check_result(sout, "Teilergebnis (cpu stop)", expect_aborted=True)

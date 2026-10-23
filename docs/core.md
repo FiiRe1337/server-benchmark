@@ -197,6 +197,12 @@ wird nicht gespeichert.
    aktualisiert. Der Hauptthread liest die Zähler zu Beginn und Ende der Messphase und pro
    Tick (QPC-Zeitstempel). Die Messung enthält damit höchstens einen Batch Unschärfe je
    Thread an den Rändern (≤ 2 ms bei ≥ 1 s Messdauer).
+   Prioritäten: Worker laufen mit `THREAD_PRIORITY_BELOW_NORMAL`, der Steuer-Thread
+   (Ticks, Stop-Event, Phasen) für die Dauer des Tests mit `THREAD_PRIORITY_HIGHEST`.
+   So bleiben Ticks, Messdauer und die Reaktion auf `sbench stop`/GUI auch dann pünktlich,
+   wenn alle logischen Prozessoren ausgelastet sind und der Scheduler gleich priorisierte
+   Threads nicht fair abwechselt (beobachtet auf VMs mit 4 vCPUs). Auf einem ruhigen System
+   ändert das die Messwerte nicht; normal priorisierte Fremdlast hat Vorrang vor den Workern.
 
 ### memory: Bandbreite
 
