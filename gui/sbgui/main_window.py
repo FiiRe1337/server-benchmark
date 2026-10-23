@@ -15,6 +15,7 @@ from . import theme as T, sbench
 from .sbench import ROOT
 
 from .core import gui_version, build_info, CoreError
+from .legacy import load_results
 
 GUI_VERSION = gui_version()        # from sbgui/_build_info.py (CI build) or 0.1.0-dev (source)
 NAV = [("dashboard", "Übersicht"), ("profiles", "Testprofile"), ("live", "Live-Lauf"), ("results", "Ergebnisse"), ("compare", "Vergleich"), ("export", "Export")]
@@ -130,12 +131,8 @@ class MainWindow(QMainWindow):
         new = sorted(glob.glob(os.path.join(sbench.gui_dir(), "results", "*.json")), key=os.path.getmtime, reverse=True)
         self.result_files = [f for f in new if f not in self.result_files] + self.result_files
         files = []
-        for f in self.result_files:      # skip unreadable / incomplete files instead of breaking the page
-            try:
-                if json.load(open(f, encoding="utf-8")).get("schema") == "sb-result/1":
-                    files.append(f)
-            except (OSError, ValueError):
-                pass
+        for f, _ in load_results(self.result_files):     # unreadable / incomplete files: backed up + skipped, never break a page
+            files.append(f)
         keys = [k for k, _ in NAV]
         for key, page in (("results", lambda: ResultsPage(files, self.run_exit_codes)), ("compare", lambda: Compare(files)), ("export", lambda: ExportPage(files, os.path.join(sbench.gui_dir(), "export")))):
             i = keys.index(key); old = self.stack.widget(i); cur = self.stack.currentIndex()

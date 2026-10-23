@@ -5,16 +5,19 @@ Contract 1.3: partial/stopped_in per test (null summary values when stopped befo
 (meta.cpu_score, summary.score_reference), time series at tick_ms; fatal errors[] of a test (first one prominent, the
 rest expandable), storage targets[] created/deleted (warning for files left behind), per-thread score and (1.3.1) SMT
 from the test's cpus[]."""
-import json, os
+import logging, os
 import numpy as np, pyqtgraph as pg
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QFrame, QToolButton
 from ..widgets import Card, label, chip, table, add_row, plot, fmt_num, Responsive, WrapLabel
-from ..model import (check_schema, host_label, human_bytes, numa_cpus, storage_tests, test_label, summary_metric, fmt_metric,
+from ..legacy import load_results, check_file
+from ..model import (host_label, human_bytes, numa_cpus, storage_tests, test_label, summary_metric, fmt_metric,
                      compute_details, numa_placement, RAM_METHOD_TXT, METRIC_TXT, short_size, sval, is_partial, partial_text,
                      has_values, TYPE_TXT, fatal_errors, error_text, test_cpus, leftover_targets, worker_score, run_outcome,
                      OUTCOME_TXT)
 from .. import theme as T
+
+log = logging.getLogger("sbench-gui")
 
 
 def _local(utc):
@@ -28,12 +31,7 @@ class ResultsPage(QWidget):
         code decides 'abgebrochen' (3) vs 'Laufzeitfehler' (1); without one the result is classified heuristically."""
         super().__init__(); self.setObjectName("page")
         self.exit_codes = exit_codes
-        self.results = []
-        for f in result_files:
-            try:
-                self.results.append((f, check_schema(json.load(open(f, encoding="utf-8")), "sb-result/1")))
-            except (OSError, ValueError):
-                pass
+        self.results = load_results(result_files)      # unreadable/legacy files: backed up + warning, never a crash
         v = QVBoxLayout(self); v.setContentsMargins(28, 24, 28, 24); v.setSpacing(14)
         hdr = QHBoxLayout(); tv = QVBoxLayout(); tv.setSpacing(2)
         tv.addWidget(label("Ergebnis", "h1"))
@@ -100,9 +98,9 @@ class ResultsPage(QWidget):
     # ------------------------------------------------------------------
     def add_result(self, path):
         """Append one more sb-result/1 file (e.g. a 1.3.1 demo outside the result folder); returns False if unreadable."""
-        try:
-            r = check_schema(json.load(open(path, encoding="utf-8")), "sb-result/1")
-        except (OSError, ValueError):
+        r, why = check_file(path, "result")
+        if why:
+            log.warning("Ergebnis %s nicht geladen: %s", path, why)
             return False
         self.results.append((path, r))
         self.box.addItem(f"{host_label(r['meta'])} · {_local(r['started_utc'])} · {os.path.basename(path)}", path)

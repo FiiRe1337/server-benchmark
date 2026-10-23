@@ -27,6 +27,9 @@ on:
       core_sha256:
         description: "SHA-256 des eingebetteten sbench.exe"
         value: ${{ jobs.gui.outputs.core_sha256 }}
+      exe_sha256:
+        description: "SHA-256 der getesteten sbench-gui.exe (release.yml prüft, dass genau diese Datei veröffentlicht wird)"
+        value: ${{ jobs.gui.outputs.exe_sha256 }}
       artifact:
         description: "Artifact-Name der GUI-EXE"
         value: sbench-gui-x64
@@ -45,6 +48,7 @@ jobs:
     outputs:
       version: ${{ steps.info.outputs.version }}
       core_sha256: ${{ steps.info.outputs.core_sha256 }}
+      exe_sha256: ${{ steps.exehash.outputs.exe_sha256 }}
     defaults:
       run:
         shell: pwsh
@@ -134,6 +138,80 @@ jobs:
           "### Klick-Test`n``````text`n$($r.summary -join "`n")`n``````" >> $env:GITHUB_STEP_SUMMARY
           if ($p.ExitCode -ne 0 -or -not $r.ok -or -not $r.frozen) { Get-Content $report; exit 1 }
 
+      - name: Start-Test der EXE (echter Start, leeres und altes beta.2-Benutzerprofil)
+        run: |
+          # v0.2.0-beta.1 opened only briefly on machines that had run a beta before. --self-test did not cover the real
+          # start path (it builds the window from demo data with a temporary SBENCH_GUI_DIR). Here the built EXE runs
+          # --self-test incl. the child --smoke-start (real start: %LOCALAPPDATA%\sbench-gui, data\ next to the EXE, real
+          # core, app.exec()) with its own LOCALAPPDATA/APPDATA per scenario:
+          #   leer          first start, nothing there
+          #   legacy-beta2  profiles/results/logs/run index of beta.1/beta.2 (gui/tests/fixtures/legacy-beta2, anonymised)
+          #   defekt        legacy-beta2 + unusable files (gui/tests/fixtures/legacy-broken): must be backed up, no crash
+          # Fails on exit code <> 0, report not ok, window not visible, stray top-level windows, unexpected backups or
+          # a non-empty %LOCALAPPDATA%\sbench\crash.log.
+          $fx = Join-Path $PWD "tests\fixtures"
+          $exe = (Get-Item dist\sbench-gui.exe).FullName
+          $fail = @(); $sum = @()
+          foreach ($sc in @(@{n="leer"; sets=@(); q=0; res=0}, @{n="legacy-beta2"; sets=@("legacy-beta2"); q=0; res=4},
+                            @{n="defekt"; sets=@("legacy-beta2", "legacy-broken"); q=8; res=4})) {
+            $root = Join-Path $env:RUNNER_TEMP "gui-start-$($sc.n)"
+            $la = Join-Path $root "LocalAppData"; $ra = Join-Path $root "Roaming"; $app = Join-Path $root "app"
+            New-Item -ItemType Directory -Force $la, $ra, $app | Out-Null
+            Copy-Item $exe $app
+            foreach ($set in $sc.sets) {
+              # merge the fixture sets file by file (Copy-Item -Recurse into an existing folder does not merge reliably)
+              python -c "import shutil, sys; shutil.copytree(sys.argv[1], sys.argv[2], dirs_exist_ok=True)" (Join-Path $fx "$set\LocalAppData") $la
+              if (Test-Path (Join-Path $fx "$set\data")) {
+                python -c "import shutil, sys; shutil.copytree(sys.argv[1], sys.argv[2], dirs_exist_ok=True)" (Join-Path $fx "$set\data") (Join-Path $app "data")
+              }
+              if ($LASTEXITCODE -ne 0) { throw "Fixture $set nicht kopiert" }
+            }
+            Get-ChildItem -Recurse -File $la | ForEach-Object { Write-Host "  seed: $($_.FullName.Substring($la.Length))" }
+            $report = Join-Path $PWD "build\selftest-start-$($sc.n).json"
+            $env:LOCALAPPDATA = $la; $env:APPDATA = $ra
+            $p = Start-Process -FilePath (Join-Path $app "sbench-gui.exe") -ArgumentList @("--self-test", "--platforms", "windows", "--no-clicks", "--report", "`"$report`"") -Wait -PassThru -NoNewWindow
+            $crash = Join-Path $la "sbench\crash.log"
+            Write-Host "== $($sc.n): exit code $($p.ExitCode)"
+            if (-not (Test-Path $report)) { $fail += "$($sc.n): kein Bericht (Exit $($p.ExitCode))"; continue }
+            $r = Get-Content $report -Raw | ConvertFrom-Json
+            $r.summary | ForEach-Object { Write-Host $_ }
+            $sum += "[$($sc.n)]"; $sum += $r.summary
+            $st = $r.start
+            if ($p.ExitCode -ne 0 -or -not $r.ok) { $fail += "$($sc.n): Self-Test fehlgeschlagen (Exit $($p.ExitCode))" }
+            if (-not $st -or -not $st.ok -or -not $st.visible) { $fail += "$($sc.n): echter Start fehlgeschlagen: $($st.problems -join '; ')" }
+            # count the backups on disk: the GUI child of --self-test also opens the user's profiles and may back them up first
+            $bak = @(Get-ChildItem -Recurse -File $la -Filter "*.defekt-*")
+            $bak | ForEach-Object { Write-Host "  gesichert: $($_.FullName.Substring($la.Length))" }
+            if ($bak.Count -ne $sc.q) { $fail += "$($sc.n): $($bak.Count) gesicherte Dateien, erwartet $($sc.q)" }
+            $left = @(Get-ChildItem -Recurse -File $la -Filter "*.json" | Where-Object { $_.Name -match "leer|abgeschnitten|liste|unvollstaendig|falsches-schema|kopie|-alt\.json" })
+            if ($left) { $fail += "$($sc.n): defekte Dateien nicht gesichert: $($left.Name -join ', ')" }
+            if ($st -and $st.results -ne $sc.res) { $fail += "$($sc.n): $($st.results) Ergebnisse geladen, erwartet $($sc.res)" }
+            if ((Test-Path $crash) -and (Get-Item $crash).Length -gt 0) {
+              Write-Host "---- crash.log ----"; Get-Content $crash | Write-Host
+              Copy-Item $crash (Join-Path $PWD "build\selftest-start-$($sc.n)-crash.log")
+              $fail += "$($sc.n): crash.log nicht leer"
+            }
+            Get-ChildItem -Recurse (Join-Path $la "sbench-gui\logs") -Filter *.log | ForEach-Object { Copy-Item $_.FullName (Join-Path $PWD "build\selftest-start-$($sc.n)-$($_.Name)") }
+          }
+          "### Start-Test (leer / beta.2 / defekte Dateien)`n``````text`n$($sum -join "`n")`n``````" >> $env:GITHUB_STEP_SUMMARY
+          if ($fail) { $fail | ForEach-Object { Write-Host "::error::$_" }; exit 1 }
+
+      - name: Absturzprotokoll der EXE (Fehler vor Qt und harter Absturz landen in crash.log)
+        run: |
+          foreach ($kind in @("python", "native")) {
+            $la = Join-Path $env:RUNNER_TEMP "gui-crash-$kind"
+            New-Item -ItemType Directory -Force $la | Out-Null
+            $env:LOCALAPPDATA = $la
+            $p = Start-Process -FilePath dist\sbench-gui.exe -ArgumentList @("--self-test-crash", $kind) -Wait -PassThru -NoNewWindow
+            $crash = Join-Path $la "sbench\crash.log"
+            Write-Host "== $kind`: exit code $($p.ExitCode)"
+            if (-not (Test-Path $crash)) { throw "$kind`: crash.log fehlt" }
+            $t = Get-Content $crash -Raw; Write-Host $t
+            # faulthandler on Windows: "Windows fatal exception: access violation" and/or "Fatal Python error: Segmentation fault"
+            $ok = if ($kind -eq "python") { $t.Contains("RuntimeError: --self-test-crash") } else { $t -match "Windows fatal exception|Fatal Python error" }
+            if ($p.ExitCode -eq 0 -or -not $ok) { throw "$kind`: crash.log ohne erwarteten Eintrag oder Exit 0" }
+          }
+
       - name: Manipulationstest (falscher Hash -> Start verweigert, Kopie wiederhergestellt)
         run: |
           $st = Join-Path $env:RUNNER_TEMP "gui-selftest"
@@ -148,6 +226,14 @@ jobs:
           if ($h -ne "${{ steps.info.outputs.core_sha256 }}") { throw "Kopie nicht wiederhergestellt ($h)" }
           if ($p.ExitCode -ne 0) { throw "Self-Test nach Wiederherstellung fehlgeschlagen" }
 
+      - name: SHA-256 der getesteten EXE
+        id: exehash
+        run: |
+          $h = (Get-FileHash dist\sbench-gui.exe -Algorithm SHA256).Hash.ToLower()
+          "exe_sha256=$h" >> $env:GITHUB_OUTPUT
+          Write-Host "sbench-gui.exe SHA-256 $h"
+          "sbench-gui.exe SHA-256 ``$h`` (getestet: Self-Test, Klick-Test, Start-Test, Absturzprotokoll)" >> $env:GITHUB_STEP_SUMMARY
+
       - name: Upload sbench-gui-x64 (nur sbench-gui.exe)
         uses: actions/upload-artifact@v4
         with:
@@ -160,5 +246,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: sbench-gui-selftest-x64
-          path: gui/build/selftest-*.json
+          path: |
+            gui/build/selftest-*.json
+            gui/build/selftest-*.log
           if-no-files-found: ignore

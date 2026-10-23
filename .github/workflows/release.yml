@@ -110,6 +110,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       GUI_VERSION: ${{ needs.gui.outputs.version }}
+      GUI_EXE_SHA256: ${{ needs.gui.outputs.exe_sha256 }}
       PUBLISH: ${{ needs.meta.outputs.publish }}
       VERSION: ${{ needs.core.outputs.version }}
       META_TAG: ${{ needs.meta.outputs.tag }}
@@ -133,6 +134,12 @@ jobs:
           if [ "$(ls -A art/sbench-gui-x64)" != "sbench-gui.exe" ]; then
             echo "::error::sbench-gui-x64 muss genau sbench-gui.exe enthalten"; exit 1
           fi
+          # exactly the EXE that passed self-test, click test and start test in build-gui.yml is published
+          h="$(sha256sum art/sbench-gui-x64/sbench-gui.exe | cut -d' ' -f1)"
+          if [ -z "$GUI_EXE_SHA256" ] || [ "$h" != "$GUI_EXE_SHA256" ]; then
+            echo "::error::sbench-gui.exe SHA-256 $h <> getestete EXE '$GUI_EXE_SHA256'"; exit 1
+          fi
+          echo "sbench-gui.exe = getestete EXE ($h)"
           mkdir assets
           pack() { (cd "art/$1" && zip -q -r -X "$GITHUB_WORKSPACE/assets/$2" .); }
           for a in x64 arm64; do

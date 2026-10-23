@@ -1,0 +1,65 @@
+{
+ "schema": "sb-result/1",
+ "kern_version": "0.1.0-beta.2",
+ "run_id": "stop-test",
+ "started_utc": "2026-10-22T15:21:48.648Z",
+ "ended_utc": "2026-10-22T15:21:50.807Z",
+ "aborted": true,
+ "tick_ms": 1000,
+ "meta": {
+  "host": "DEMO-HOST-01",
+  "os": {
+   "name": "Windows Server 2022 Datacenter",
+   "version": "21H2",
+   "build": "20348.5622"
+  },
+  "cpu": {
+   "model": "AMD EPYC 7763 64-Core Processor",
+   "sockets": 1,
+   "cores": 2,
+   "threads": 4,
+   "base_mhz": 2445
+  },
+  "ram_bytes": 17179869184,
+  "hypervisor": {
+   "present": true,
+   "vendor": "Microsoft Hv",
+   "role": "host",
+   "partition_info": {
+    "is_root": true,
+    "provisional": true,
+    "role_source": "cpuid",
+    "physical_host": "DEMO-PHYS-01",
+    "methods": {
+     "cpuid": {
+      "hypervisor_bit": true,
+      "vendor": "Microsoft Hv",
+      "create_partitions": true
+     },
+     "registry_guest_parameters": true,
+     "service_vmms": true,
+     "pf_virt_firmware_enabled": true,
+     "wmi_computer_system": {
+      "hypervisor_present": true,
+      "model": "Virtual Machine",
+      "manufacturer": "Microsoft Corporation",
+      "ok": true
+     }
+    }
+   }
+  },
+  "drives": [
+   {
+    "path": "\\\\.\\PhysicalDrive0",
+    "model": "Msft Virtual Disk",
+    "size_bytes": 274877906944,
+    "bus": "SAS",
+    "sector_logical": 512,
+    "sector_physical": 4096
+   },
+   {
+    "path": "\\\\.\\PhysicalDrive1",
+    "model": "Msft Virtual Disk",
+    "size_bytes": 161061273600,
+    "bus": "SAS",
+    "sector_logi

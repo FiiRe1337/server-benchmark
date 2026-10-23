@@ -1,10 +1,10 @@
-import json
 import numpy as np, pyqtgraph as pg
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QListWidgetItem, QComboBox, QPushButton
 from ..widgets import Card, label, table, add_row, plot, fmt_num, listw, Responsive
 from .. import theme as T
-from ..model import (match_key, host_label, storage_tests, check_schema, compute_tests, summary_metric, fmt_metric, lower_is_better,
+from ..legacy import load_results
+from ..model import (match_key, host_label, storage_tests, compute_tests, summary_metric, fmt_metric, lower_is_better,
                      compute_details, sval, is_partial, partial_text)
 
 PCTS = ["p50", "p90", "p95", "p99", "p99_9", "p99_99"]
@@ -79,7 +79,7 @@ class Compare(QWidget):
 
     def __init__(self, result_files):
         super().__init__(); self.setObjectName("page")
-        self.results = [(f, check_schema(json.load(open(f, encoding="utf-8")), "sb-result/1")) for f in result_files]
+        self.results = load_results(result_files)      # unreadable/legacy files: backed up + warning, never a crash
         self.results = [(f, r) for f, r in self.results if len([t for t in r["tests"] if t["type"] == "storage"]) > 1] + \
                        [(f, r) for f, r in self.results if len([t for t in r["tests"] if t["type"] == "storage"]) <= 1]
         v = QVBoxLayout(self); v.setContentsMargins(28, 24, 28, 24); v.setSpacing(14)
