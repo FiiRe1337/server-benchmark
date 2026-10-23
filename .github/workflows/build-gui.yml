@@ -179,7 +179,12 @@ jobs:
             $st = $r.start
             if ($p.ExitCode -ne 0 -or -not $r.ok) { $fail += "$($sc.n): Self-Test fehlgeschlagen (Exit $($p.ExitCode))" }
             if (-not $st -or -not $st.ok -or -not $st.visible) { $fail += "$($sc.n): echter Start fehlgeschlagen: $($st.problems -join '; ')" }
-            if ($st -and @($st.quarantined).Count -ne $sc.q) { $fail += "$($sc.n): $(@($st.quarantined).Count) gesicherte Dateien, erwartet $($sc.q)" }
+            # count the backups on disk: the GUI child of --self-test also opens the user's profiles and may back them up first
+            $bak = @(Get-ChildItem -Recurse -File $la -Filter "*.defekt-*")
+            $bak | ForEach-Object { Write-Host "  gesichert: $($_.FullName.Substring($la.Length))" }
+            if ($bak.Count -ne $sc.q) { $fail += "$($sc.n): $($bak.Count) gesicherte Dateien, erwartet $($sc.q)" }
+            $left = @(Get-ChildItem -Recurse -File $la -Filter "*.json" | Where-Object { $_.Name -match "leer|abgeschnitten|liste|unvollstaendig|falsches-schema|kopie|-alt\.json" })
+            if ($left) { $fail += "$($sc.n): defekte Dateien nicht gesichert: $($left.Name -join ', ')" }
             if ($st -and $st.results -ne $sc.res) { $fail += "$($sc.n): $($st.results) Ergebnisse geladen, erwartet $($sc.res)" }
             if ((Test-Path $crash) -and (Get-Item $crash).Length -gt 0) {
               Write-Host "---- crash.log ----"; Get-Content $crash | Write-Host
