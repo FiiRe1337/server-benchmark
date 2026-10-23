@@ -1,9 +1,10 @@
-import json, logging, os, shutil
+import logging, os, shutil
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QListWidgetItem,
                                QCheckBox, QLineEdit, QTextBrowser, QFileDialog, QMessageBox)
 from ..widgets import Card, label, chip, listw, Responsive, ElideLabel
-from ..model import host_label, check_schema, compute_tests
+from ..legacy import load_results
+from ..model import host_label, compute_tests
 from ..report import build_html
 from .. import theme as T
 
@@ -15,7 +16,7 @@ class ExportPage(QWidget):
 
     def __init__(self, result_files, out_dir):
         super().__init__(); self.setObjectName("page")
-        self.results = [(f, check_schema(json.load(open(f, encoding="utf-8")), "sb-result/1")) for f in result_files]
+        self.results = load_results(result_files)      # unreadable/legacy files: backed up + warning, never a crash
         v = QVBoxLayout(self); v.setContentsMargins(28, 24, 28, 24); v.setSpacing(16)
         hdr = QHBoxLayout(); tv = QVBoxLayout(); tv.setSpacing(2)
         tv.addWidget(label("Export", "h1"))

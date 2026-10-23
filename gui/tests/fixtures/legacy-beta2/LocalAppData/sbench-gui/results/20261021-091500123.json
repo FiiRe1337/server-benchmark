@@ -1,0 +1,501 @@
+{
+ "schema": "sb-result/1",
+ "kern_version": "0.1.0-beta.2",
+ "run_id": "smoke-run",
+ "started_utc": "2026-10-22T15:21:26.721Z",
+ "ended_utc": "2026-10-22T15:21:32.902Z",
+ "aborted": false,
+ "tick_ms": 1000,
+ "meta": {
+  "host": "DEMO-HOST-01",
+  "os": {
+   "name": "Windows Server 2022 Datacenter",
+   "version": "21H2",
+   "build": "20348.5622"
+  },
+  "cpu": {
+   "model": "AMD EPYC 7763 64-Core Processor",
+   "sockets": 1,
+   "cores": 2,
+   "threads": 4,
+   "base_mhz": 2445
+  },
+  "ram_bytes": 17179869184,
+  "hypervisor": {
+   "present": true,
+   "vendor": "Microsoft Hv",
+   "role": "host",
+   "partition_info": {
+    "is_root": true,
+    "provisional": true,
+    "role_source": "cpuid",
+    "physical_host": "DEMO-PHYS-01",
+    "methods": {
+     "cpuid": {
+      "hypervisor_bit": true,
+      "vendor": "Microsoft Hv",
+      "create_partitions": true
+     },
+     "registry_guest_parameters": true,
+     "service_vmms": true,
+     "pf_virt_firmware_enabled": true,
+     "wmi_computer_system": {
+      "hypervisor_present": true,
+      "model": "Virtual Machine",
+      "manufacturer": "Microsoft Corporation",
+      "ok": true
+     }
+    }
+   }
+  },
+  "drives": [
+   {
+    "path": "\\\\.\\PhysicalDrive0",
+    "model": "Msft Virtual Disk",
+    "size_bytes": 274877906944,
+    "bus": "SAS",
+    "sector_logical": 512,
+    "sector_physical": 4096
+   },
+   {
+    "path": "\\\\.\\PhysicalDrive1",
+    "model": "Msft Virtual Disk",
+    "size_bytes": 161061273600,
+    "bus": "SAS",
+    "sector_logical": 512,
+    "sector_physical": 4096
+   }
+  ],
+  "nics": [
+   {
+    "name": "Microsoft Hyper-V Network Adapter #3",
+    "ipv4": [
+     "192.0.2.10"
+    ],
+    "ipv6": [
+     "2001:db8::10"
+    ],
+    "link_mbps": 50000
+   },
+   {
+    "name": "Hyper-V Virtual Ethernet Adapter",
+    "ipv4": [
+     "192.0.2.11"
+    ],
+    "ipv6": [
+     "2001:db8::11"
+    ],
+    "link_mbps": 10000
+   }
+  ],
+  "ram_free_bytes": 14601076736,
+  "numa_nodes": [
+   {
+    "id": 0,
+    "cpus": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "ram_bytes": 17174360064,
+    "ram_free_bytes": 14601072640,
+    "ram_method": "total"
+   }
+  ],
+  "elevated": true,
+  "data_dir": "C:\\Users\\DEMO-USER\\AppData\\Local\\Temp\\sbench-demo\\bin\\data",
+  "cpu_score": {
+   "formula": "score = ops_per_s / ref_ops_per_s[workload] * 1000",
+   "points": 1000,
+   "reference_threads": 1,
+   "reference_system": "GitHub-Runner windows-2022/windows-2025, AMD EPYC 7763, 1 Thread",
+   "ref_ops_per_s": {
+    "int": 280000000,
+    "float": 150000000,
+    "crypto": 3400000,
+    "mixed": 380000
+   }
+  }
+ },
+ "tests": [
+  {
+   "index": 0,
+   "type": "storage",
+   "partial": false,
+   "config": {
+    "type": "storage",
+    "name": "Smoke 4K random 70/30",
+    "targets": [
+     {
+      "path": "C:\\Users\\DEMO-USER\\AppData\\Local\\Temp\\sbench-demo\\sbtest.dat",
+      "kind": "file",
+      "file_size": "256MiB"
+     }
+    ],
+    "workers": 2,
+    "queue_depth": 8,
+    "warmup_s": 1,
+    "duration_s": 5,
+    "cache": "unbuffered",
+    "access_specs": [
+     {
+      "name": "4K random",
+      "weight": 100,
+      "block_size": "4KiB",
+      "read_pct": 70,
+      "random_pct": 100
+     }
+    ]
+   },
+   "summary": {
+    "iops": 268.5,
+    "mbps": 1.1,
+    "read_iops": 185.4,
+    "write_iops": 83.1,
+    "read_mbps": 0.76,
+    "write_mbps": 0.34,
+    "lat_us": {
+     "min": 37579.3,
+     "mean": 58875.445,
+     "max": 187131.2,
+     "stddev": 17753.464,
+     "p50": 55181.312,
+     "p90": 68419.584,
+     "p95": 72089.6,
+     "p99": 171442.176,
+     "p99_9": 186122.24,
+     "p99_99": 187131.2
+    },
+    "errors": 0,
+    "io_count": 1344,
+    "cpu_pct": 2.7,
+    "proc_cpu_pct": 0
+   },
+   "targets": [
+    {
+     "index": 0,
+     "path": "C:\\Users\\DEMO-USER\\AppData\\Local\\Temp\\sbench-demo\\sbtest.dat",
+     "kind": "file",
+     "created": true,
+     "deleted": true
+    }
+   ],
+   "per_worker": [
+    {
+     "id": 0,
+     "target": 0,
+     "iops": 134.3,
+     "mbps": 0.55,
+     "read_iops": 91.1,
+     "write_iops": 43.2,
+     "lat_us": {
+      "min": 40535,
+      "mean": 58880.758,
+      "max": 187131.2,
+      "stddev": 17962.724,
+      "p50": 55443.456,
+      "p90": 68419.584,
+      "p95": 72613.888,
+      "p99": 176685.056,
+      "p99_9": 187131.2,
+      "p99_99": 187131.2
+     },
+     "io_count": 672,
+     "errors": 0
+    },
+    {
+     "id": 1,
+     "target": 0,
+     "iops": 134.3,
+     "mbps": 0.55,
+     "read_iops": 94.3,
+     "write_iops": 40,
+     "lat_us": {
+      "min": 37579.3,
+      "mean": 58870.133,
+      "max": 176565.8,
+      "stddev": 17541.705,
+      "p50": 55181.312,
+      "p90": 68419.584,
+      "p95": 72089.6,
+      "p99": 170393.6,
+      "p99_9": 176565.8,
+      "p99_99": 176565.8
+     },
+     "io_count": 672,
+     "errors": 0
+    }
+   ],
+   "per_spec": [
+    {
+     "spec": 0,
+     "weight": 100,
+     "block_size_bytes": 4096,
+     "read_pct": 70,
+     "random_pct": 100,
+     "iops": 268.5,
+     "mbps": 1.1,
+     "lat_us": {
+      "min": 37579.3,
+      "mean": 58875.445,
+      "max": 187131.2,
+      "stddev": 17753.464,
+      "p50": 55181.312,
+      "p90": 68419.584,
+      "p95": 72089.6,
+      "p99": 171442.176,
+      "p99_9": 186122.24,
+      "p99_99": 187131.2
+     },
+     "io_count": 1344
+    }
+   ],
+   "histogram": [
+    {
+     "le_us": 37748.735,
+     "count": 2
+    },
+    {
+     "le_us": 39845.887,
+     "count": 3
+    },
+    {
+     "le_us": 40894.463,
+     "count": 6
+    },
+    {
+     "le_us": 41943.039,
+     "count": 5
+    },
+    {
+     "le_us": 42991.615,
+     "count": 9
+    },
+    {
+     "le_us": 44040.191,
+     "count": 20
+    },
+    {
+     "le_us": 45088.767,
+     "count": 25
+    },
+    {
+     "le_us": 46137.343,
+     "count": 23
+    },
+    {
+     "le_us": 47185.919,
+     "count": 46
+    },
+    {
+     "le_us": 48234.495,
+     "count": 27
+    },
+    {
+     "le_us": 49283.071,
+     "count": 44
+    },
+    {
+     "le_us": 50331.647,
+     "count": 55
+    },
+    {
+     "le_us": 51380.223,
+     "count": 66
+    },
+    {
+     "le_us": 52428.799,
+     "count": 83
+    },
+    {
+     "le_us": 53477.375,
+     "count": 109
+    },
+    {
+     "le_us": 54525.951,
+     "count": 82
+    },
+    {
+     "le_us": 55574.527,
+     "count": 91
+    },
+    {
+     "le_us": 56623.103,
+     "count": 61
+    },
+    {
+     "le_us": 57671.679,
+     "count": 58
+    },
+    {
+     "le_us": 58720.255,
+     "count": 58
+    },
+    {
+     "le_us": 59768.831,
+     "count": 57
+    },
+    {
+     "le_us": 60817.407,
+     "count": 31
+    },
+    {
+     "le_us": 61865.983,
+     "count": 35
+    },
+    {
+     "le_us": 62914.559,
+     "count": 44
+    },
+    {
+     "le_us": 63963.135,
+     "count": 46
+    },
+    {
+     "le_us": 65011.711,
+     "count": 34
+    },
+    {
+     "le_us": 66060.287,
+     "count": 32
+    },
+    {
+     "le_us": 67108.863,
+     "count": 30
+    },
+    {
+     "le_us": 69206.015,
+     "count": 54
+    },
+    {
+     "le_us": 71303.167,
+     "count": 32
+    },
+    {
+     "le_us": 73400.319,
+     "count": 17
+    },
+    {
+     "le_us": 75497.471,
+     "count": 9
+    },
+    {
+     "le_us": 77594.623,
+     "count": 4
+    },
+    {
+     "le_us": 79691.775,
+     "count": 2
+    },
+    {
+     "le_us": 81788.927,
+     "count": 6
+    },
+    {
+     "le_us": 83886.079,
+     "count": 1
+    },
+    {
+     "le_us": 85983.231,
+     "count": 3
+    },
+    {
+     "le_us": 88080.383,
+     "count": 2
+    },
+    {
+     "le_us": 142606.335,
+     "count": 3
+    },
+    {
+     "le_us": 146800.639,
+     "count": 13
+    },
+    {
+     "le_us": 171966.463,
+     "count": 4
+    },
+    {
+     "le_us": 176160.767,
+     "count": 4
+    },
+    {
+     "le_us": 180355.071,
+     "count": 4
+    },
+    {
+     "le_us": 184549.375,
+     "count": 2
+    },
+    {
+     "le_us": 188743.679,
+     "count": 2
+    }
+   ],
+   "timeseries": [
+    {
+     "t": 1.013,
+     "iops": 259.7,
+     "mbps": 1.06,
+     "lat_us": {
+      "mean": 58408.624,
+      "p99": 75235.328,
+      "max": 76473.3
+     },
+     "cpu_pct": 1.1,
+     "proc_cpu_pct": 0
+    },
+    {
+     "t": 2.014,
+     "iops": 290.6,
+     "mbps": 1.19,
+     "lat_us": {
+      "mean": 53673.898,
+      "p99": 66191.36,
+      "max": 66342.3
+     },
+     "cpu_pct": 3.1,
+     "proc_cpu_pct": 0
+    },
+    {
+     "t": 3.004,
+     "iops": 259.6,
+     "mbps": 1.06,
+     "lat_us": {
+      "mean": 63707.645,
+      "p99": 145227.776,
+      "max": 145916
+     },
+     "cpu_pct": 1.6,
+     "proc_cpu_pct": 0
+    },
+    {
+     "t": 4.004,
+     "iops": 252.9,
+     "mbps": 1.04,
+     "lat_us": {
+      "mean": 63231.306,
+      "p99": 182976.512,
+      "max": 187131.2
+     },
+     "cpu_pct": 3.9,
+     "proc_cpu_pct": 0
+    },
+    {
+     "t": 5.005,
+     "iops": 279.9,
+     "mbps": 1.15,
+     "lat_us": {
+      "mean": 56348.718,
+      "p99": 85196.8,
+      "max": 87065.4
+     },
+     "cpu_pct": 3.5,
+     "proc_cpu_pct": 0
+    }
+   ],
+   "errors": []
+  }
+ ]
+}

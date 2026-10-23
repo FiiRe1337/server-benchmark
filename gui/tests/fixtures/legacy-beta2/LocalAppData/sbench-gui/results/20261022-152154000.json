@@ -1,0 +1,773 @@
+{
+ "schema": "sb-result/1",
+ "kern_version": "0.1.0-beta.2",
+ "run_id": "20261022-152154-d989",
+ "started_utc": "2026-10-22T15:21:54.581Z",
+ "ended_utc": "2026-10-22T15:22:20.272Z",
+ "aborted": false,
+ "tick_ms": 500,
+ "meta": {
+  "host": "DEMO-HOST-01",
+  "os": {
+   "name": "Windows Server 2022 Datacenter",
+   "version": "21H2",
+   "build": "20348.5622"
+  },
+  "cpu": {
+   "model": "AMD EPYC 7763 64-Core Processor",
+   "sockets": 1,
+   "cores": 2,
+   "threads": 4,
+   "base_mhz": 2445
+  },
+  "ram_bytes": 17179869184,
+  "hypervisor": {
+   "present": true,
+   "vendor": "Microsoft Hv",
+   "role": "host",
+   "partition_info": {
+    "is_root": true,
+    "provisional": true,
+    "role_source": "cpuid",
+    "physical_host": "DEMO-PHYS-01",
+    "methods": {
+     "cpuid": {
+      "hypervisor_bit": true,
+      "vendor": "Microsoft Hv",
+      "create_partitions": true
+     },
+     "registry_guest_parameters": true,
+     "service_vmms": true,
+     "pf_virt_firmware_enabled": true,
+     "wmi_computer_system": {
+      "hypervisor_present": true,
+      "model": "Virtual Machine",
+      "manufacturer": "Microsoft Corporation",
+      "ok": true
+     }
+    }
+   }
+  },
+  "drives": [
+   {
+    "path": "\\\\.\\PhysicalDrive0",
+    "model": "Msft Virtual Disk",
+    "size_bytes": 274877906944,
+    "bus": "SAS",
+    "sector_logical": 512,
+    "sector_physical": 4096
+   },
+   {
+    "path": "\\\\.\\PhysicalDrive1",
+    "model": "Msft Virtual Disk",
+    "size_bytes": 161061273600,
+    "bus": "SAS",
+    "sector_logical": 512,
+    "sector_physical": 4096
+   }
+  ],
+  "nics": [
+   {
+    "name": "Microsoft Hyper-V Network Adapter #3",
+    "ipv4": [
+     "192.0.2.10"
+    ],
+    "ipv6": [
+     "2001:db8::10"
+    ],
+    "link_mbps": 50000
+   },
+   {
+    "name": "Hyper-V Virtual Ethernet Adapter",
+    "ipv4": [
+     "192.0.2.11"
+    ],
+    "ipv6": [
+     "2001:db8::11"
+    ],
+    "link_mbps": 10000
+   }
+  ],
+  "ram_free_bytes": 14621757440,
+  "numa_nodes": [
+   {
+    "id": 0,
+    "cpus": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "ram_bytes": 17174360064,
+    "ram_free_bytes": 14621757440,
+    "ram_method": "total"
+   }
+  ],
+  "elevated": true,
+  "data_dir": "C:\\Users\\DEMO-USER\\AppData\\Local\\Temp\\sbench-demo\\bin\\data",
+  "cpu_score": {
+   "formula": "score = ops_per_s / ref_ops_per_s[workload] * 1000",
+   "points": 1000,
+   "reference_threads": 1,
+   "reference_system": "GitHub-Runner windows-2022/windows-2025, AMD EPYC 7763, 1 Thread",
+   "ref_ops_per_s": {
+    "int": 280000000,
+    "float": 150000000,
+    "crypto": 3400000,
+    "mixed": 380000
+   }
+  }
+ },
+ "tests": [
+  {
+   "index": 0,
+   "type": "cpu",
+   "partial": false,
+   "config": {
+    "type": "cpu",
+    "name": "int 1T",
+    "workload": "int",
+    "threads": 1,
+    "warmup_s": 0.5,
+    "duration_s": 2
+   },
+   "summary": {
+    "workload": "int",
+    "threads": 1,
+    "ops_per_s": 285375604.2,
+    "score": 1019.2,
+    "ops": 571211776,
+    "score_reference": 280000000,
+    "cpus": [
+     0
+    ],
+    "cpu_pct": 25,
+    "proc_cpu_pct": 25.17
+   },
+   "cpus": [
+    {
+     "id": 0,
+     "cpu": 0,
+     "group": 0,
+     "number": 0,
+     "numa_node": 0,
+     "core": 0,
+     "smt_sibling_of": null
+    }
+   ],
+   "per_worker": [
+    {
+     "id": 0,
+     "cpu": 0,
+     "node": 0,
+     "ops_per_s": 285375604.2
+    }
+   ],
+   "timeseries": [
+    {
+     "t": 0.516,
+     "ops_per_s": 285255657.4,
+     "score": 1018.8,
+     "cpu_pct": 25.2,
+     "proc_cpu_pct": 25
+    },
+    {
+     "t": 1.031,
+     "ops_per_s": 285207196,
+     "score": 1018.6,
+     "cpu_pct": 25,
+     "proc_cpu_pct": 25
+    },
+    {
+     "t": 1.532,
+     "ops_per_s": 285660389.9,
+     "score": 1020.2,
+     "cpu_pct": 24.8,
+     "proc_cpu_pct": 25.73
+    },
+    {
+     "t": 2.001,
+     "ops_per_s": 285470029.9,
+     "score": 1019.5,
+     "cpu_pct": 25,
+     "proc_cpu_pct": 24.97
+    }
+   ],
+   "errors": []
+  },
+  {
+   "index": 1,
+   "type": "cpu",
+   "partial": false,
+   "config": {
+    "type": "cpu",
+    "name": "float 1T",
+    "workload": "float",
+    "threads": 1,
+    "warmup_s": 0.5,
+    "duration_s": 2
+   },
+   "summary": {
+    "workload": "float",
+    "threads": 1,
+    "ops_per_s": 150901949.2,
+    "score": 1006,
+    "ops": 302252032,
+    "score_reference": 150000000,
+    "cpus": [
+     0
+    ],
+    "cpu_pct": 25.4,
+    "proc_cpu_pct": 24.96
+   },
+   "cpus": [
+    {
+     "id": 0,
+     "cpu": 0,
+     "group": 0,
+     "number": 0,
+     "numa_node": 0,
+     "core": 0,
+     "smt_sibling_of": null
+    }
+   ],
+   "per_worker": [
+    {
+     "id": 0,
+     "cpu": 0,
+     "node": 0,
+     "ops_per_s": 150901949.2
+    }
+   ],
+   "timeseries": [
+    {
+     "t": 0.5,
+     "ops_per_s": 151169681.7,
+     "score": 1007.8,
+     "cpu_pct": 25,
+     "proc_cpu_pct": 24.99
+    },
+    {
+     "t": 1.002,
+     "ops_per_s": 150785280.9,
+     "score": 1005.2,
+     "cpu_pct": 25,
+     "proc_cpu_pct": 24.92
+    },
+    {
+     "t": 1.503,
+     "ops_per_s": 150690368.6,
+     "score": 1004.6,
+     "cpu_pct": 26.6,
+     "proc_cpu_pct": 24.95
+    },
+    {
+     "t": 2.003,
+     "ops_per_s": 151021523.8,
+     "score": 1006.8,
+     "cpu_pct": 25,
+     "proc_cpu_pct": 25
+    }
+   ],
+   "errors": []
+  },
+  {
+   "index": 2,
+   "type": "cpu",
+   "partial": false,
+   "config": {
+    "type": "cpu",
+    "name": "crypto 1T",
+    "workload": "crypto",
+    "threads": 1,
+    "warmup_s": 0.5,
+    "duration_s": 2
+   },
+   "summary": {
+    "workload": "crypto",
+    "threads": 1,
+    "ops_per_s": 3568053.3,
+    "score": 1049.4,
+    "ops": 7141376,
+    "score_reference": 3400000,
+    "cpus": [
+     0
+    ],
+    "cpu_pct": 25,
+    "proc_cpu_pct": 24.98
+   },
+   "cpus": [
+    {
+     "id": 0,
+     "cpu": 0,
+     "group": 0,
+     "number": 0,
+     "numa_node": 0,
+     "core": 0,
+     "smt_sibling_of": null
+    }
+   ],
+   "per_worker": [
+    {
+     "id": 0,
+     "cpu": 0,
+     "node": 0,
+     "ops_per_s": 3568053.3
+    }
+   ],
+   "timeseries": [
+    {
+     "t": 0.516,
+     "ops_per_s": 3567021.8,
+     "score": 1049.1,
+     "cpu_pct": 25.2,
+     "proc_cpu_pct": 25
+    },
+    {
+     "t": 1.016,
+     "ops_per_s": 3572541.3,
+     "score": 1050.7,
+     "cpu_pct": 25.4,
+     "proc_cpu_pct": 24.98
+    },
+    {
+     "t": 1.532,
+     "ops_per_s": 3562949.4,
+     "score": 1047.9,
+     "cpu_pct": 24.6,
+     "proc_cpu_pct": 25
+    },
+    {
+     "t": 2.001,
+     "ops_per_s": 3571409.3,
+     "score": 1050.4,
+     "cpu_pct": 24.8,
+     "proc_cpu_pct": 24.95
+    }
+   ],
+   "errors": []
+  },
+  {
+   "index": 3,
+   "type": "cpu",
+   "partial": false,
+   "config": {
+    "type": "cpu",
+    "name": "mixed 1T",
+    "workload": "mixed",
+    "threads": 1,
+    "warmup_s": 0.5,
+    "duration_s": 2
+   },
+   "summary": {
+    "workload": "mixed",
+    "threads": 1,
+    "ops_per_s": 396085.3,
+    "score": 1042.3,
+    "ops": 792832,
+    "score_reference": 380000,
+    "cpus": [
+     0
+    ],
+    "cpu_pct": 25,
+    "proc_cpu_pct": 24.98
+   },
+   "cpus": [
+    {
+     "id": 0,
+     "cpu": 0,
+     "group": 0,
+     "number": 0,
+     "numa_node": 0,
+     "core": 0,
+     "smt_sibling_of": null
+    }
+   ],
+   "per_worker": [
+    {
+     "id": 0,
+     "cpu": 0,
+     "node": 0,
+     "ops_per_s": 396085.3
+    }
+   ],
+   "timeseries": [
+    {
+     "t": 0.501,
+     "ops_per_s": 395353.1,
+     "score": 1040.4,
+     "cpu_pct": 24.8,
+     "proc_cpu_pct": 24.94
+    },
+    {
+     "t": 1.001,
+     "ops_per_s": 396657.5,
+     "score": 1043.8,
+     "cpu_pct": 25.4,
+     "proc_cpu_pct": 24.99
+    },
+    {
+     "t": 1.517,
+     "ops_per_s": 396116.2,
+     "score": 1042.4,
+     "cpu_pct": 24.6,
+     "proc_cpu_pct": 25
+    },
+    {
+     "t": 2.001,
+     "ops_per_s": 395900.5,
+     "score": 1041.8,
+     "cpu_pct": 25,
+     "proc_cpu_pct": 25
+    }
+   ],
+   "errors": []
+  },
+  {
+   "index": 4,
+   "type": "cpu",
+   "partial": false,
+   "config": {
+    "type": "cpu",
+    "name": "int alle",
+    "workload": "int",
+    "threads": 0,
+    "warmup_s": 0.5,
+    "duration_s": 2
+   },
+   "summary": {
+    "workload": "int",
+    "threads": 4,
+    "ops_per_s": 1411394044.1,
+    "score": 5040.7,
+    "ops": 5917769728,
+    "score_reference": 280000000,
+    "cpus": [
+     0,
+     2,
+     1,
+     3
+    ],
+    "cpu_pct": 100,
+    "proc_cpu_pct": 100
+   },
+   "cpus": [
+    {
+     "id": 0,
+     "cpu": 0,
+     "group": 0,
+     "number": 0,
+     "numa_node": 0,
+     "core": 0,
+     "smt_sibling_of": null
+    },
+    {
+     "id": 1,
+     "cpu": 2,
+     "group": 0,
+     "number": 2,
+     "numa_node": 0,
+     "core": 1,
+     "smt_sibling_of": null
+    },
+    {
+     "id": 2,
+     "cpu": 1,
+     "group": 0,
+     "number": 1,
+     "numa_node": 0,
+     "core": 0,
+     "smt_sibling_of": 0
+    },
+    {
+     "id": 3,
+     "cpu": 3,
+     "group": 0,
+     "number": 3,
+     "numa_node": 0,
+     "core": 1,
+     "smt_sibling_of": 2
+    }
+   ],
+   "per_worker": [
+    {
+     "id": 0,
+     "cpu": 0,
+     "node": 0,
+     "ops_per_s": 351371438
+    },
+    {
+     "id": 1,
+     "cpu": 2,
+     "node": 0,
+     "ops_per_s": 353184564.7
+    },
+    {
+     "id": 2,
+     "cpu": 1,
+     "node": 0,
+     "ops_per_s": 352840695.8
+    },
+    {
+     "id": 3,
+     "cpu": 3,
+     "node": 0,
+     "ops_per_s": 353997345.6
+    }
+   ],
+   "timeseries": [
+    {
+     "t": 0.798,
+     "ops_per_s": 1100761213.5,
+     "score": 3931.3,
+     "cpu_pct": 100,
+     "proc_cpu_pct": 100
+    },
+    {
+     "t": 1.799,
+     "ops_per_s": 1099256726.3,
+     "score": 3925.9,
+     "cpu_pct": 100,
+     "proc_cpu_pct": 100
+    },
+    {
+     "t": 2.801,
+     "ops_per_s": 1096117043.6,
+     "score": 3914.7,
+     "cpu_pct": 100,
+     "proc_cpu_pct": 100
+    }
+   ],
+   "errors": []
+  },
+  {
+   "index": 5,
+   "type": "cpu",
+   "partial": false,
+   "config": {
+    "type": "cpu",
+    "name": "mixed alle",
+    "workload": "mixed",
+    "threads": 0,
+    "warmup_s": 0.5,
+    "duration_s": 2
+   },
+   "summary": {
+    "workload": "mixed",
+    "threads": 4,
+    "ops_per_s": 1661924.5,
+    "score": 4373.5,
+    "ops": 4919296,
+    "score_reference": 380000,
+    "cpus": [
+     0,
+     2,
+     1,
+     3
+    ],
+    "cpu_pct": 100,
+    "proc_cpu_pct": 100
+   },
+   "cpus": [
+    {
+     "id": 0,
+     "cpu": 0,
+     "group": 0,
+     "number": 0,
+     "numa_node": 0,
+     "core": 0,
+     "smt_sibling_of": null
+    },
+    {
+     "id": 1,
+     "cpu": 2,
+     "group": 0,
+     "number": 2,
+     "numa_node": 0,
+     "core": 1,
+     "smt_sibling_of": null
+    },
+    {
+     "id": 2,
+     "cpu": 1,
+     "group": 0,
+     "number": 1,
+     "numa_node": 0,
+     "core": 0,
+     "smt_sibling_of": 0
+    },
+    {
+     "id": 3,
+     "cpu": 3,
+     "group": 0,
+     "number": 3,
+     "numa_node": 0,
+     "core": 1,
+     "smt_sibling_of": 2
+    }
+   ],
+   "per_worker": [
+    {
+     "id": 0,
+     "cpu": 0,
+     "node": 0,
+     "ops_per_s": 415091.9
+    },
+    {
+     "id": 1,
+     "cpu": 2,
+     "node": 0,
+     "ops_per_s": 415178.4
+    },
+    {
+     "id": 2,
+     "cpu": 1,
+     "node": 0,
+     "ops_per_s": 415135.2
+    },
+    {
+     "id": 3,
+     "cpu": 3,
+     "node": 0,
+     "ops_per_s": 416519
+    }
+   ],
+   "timeseries": [
+    {
+     "t": 0.768,
+     "ops_per_s": 1416633.8,
+     "score": 3728,
+     "cpu_pct": 100,
+     "proc_cpu_pct": 100
+    },
+    {
+     "t": 1.724,
+     "ops_per_s": 1409304.8,
+     "score": 3708.7,
+     "cpu_pct": 100,
+     "proc_cpu_pct": 63.75
+    },
+    {
+     "t": 2.318,
+     "ops_per_s": 1418233.6,
+     "score": 3732.2,
+     "cpu_pct": 100,
+     "proc_cpu_pct": 100
+    }
+   ],
+   "errors": []
+  },
+  {
+   "index": 6,
+   "type": "cpu",
+   "partial": false,
+   "config": {
+    "type": "cpu",
+    "name": "mixed Knoten 0",
+    "workload": "mixed",
+    "threads": 0,
+    "numa_node": 0,
+    "warmup_s": 0,
+    "duration_s": 1
+   },
+   "summary": {
+    "workload": "mixed",
+    "threads": 4,
+    "ops_per_s": 1647803.1,
+    "score": 4336.3,
+    "ops": 3972608,
+    "score_reference": 380000,
+    "numa_node": 0,
+    "cpus": [
+     0,
+     2,
+     1,
+     3
+    ],
+    "cpu_pct": 100,
+    "proc_cpu_pct": 100
+   },
+   "cpus": [
+    {
+     "id": 0,
+     "cpu": 0,
+     "group": 0,
+     "number": 0,
+     "numa_node": 0,
+     "core": 0,
+     "smt_sibling_of": null
+    },
+    {
+     "id": 1,
+     "cpu": 2,
+     "group": 0,
+     "number": 2,
+     "numa_node": 0,
+     "core": 1,
+     "smt_sibling_of": null
+    },
+    {
+     "id": 2,
+     "cpu": 1,
+     "group": 0,
+     "number": 1,
+     "numa_node": 0,
+     "core": 0,
+     "smt_sibling_of": 0
+    },
+    {
+     "id": 3,
+     "cpu": 3,
+     "group": 0,
+     "number": 3,
+     "numa_node": 0,
+     "core": 1,
+     "smt_sibling_of": 2
+    }
+   ],
+   "per_worker": [
+    {
+     "id": 0,
+     "cpu": 0,
+     "node": 0,
+     "ops_per_s": 408552.8
+    },
+    {
+     "id": 1,
+     "cpu": 2,
+     "node": 0,
+     "ops_per_s": 413490.5
+    },
+    {
+     "id": 2,
+     "cpu": 1,
+     "node": 0,
+     "ops_per_s": 411950.8
+    },
+    {
+     "id": 3,
+     "cpu": 3,
+     "node": 0,
+     "ops_per_s": 413809
+    }
+   ],
+   "timeseries": [
+    {
+     "t": 0.595,
+     "ops_per_s": 1416962.7,
+     "score": 3728.8,
+     "cpu_pct": 100,
+     "proc_cpu_pct": 100
+    },
+    {
+     "t": 1.159,
+     "ops_per_s": 1411801.4,
+     "score": 3715.3,
+     "cpu_pct": 100,
+     "proc_cpu_pct": 100
+    }
+   ],
+   "errors": []
+  }
+ ]
+}

@@ -26,8 +26,12 @@ class Card(QFrame):
         if title:
             h = QHBoxLayout(); h.setSpacing(8)
             v = QVBoxLayout(); v.setSpacing(1); self.title_label = label(title, "h2"); v.addWidget(self.title_label)
+            # v0.2.0-beta.1: setVisible(True) ran here while the label had no parent yet (layout v not installed) and opened
+            # it as its own top-level window: 27 windows flashed up and vanished at every start. Only hide (never show)
+            # an unparented widget; the parent card shows its children.
             self.subtitle_label = label(subtitle or "", "muted"); v.addWidget(self.subtitle_label)
-            self.subtitle_label.setVisible(bool(subtitle))
+            if not subtitle:
+                self.subtitle_label.hide()
             h.addLayout(v); h.addStretch(1)
             for w in (right or []):
                 h.addWidget(w)

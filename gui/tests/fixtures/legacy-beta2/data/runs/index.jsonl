@@ -1,0 +1,4 @@
+{"run_id": "smoke-run", "started_utc": "2026-10-20T15:52:39.754Z", "ended_utc": "2026-10-20T15:52:45.866Z", "out": "C:\\Users\\DEMO-USER\\AppData\\Local\\sbench-gui\\results\\20261014-160000789.json", "exit_code": 0}
+{"run_id": "smoke-run", "started_utc": "2026-10-22T15:21:26.721Z", "ended_utc": "2026-10-22T15:21:32.902Z", "out": "C:\\Users\\DEMO-USER\\AppData\\Local\\sbench-gui\\results\\20261021-091500123.json", "exit_code": 0}
+{"run_id": "stop-test", "started_utc": "2026-10-22T15:21:48.648Z", "ended_utc": "2026-10-22T15:21:50.807Z", "out": "C:\\Users\\DEMO-USER\\AppData\\Local\\sbench-gui\\results\\20261021-093000456.json", "exit_code": 3}
+{"run_id": "20261022-152154-d989", "started_utc": "2026-10-22T15:21:54.581Z", "ended_utc": "2026-10-22T15:22:20.272Z", "out": "C:\\Users\\DEMO-USER\\AppData\\Local\\sbench-gui\\results\\20261022-152154000.json", "exit_code": 0}

@@ -1,0 +1,545 @@
+{
+ "schema": "sb-result/1",
+ "kern_version": "0.1.0-beta.1",
+ "run_id": "smoke-run",
+ "started_utc": "2026-10-20T15:52:39.754Z",
+ "ended_utc": "2026-10-20T15:52:45.866Z",
+ "aborted": false,
+ "meta": {
+  "host": "DEMO-HOST-01",
+  "os": {
+   "name": "Windows Server 2022 Datacenter",
+   "version": "21H2",
+   "build": "20348.5622"
+  },
+  "cpu": {
+   "model": "AMD EPYC 9V74 80-Core Processor",
+   "sockets": 1,
+   "cores": 1,
+   "threads": 2,
+   "base_mhz": 2596
+  },
+  "ram_bytes": 8589934592,
+  "hypervisor": {
+   "present": true,
+   "vendor": "Microsoft Hv",
+   "role": "host",
+   "partition_info": {
+    "is_root": true,
+    "provisional": true,
+    "role_source": "cpuid",
+    "physical_host": "DEMO-PHYS-01",
+    "methods": {
+     "cpuid": {
+      "hypervisor_bit": true,
+      "vendor": "Microsoft Hv",
+      "create_partitions": true
+     },
+     "registry_guest_parameters": true,
+     "service_vmms": true,
+     "pf_virt_firmware_enabled": true,
+     "wmi_computer_system": {
+      "hypervisor_present": true,
+      "model": "Virtual Machine",
+      "manufacturer": "Microsoft Corporation",
+      "ok": true
+     }
+    }
+   }
+  },
+  "drives": [
+   {
+    "path": "\\\\.\\PhysicalDrive0",
+    "model": "Virtual_Disk NVME Premium",
+    "size_bytes": 274877906944,
+    "bus": "NVMe",
+    "sector_logical": 512,
+    "sector_physical": 4096
+   },
+   {
+    "path": "\\\\.\\PhysicalDrive1",
+    "model": "Microsoft NVMe Direct Disk v2",
+    "size_bytes": 118111600640,
+    "bus": "NVMe",
+    "sector_logical": 512,
+    "sector_physical": 4096
+   }
+  ],
+  "nics": [
+   {
+    "name": "Microsoft Hyper-V Network Adapter #3",
+    "ipv4": [
+     "192.0.2.10"
+    ],
+    "ipv6": [
+     "2001:db8::10"
+    ],
+    "link_mbps": 100000
+   },
+   {
+    "name": "Hyper-V Virtual Ethernet Adapter",
+    "ipv4": [
+     "192.0.2.11"
+    ],
+    "ipv6": [
+     "2001:db8::11"
+    ],
+    "link_mbps": 10000
+   }
+  ],
+  "ram_free_bytes": 6169530368,
+  "numa_nodes": [
+   {
+    "id": 0,
+    "cpus": [
+     0,
+     1
+    ],
+    "ram_bytes": 8589934592,
+    "ram_free_bytes": 6169530368
+   }
+  ],
+  "elevated": true,
+  "data_dir": "C:\\Users\\DEMO-USER\\AppData\\Local\\Temp\\sbench-demo\\bin\\data"
+ },
+ "tests": [
+  {
+   "index": 0,
+   "type": "storage",
+   "config": {
+    "type": "storage",
+    "name": "Smoke 4K random 70/30",
+    "targets": [
+     {
+      "path": "C:\\Users\\DEMO-USER\\AppData\\Local\\Temp\\sbench-demo\\sbtest.dat",
+      "kind": "file",
+      "file_size": "256MiB"
+     }
+    ],
+    "workers": 2,
+    "queue_depth": 8,
+    "warmup_s": 1,
+    "duration_s": 5,
+    "cache": "unbuffered",
+    "access_specs": [
+     {
+      "name": "4K random",
+      "weight": 100,
+      "block_size": "4KiB",
+      "read_pct": 70,
+      "random_pct": 100
+     }
+    ]
+   },
+   "summary": {
+    "iops": 428.2,
+    "mbps": 1.75,
+    "read_iops": 300.4,
+    "write_iops": 127.7,
+    "read_mbps": 1.23,
+    "write_mbps": 0.52,
+    "lat_us": {
+     "min": 22364.9,
+     "mean": 37072.651,
+     "max": 127241.1,
+     "stddev": 11308.246,
+     "p50": 35520.512,
+     "p90": 41549.824,
+     "p95": 43909.12,
+     "p99": 101449.728,
+     "p99_9": 127139.84,
+     "p99_99": 127139.84
+    },
+    "errors": 0,
+    "io_count": 2142
+   },
+   "targets": [
+    {
+     "index": 0,
+     "path": "C:\\Users\\DEMO-USER\\AppData\\Local\\Temp\\sbench-demo\\sbtest.dat",
+     "kind": "file",
+     "created": true,
+     "deleted": true
+    }
+   ],
+   "per_worker": [
+    {
+     "id": 0,
+     "target": 0,
+     "iops": 213.9,
+     "mbps": 0.88,
+     "read_iops": 149.5,
+     "write_iops": 64.4,
+     "lat_us": {
+      "min": 23137.8,
+      "mean": 37079.066,
+      "max": 127241.1,
+      "stddev": 11350.892,
+      "p50": 35520.512,
+      "p90": 41287.68,
+      "p95": 44433.408,
+      "p99": 101449.728,
+      "p99_9": 127139.84,
+      "p99_99": 127139.84
+     },
+     "io_count": 1070,
+     "errors": 0
+    },
+    {
+     "id": 1,
+     "target": 0,
+     "iops": 214.3,
+     "mbps": 0.88,
+     "read_iops": 150.9,
+     "write_iops": 63.4,
+     "lat_us": {
+      "min": 22364.9,
+      "mean": 37066.249,
+      "max": 127135.3,
+      "stddev": 11265.514,
+      "p50": 35520.512,
+      "p90": 41549.824,
+      "p95": 43909.12,
+      "p99": 101449.728,
+      "p99_9": 126091.264,
+      "p99_99": 127135.3
+     },
+     "io_count": 1072,
+     "errors": 0
+    }
+   ],
+   "per_spec": [
+    {
+     "spec": 0,
+     "weight": 100,
+     "block_size_bytes": 4096,
+     "read_pct": 70,
+     "random_pct": 100,
+     "iops": 428.2,
+     "mbps": 1.75,
+     "lat_us": {
+      "min": 22364.9,
+      "mean": 37072.651,
+      "max": 127241.1,
+      "stddev": 11308.246,
+      "p50": 35520.512,
+      "p90": 41549.824,
+      "p95": 43909.12,
+      "p99": 101449.728,
+      "p99_9": 127139.84,
+      "p99_99": 127139.84
+     },
+     "io_count": 2142
+    }
+   ],
+   "histogram": [
+    {
+     "le_us": 22544.383,
+     "count": 1
+    },
+    {
+     "le_us": 23068.671,
+     "count": 2
+    },
+    {
+     "le_us": 23592.959,
+     "count": 2
+    },
+    {
+     "le_us": 24117.247,
+     "count": 3
+    },
+    {
+     "le_us": 24641.535,
+     "count": 2
+    },
+    {
+     "le_us": 25165.823,
+     "count": 3
+    },
+    {
+     "le_us": 25690.111,
+     "count": 2
+    },
+    {
+     "le_us": 26214.399,
+     "count": 9
+    },
+    {
+     "le_us": 26738.687,
+     "count": 16
+    },
+    {
+     "le_us": 27262.975,
+     "count": 19
+    },
+    {
+     "le_us": 27787.263,
+     "count": 28
+    },
+    {
+     "le_us": 28311.551,
+     "count": 14
+    },
+    {
+     "le_us": 28835.839,
+     "count": 37
+    },
+    {
+     "le_us": 29360.127,
+     "count": 30
+    },
+    {
+     "le_us": 29884.415,
+     "count": 39
+    },
+    {
+     "le_us": 30408.703,
+     "count": 36
+    },
+    {
+     "le_us": 30932.991,
+     "count": 42
+    },
+    {
+     "le_us": 31457.279,
+     "count": 46
+    },
+    {
+     "le_us": 31981.567,
+     "count": 77
+    },
+    {
+     "le_us": 32505.855,
+     "count": 69
+    },
+    {
+     "le_us": 33030.143,
+     "count": 69
+    },
+    {
+     "le_us": 33554.431,
+     "count": 98
+    },
+    {
+     "le_us": 34603.007,
+     "count": 225
+    },
+    {
+     "le_us": 35651.583,
+     "count": 226
+    },
+    {
+     "le_us": 36700.159,
+     "count": 227
+    },
+    {
+     "le_us": 37748.735,
+     "count": 200
+    },
+    {
+     "le_us": 38797.311,
+     "count": 160
+    },
+    {
+     "le_us": 39845.887,
+     "count": 120
+    },
+    {
+     "le_us": 40894.463,
+     "count": 69
+    },
+    {
+     "le_us": 41943.039,
+     "count": 84
+    },
+    {
+     "le_us": 42991.615,
+     "count": 47
+    },
+    {
+     "le_us": 44040.191,
+     "count": 33
+    },
+    {
+     "le_us": 45088.767,
+     "count": 24
+    },
+    {
+     "le_us": 46137.343,
+     "count": 7
+    },
+    {
+     "le_us": 47185.919,
+     "count": 6
+    },
+    {
+     "le_us": 48234.495,
+     "count": 1
+    },
+    {
+     "le_us": 49283.071,
+     "count": 3
+    },
+    {
+     "le_us": 50331.647,
+     "count": 1
+    },
+    {
+     "le_us": 51380.223,
+     "count": 1
+    },
+    {
+     "le_us": 52428.799,
+     "count": 2
+    },
+    {
+     "le_us": 54525.951,
+     "count": 2
+    },
+    {
+     "le_us": 55574.527,
+     "count": 3
+    },
+    {
+     "le_us": 56623.103,
+     "count": 1
+    },
+    {
+     "le_us": 57671.679,
+     "count": 1
+    },
+    {
+     "le_us": 59768.831,
+     "count": 5
+    },
+    {
+     "le_us": 60817.407,
+     "count": 1
+    },
+    {
+     "le_us": 66060.287,
+     "count": 1
+    },
+    {
+     "le_us": 83886.079,
+     "count": 2
+    },
+    {
+     "le_us": 85983.231,
+     "count": 2
+    },
+    {
+     "le_us": 88080.383,
+     "count": 5
+    },
+    {
+     "le_us": 90177.535,
+     "count": 1
+    },
+    {
+     "le_us": 92274.687,
+     "count": 1
+    },
+    {
+     "le_us": 94371.839,
+     "count": 2
+    },
+    {
+     "le_us": 96468.991,
+     "count": 4
+    },
+    {
+     "le_us": 98566.143,
+     "count": 2
+    },
+    {
+     "le_us": 100663.295,
+     "count": 6
+    },
+    {
+     "le_us": 102760.447,
+     "count": 6
+    },
+    {
+     "le_us": 104857.599,
+     "count": 2
+    },
+    {
+     "le_us": 111149.055,
+     "count": 1
+    },
+    {
+     "le_us": 123731.967,
+     "count": 2
+    },
+    {
+     "le_us": 125829.119,
+     "count": 8
+    },
+    {
+     "le_us": 127926.271,
+     "count": 4
+    }
+   ],
+   "timeseries": [
+    {
+     "t": 1,
+     "iops": 397.8,
+     "mbps": 1.63,
+     "lat_us": {
+      "mean": 38986.73,
+      "p99": 126091.264,
+      "max": 127241.1
+     },
+     "cpu_pct": 0.8
+    },
+    {
+     "t": 2.002,
+     "iops": 438.5,
+     "mbps": 1.8,
+     "lat_us": {
+      "mean": 36590.543,
+      "p99": 44433.408,
+      "max": 45783.7
+     },
+     "cpu_pct": 0.8
+    },
+    {
+     "t": 3.002,
+     "iops": 457,
+     "mbps": 1.87,
+     "lat_us": {
+      "mean": 34968.361,
+      "p99": 43909.12,
+      "max": 46070.5
+     },
+     "cpu_pct": 1.6
+    },
+    {
+     "t": 4.002,
+     "iops": 426.7,
+     "mbps": 1.75,
+     "lat_us": {
+      "mean": 37559.683,
+      "p99": 101449.728,
+      "max": 103176.5
+     },
+     "cpu_pct": 0.8
+    },
+    {
+     "t": 5.003,
+     "iops": 421,
+     "mbps": 1.72,
+     "lat_us": {
+      "mean": 37556.121,
+      "p99": 93585.408,
+      "max": 95113.2
+     },
+     "cpu_pct": 1.6
+    }
+   ],
+   "errors": []
+  }
+ ]
+}

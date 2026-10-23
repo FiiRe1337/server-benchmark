@@ -9,6 +9,12 @@
                                               and runs the click smoke test (--self-test-clicks) in a child
   sbench-gui --self-test-clicks [--platforms offscreen] [--report f.json]
                                            -> presses every button/action of every page (sbgui/clicktest.py), exit 0/1
+  sbench-gui --smoke-start SECONDS [--platforms windows] [--report f.json]
+                                           -> the REAL start path (user profiles/results in %LOCALAPPDATA%\\sbench-gui,
+                                              real core, app.exec()) and quit after SECONDS; fails on any exception, on
+                                              top-level windows other than the main window and if the window is not
+                                              visible. Also part of --self-test (child "start"), CI runs it with an empty
+                                              and with a legacy beta.2 %LOCALAPPDATA% (gui/tests/fixtures/legacy-beta2)
 """
 import argparse, glob, json, os, platform, subprocess, sys, time
 
@@ -30,11 +36,14 @@ def parse(argv):
     ap.add_argument("--self-test-child", metavar="PLATFORM")
     ap.add_argument("--self-test-clicks", action="store_true", help="click smoke test of every button (exit 0/1, JSON via --report)")
     ap.add_argument("--no-clicks", action="store_true", help="self-test: skip the click smoke test child")
+    ap.add_argument("--smoke-start", metavar="SECONDS", type=float, help="real start path, quit after SECONDS (exit 0/1, JSON via --report)")
+    ap.add_argument("--no-start", action="store_true", help="self-test: skip the real-start smoke child (--smoke-start)")
     ap.add_argument("--platforms", default="windows,offscreen" if os.name == "nt" else "offscreen")
     ap.add_argument("--report", metavar="FILE", help="also write the JSON report to FILE (needed for windowed EXE: no stdout)")
     ap.add_argument("--guide", metavar="DIR", help="README guide screenshots with the REAL core (see sbgui/guide.py)")
     ap.add_argument("--guide-target", metavar="FILE", help="test file for --guide (default: %%TEMP%%\\sbench-anleitung.dat)")
     ap.add_argument("--no-core", action="store_true", help="self-test: skip the core checks (GUI only)")
+    ap.add_argument("--self-test-crash", choices=("python", "native"), help=argparse.SUPPRESS)   # CI: crash.log of the frozen EXE
     ap.add_argument("--extra-results", metavar="DIR", action="append", default=[], help=argparse.SUPPRESS)
     ap.add_argument("--expect-result", metavar="FILE", help=argparse.SUPPRESS)
     return ap.parse_args(argv)
@@ -67,7 +76,9 @@ def make_app(argv_extra=(), scale=1.0):
     # Qt 6 is per-monitor-DPI aware by default; keep fractional factors (125 %, 150 %) exact.
     QGuiApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QApplication([sys.argv[0], *argv_extra])
-    from . import theme
+    from PySide6.QtCore import qInstallMessageHandler
+    from . import theme, errors
+    qInstallMessageHandler(errors.qt_message_handler)    # qFatal ends the process: write it to crash.log first
     theme.apply(app)
     return app
 
@@ -271,6 +282,21 @@ def self_test(a):
             res = {"ok": False, "error": "timeout"}
         res["seconds"] = round(time.time() - t0, 2)
         report["platforms"][plat] = res; ok &= bool(res.get("ok"))
+    if not a.no_start:      # the real start path (user dirs, real core, app.exec()) that --self-test-child does not cover
+        t0 = time.time()
+        rf = os.path.join(tempfile.gettempdir(), f"sbench-gui-selftest-{os.getpid()}-start.json")
+        plat = [p for p in a.platforms.split(",") if p][0]
+        try:
+            cp = subprocess.run(me + ["--smoke-start", "3", "--platforms", plat, "--report", rf], capture_output=True, text=True,
+                                timeout=120, cwd=ROOT, creationflags=_NO_WINDOW)
+            try:
+                res = json.load(open(rf, encoding="utf-8")); os.remove(rf)
+            except (OSError, ValueError):
+                res = {"ok": False, "exit": cp.returncode, "stderr": (cp.stderr or "")[-1500:]}
+        except subprocess.TimeoutExpired:
+            res = {"ok": False, "error": "timeout"}
+        res["seconds"] = round(time.time() - t0, 2)
+        report["start"] = res; ok &= bool(res.get("ok"))
     if not a.no_clicks:     # every button of every page, inside this very build (frozen: real core)
         t0 = time.time()
         rf = os.path.join(tempfile.gettempdir(), f"sbench-gui-selftest-{os.getpid()}-clicks.json")
@@ -307,6 +333,12 @@ def _summary(report):
             lines.append(f"  {'OK    ' if chk.get('ok') else 'FEHLER'} {name}: {chk.get('detail', '')}")
     for plat, r in report.get("platforms", {}).items():
         lines.append(f"  {'OK    ' if r.get('ok') else 'FEHLER'} GUI {plat}: {r.get('error') or r.get('expect_result') or r.get('grab')}")
+    st = report.get("start")
+    if st:
+        lines.append(f"  {'OK    ' if st.get('ok') else 'FEHLER'} Echter Start ({st.get('platform', '?')}): "
+                     + (f"Fenster sichtbar, {st.get('results', 0)} Ergebnisse, {st.get('profiles', 0)} Profile, "
+                        f"{len(st.get('quarantined') or [])} Dateien gesichert" if st.get("ok") else
+                        "; ".join(st.get("problems") or [st.get("error") or st.get("stderr") or "?"])))
     ck = report.get("clicks")
     if ck:
         lines.append(f"  {'OK    ' if ck.get('ok') else 'FEHLER'} Klick-Test: {ck.get('count', 0)} Buttons"
@@ -514,6 +546,11 @@ def _loaded_modules():
 
 def main(argv=None):
     a = parse(sys.argv[1:] if argv is None else argv)
+    if a.self_test_crash:      # CI proof that crash.log catches errors before Qt exists (python) and hard crashes (native)
+        if a.self_test_crash == "native":
+            import faulthandler
+            faulthandler._sigsegv()
+        raise RuntimeError("--self-test-crash: absichtlicher Fehler vor dem Start von Qt")
     if a.self_test_child:
         return self_test_child(a.self_test_child, a)
     if a.self_test_clicks:
@@ -521,6 +558,8 @@ def main(argv=None):
         return clicktest.main(a)
     if a.self_test:
         return self_test(a)
+    if a.smoke_start:
+        return start(a, smoke_s=a.smoke_start)
     if a.screenshot:
         return screenshots(a)
     if a.guide:
@@ -528,23 +567,123 @@ def main(argv=None):
         return guide.run(a)
     if a.demo:
         return demo(a)
-    from . import sbench, core, errors
-    logf = sbench.setup_logging()
-    app = make_app()
-    errors.install(os.path.join(sbench.gui_dir(), "logs"))   # no slot exception may vanish in the windowed EXE
+    return start(a)
+
+
+def start(a, smoke_s=None):
+    """Normal GUI start (also --smoke-start SECONDS: same path, then quit and report).
+
+    Order matters: crash.log (sbgui/crashlog.py, from __main__.py) -> GUI log -> QApplication -> GUI excepthook -> check
+    the user's saved files (legacy.sanitize_user_dir: unusable ones are backed up, never a crash) -> main window. If the
+    window still cannot be built (unknown legacy content), profiles/ and results/ are moved to backup-<ts>/ and the
+    window is built once more with the bundled profiles only."""
+    from . import sbench, core, errors, legacy, crashlog
     import logging
+    log = logging.getLogger("sbench-gui")
+    logf = sbench.setup_logging()
+    smoke = {"schema": "sbench-gui-smokestart/1", "ok": False, "problems": [], "frozen": bool(getattr(sys, "frozen", False))} if smoke_s else None
+    plat = [p for p in (a.platforms or "").split(",") if p][:1] if smoke else []
+    app = make_app(["-platform", plat[0]] if plat else [])
+    errors.install(os.path.join(sbench.gui_dir(), "logs"), quiet=bool(smoke))   # no slot exception may vanish in the windowed EXE
+    gd = sbench.gui_dir()
+    shown_early = _watch_toplevels(app) if smoke else None
     try:
-        logging.getLogger("sbench-gui").info("start GUI %s, log %s, sbench %s", core.gui_version(), logf, sbench.sbench_command())
-        win = build_window(a, deterministic=False, extra_results=[os.path.join(sbench.gui_dir(), "results")])
+        log.info("start GUI %s, log %s, crash log %s, sbench %s", core.gui_version(), logf, crashlog.crash_file(), sbench.sbench_command())
+        legacy.sanitize_user_dir(gd)
+        try:
+            win = build_window(a, deterministic=False, extra_results=[os.path.join(gd, "results")])
+        except core.CoreError:
+            raise
+        except Exception:  # noqa: BLE001 -- legacy user data we did not foresee: back it up and start clean once
+            text = crashlog.append(__import__("traceback").format_exc(), "Start (Hauptfenster)")
+            log.exception("Hauptfenster ließ sich nicht aufbauen (%s) – Benutzerdaten werden gesichert", text)
+            if not legacy.backup_user_state(gd):
+                raise
+            win = build_window(a, deterministic=False, extra_results=[os.path.join(gd, "results")])
     except core.CoreError as e:
-        logging.getLogger("sbench-gui").error("core: %s", e)
+        log.error("core: %s", e)
+        if smoke:
+            smoke["problems"].append(f"Kern: {e}"); return _smoke_done(smoke, a)
         from PySide6.QtWidgets import QMessageBox
         QMessageBox.critical(None, "sbench – Kern nicht startbar", f"{e}\n\nProtokoll: {logf}")
         return 1
+    except Exception as e:  # noqa: BLE001
+        if smoke:
+            import traceback
+            smoke["problems"].append(f"Start: {type(e).__name__}: {e}"); smoke["traceback"] = traceback.format_exc()[-3000:]
+            crashlog.append(smoke["traceback"], "Start (Smoke)")
+            return _smoke_done(smoke, a)
+        raise                                   # __main__.py: crash.log + message box
     _fit(win); win.show()
     from PySide6.QtCore import QTimer
     QTimer.singleShot(400, win.check_running)        # re-attach to runs that outlived a previous GUI
-    return app.exec()
+    QTimer.singleShot(600, lambda: _warn_quarantined(win, quiet=bool(smoke)))
+    if not smoke:
+        return app.exec()
+    stray = [w for w in (shown_early or []) if w is not win]
+
+    def finish():
+        smoke["platform"] = app.platformName()
+        smoke["visible"] = win.isVisible() and not win.isMinimized()
+        smoke["results"] = len(win.pages["results"].results)
+        smoke["profiles"] = win.pages["profiles"].list.count()
+        smoke["profile"] = (win.pages["profiles"].job or {}).get("name")
+        smoke["quarantined"] = [[os.path.basename(p), os.path.basename(b) if b else None, r] for p, b, r in smoke.get("_q", [])]
+        smoke["exceptions"] = [t[-1500:] for t in errors.take_seen()]
+        smoke["stray_windows"] = [f"{type(w).__name__} {w.objectName() or ''} {getattr(w, 'text', lambda: '')()!r}"[:120] for w in stray]
+        if not smoke["visible"]:
+            smoke["problems"].append("Hauptfenster nicht sichtbar")
+        if smoke["exceptions"]:
+            smoke["problems"].append(f"{len(smoke['exceptions'])} unbehandelte Ausnahme(n)")
+        if smoke["stray_windows"]:
+            smoke["problems"].append(f"{len(stray)} fremde Top-Level-Fenster beim Aufbau (z. B. {smoke['stray_windows'][0]})")
+        app.quit()
+    smoke["_q"] = legacy.peek_quarantined()
+    QTimer.singleShot(int(smoke_s * 1000), finish)
+    rc = app.exec()
+    smoke["exit"] = rc
+    return _smoke_done(smoke, a)
+
+
+def _smoke_done(smoke, a):
+    smoke.pop("_q", None)
+    from . import crashlog
+    cf = crashlog.crash_file()
+    smoke["crash_log"] = cf
+    smoke["ok"] = not smoke["problems"]
+    smoke["summary"] = [f"Echter Start: {'OK' if smoke['ok'] else 'FEHLGESCHLAGEN'}"] + smoke["problems"]
+    _emit(smoke, a.report)
+    return 0 if smoke["ok"] else 1
+
+
+def _watch_toplevels(app):
+    """--smoke-start: every top-level widget shown before the main window (v0.2.0-beta.1: 27 parentless labels flashed up)."""
+    from PySide6.QtCore import QObject, QEvent
+    from PySide6.QtWidgets import QWidget
+    seen = []
+
+    class F(QObject):
+        def eventFilter(self, o, ev):
+            if ev.type() == QEvent.Show and isinstance(o, QWidget) and o.isWindow() and o not in seen and type(o).__name__ != "MainWindow":
+                seen.append(o)
+            return False
+    f = F(app); app.installEventFilter(f); app._sb_toplevel_filter = f
+    return seen
+
+
+def _warn_quarantined(win, quiet=False):
+    """One German warning after start if saved files had to be backed up (non-modal: the GUI is usable meanwhile)."""
+    from . import legacy
+    items = legacy.take_quarantined()
+    txt = legacy.warning_text(items)
+    if not txt or quiet:
+        return None
+    from PySide6.QtWidgets import QMessageBox
+    box = QMessageBox(QMessageBox.Warning, "sbench – gespeicherte Dateien übersprungen", txt, QMessageBox.Ok, win)
+    box.setInformativeText("Die Dateien liegen weiterhin im Ordner %LOCALAPPDATA%\\sbench-gui (Endung .defekt-…).")
+    box.setAttribute(__import__("PySide6.QtCore", fromlist=["Qt"]).Qt.WA_DeleteOnClose)
+    box.open()
+    return box
 
 
 def _fit(win):

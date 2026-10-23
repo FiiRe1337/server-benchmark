@@ -1,11 +1,13 @@
 """Shared fixtures. Tests run from gui/ (`python -m pytest`), headless (QT_QPA_PLATFORM=offscreen), against the mock core."""
-import os, sys
+import os, sys, tempfile
 
 import pytest
 
 GUI = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, GUI)
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# never write into the developer's real %LOCALAPPDATA%\\sbench\\crash.log (sbgui/crashlog.py); subprocesses inherit it
+os.environ.setdefault("SBENCH_CRASH_DIR", tempfile.mkdtemp(prefix="sbench-crash-test-"))
 
 
 @pytest.fixture(scope="session")

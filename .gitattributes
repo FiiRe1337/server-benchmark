@@ -1,0 +1,2 @@
+# fixtures must stay byte-exact (UTF-8 BOM, truncated/empty files, LF)
+gui/tests/fixtures/** -text

@@ -1,0 +1,31 @@
+{
+ "schema": "sb-job/1",
+ "name": "Neues Profil",
+ "tests": [
+  {
+   "type": "storage",
+   "name": "4K Random Read",
+   "targets": [
+    {
+     "path": "C:\\Users\\DEMO-USER\\AppData\\Local\\Temp\\sbench-testfile.dat",
+     "kind": "file",
+     "file_size": "1GiB"
+    }
+   ],
+   "workers": 4,
+   "queue_depth": 32,
+   "warmup_s": 2,
+   "duration_s": 10,
+   "cache": "unbuffered",
+   "access_specs": [
+    {
+     "weight": 100,
+     "block_size": "4KiB",
+     "read_pct": 100,
+     "random_pct": 100,
+     "align": "4KiB"
+    }
+   ]
+  }
+ ]
+}

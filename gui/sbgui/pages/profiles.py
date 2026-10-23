@@ -8,6 +8,7 @@ from ..widgets import Card, label, chip, table, add_row, listw, short_target, Re
 from ..target_picker import TargetPicker, candidates, empty_message
 from ..issue_popup import IssuePopup
 from ..issues import parse_path
+from ..legacy import check_file, is_quarantined, quarantine, read_json
 from ..model import (derived_spec_label, derived_test_label, check_schema, destructive_targets, test_label, size_bytes, size_str,
                      human_bytes, WORKLOADS, MEM_OPS, SIMD)
 from ..overlay import DestructiveConfirm, ElevationOffer, IcfImportResult
@@ -176,21 +177,37 @@ class ProfileEditor(QWidget):
         for d in self.dirs:
             for f in sorted(x for x in os.listdir(d) if x.endswith(".json")) if os.path.isdir(d) else []:
                 p = os.path.join(d, f)
-                try:
-                    job = json.load(open(p, encoding="utf-8"))
-                except (OSError, ValueError):
+                if is_quarantined(p):
                     continue
-                it = QListWidgetItem(job.get("name", f)); it.setData(Qt.UserRole, p); self.list.addItem(it)
+                job, why = check_file(p, "profile")
+                if why:     # legacy/broken user profile: backed up as *.defekt-<ts> + warning (bundled ones: skipped)
+                    quarantine(p, why, self.user_dir); continue
+                it = QListWidgetItem(job.get("name") or f); it.setData(Qt.UserRole, p); self.list.addItem(it)
                 if (select and p == select) or (not select and "mix-60-40" in f):
                     sel = n
                 n += 1
         self.list.blockSignals(False)
         if not getattr(self, "_list_connected", False):
             self._list_connected = True
-            self.list.currentItemChanged.connect(lambda it, _: it and it.data(Qt.UserRole) and self.load(it.data(Qt.UserRole)))
+            self.list.currentItemChanged.connect(lambda it, _: it and it.data(Qt.UserRole) and self._load_safe(it.data(Qt.UserRole)))
         self.list.setCurrentRow(sel)
         if self.list.currentItem():
-            self.load(self.list.currentItem().data(Qt.UserRole))
+            self._load_safe(self.list.currentItem().data(Qt.UserRole))
+
+    def _load_safe(self, path):
+        """load(), but a saved profile the editor cannot open (older version, edited by hand) is backed up and the list is
+        rebuilt without it (start: falls back to the bundled mix-60-40) instead of breaking the start of the GUI."""
+        try:
+            self.load(path)
+            return True
+        except Exception as e:  # noqa: BLE001 -- any error in a user file; bundled profiles are tested in CI
+            if not os.path.normcase(os.path.abspath(path)).startswith(os.path.normcase(os.path.abspath(self.user_dir)) + os.sep):
+                raise
+            log.warning("Profil %s nicht ladbar: %s", path, e, exc_info=True)
+            quarantine(path, f"nicht ladbar ({type(e).__name__}: {e})", self.user_dir)
+            self.job = None
+            self._load_list()
+            return False
 
     def import_icf_dialog(self):
         p, _ = QFileDialog.getOpenFileName(self, "Iometer-Profil importieren", "", "Iometer-Konfiguration (*.icf)")
@@ -243,8 +260,7 @@ class ProfileEditor(QWidget):
 
     # ------------------------------------------------------------------ editor
     def load(self, path, ti=None):
-        with open(path, encoding="utf-8") as f:
-            self.job = check_schema(json.load(f), "sb-job/1")
+        self.job = check_schema(read_json(path), "sb-job/1")
         tests = self.job["tests"]
         self.ti = ti if isinstance(ti, int) and 0 <= ti < len(tests) else next((i for i, t in enumerate(tests) if t["type"] == "storage"), 0)
         self.title.setText(f"Testprofil: {self.job.get('name', os.path.basename(path))}")

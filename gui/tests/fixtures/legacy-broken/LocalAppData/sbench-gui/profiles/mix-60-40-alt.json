@@ -1,0 +1,1 @@
+{"schema": "sb-job/1", "name": "Mix 60/40 (alt, defekt)", "tests": [{"type": "storage", "name": "x", "targets": [{"path": "C:\\DEMO\\t.dat", "kind": "file", "file_size": "1GiB"}], "access_specs": [{"weight": "viel", "block_size": 4096}]}]}

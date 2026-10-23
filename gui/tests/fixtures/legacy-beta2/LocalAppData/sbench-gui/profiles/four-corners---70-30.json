@@ -1,0 +1,151 @@
+{
+ "schema": "sb-job/1",
+ "name": "Four Corners + 70/30",
+ "tests": [
+  {
+   "type": "storage",
+   "targets": [
+    {
+     "path": "D:\\sbench\\testfile.dat",
+     "kind": "file",
+     "file_size": "16GiB"
+    },
+    {
+     "path": "\\\\.\\D:",
+     "kind": "volume"
+    }
+   ],
+   "workers": 4,
+   "queue_depth": 32,
+   "warmup_s": 2,
+   "duration_s": 10,
+   "cache": "unbuffered",
+   "access_specs": [
+    {
+     "weight": 100,
+     "block_size": "4KiB",
+     "read_pct": 100,
+     "random_pct": 100,
+     "align": "4KiB"
+    }
+   ],
+   "name": "4K Random Read"
+  },
+  {
+   "type": "storage",
+   "targets": [
+    {
+     "path": "D:\\sbench\\testfile.dat",
+     "kind": "file",
+     "file_size": "16GiB"
+    },
+    {
+     "path": "\\\\.\\D:",
+     "kind": "volume"
+    }
+   ],
+   "workers": 4,
+   "queue_depth": 32,
+   "warmup_s": 2,
+   "duration_s": 10,
+   "cache": "unbuffered",
+   "access_specs": [
+    {
+     "weight": 100,
+     "block_size": "4KiB",
+     "read_pct": 0,
+     "random_pct": 100,
+     "align": "4KiB"
+    }
+   ],
+   "name": "4K Random Write"
+  },
+  {
+   "type": "storage",
+   "targets": [
+    {
+     "path": "D:\\sbench\\testfile.dat",
+     "kind": "file",
+     "file_size": "16GiB"
+    },
+    {
+     "path": "\\\\.\\D:",
+     "kind": "volume"
+    }
+   ],
+   "workers": 4,
+   "queue_depth": 32,
+   "warmup_s": 2,
+   "duration_s": 10,
+   "cache": "unbuffered",
+   "access_specs": [
+    {
+     "weight": 100,
+     "block_size": "4KiB",
+     "read_pct": 70,
+     "random_pct": 100,
+     "align": "4KiB"
+    }
+   ],
+   "name": "4K Random 70/30"
+  },
+  {
+   "type": "storage",
+   "targets": [
+    {
+     "path": "D:\\sbench\\testfile.dat",
+     "kind": "file",
+     "file_size": "16GiB"
+    },
+    {
+     "path": "\\\\.\\D:",
+     "kind": "volume"
+    }
+   ],
+   "workers": 2,
+   "queue_depth": 8,
+   "warmup_s": 2,
+   "duration_s": 10,
+   "cache": "unbuffered",
+   "access_specs": [
+    {
+     "weight": 100,
+     "block_size": "64KiB",
+     "read_pct": 100,
+     "random_pct": 0,
+     "align": "64KiB"
+    }
+   ],
+   "name": "64K Seq Read"
+  },
+  {
+   "type": "storage",
+   "targets": [
+    {
+     "path": "D:\\sbench\\testfile.dat",
+     "kind": "file",
+     "file_size": "16GiB"
+    },
+    {
+     "path": "\\\\.\\D:",
+     "kind": "volume"
+    }
+   ],
+   "workers": 2,
+   "queue_depth": 8,
+   "warmup_s": 2,
+   "duration_s": 10,
+   "cache": "unbuffered",
+   "access_specs": [
+    {
+     "weight": 100,
+     "block_size": "1MiB",
+     "read_pct": 0,
+     "random_pct": 0,
+     "align": "1MiB"
+    }
+   ],
+   "name": "1M Seq Write"
+  }
+ ]
+}

@@ -21,7 +21,7 @@ a = Analysis(
         ("../schema", "schema"),          # contract (sb_contract.base_dir: <here>/schema when frozen)
         ("profiles", "profiles"), ("demo", "demo"),
     ],
-    hiddenimports=["sb_contract", "sbgui.pipe_win", "sbgui._build_info", "sbgui.clicktest", "sbgui.errors", "jsonschema", "referencing"],
+    hiddenimports=["sb_contract", "sbgui.pipe_win", "sbgui._build_info", "sbgui.clicktest", "sbgui.errors", "sbgui.crashlog", "sbgui.legacy", "jsonschema", "referencing"],
     excludes=["PySide6.QtQuick", "PySide6.QtQml", "PySide6.QtWebEngineCore", "PySide6.Qt3DCore", "tkinter"],   # not QtOpenGL: pyqtgraph imports it
 )
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)

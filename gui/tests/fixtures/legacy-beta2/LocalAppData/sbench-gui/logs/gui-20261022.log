@@ -1,0 +1,4 @@
+2026-10-22 17:20:01,104 INFO sbench-gui: start GUI 0.1.0-beta.2, log C:\Users\DEMO-USER\AppData\Local\sbench-gui\logs\gui-20261022.log, sbench ['C:\\Tools\\sbench\\data\\bin\\sbench-0.1.0-beta.2.exe', '--data-dir', 'C:\\Tools\\sbench\\data']
+2026-10-22 17:20:01,402 INFO sbench-gui: sbench version --json -> 0
+2026-10-22 17:20:01,977 INFO sbench-gui: sbench info --json -> 0
+2026-10-22 17:20:02,521 INFO sbench-gui: sbench list --running -> 0
