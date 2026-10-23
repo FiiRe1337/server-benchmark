@@ -159,9 +159,14 @@ jobs:
             New-Item -ItemType Directory -Force $la, $ra, $app | Out-Null
             Copy-Item $exe $app
             foreach ($set in $sc.sets) {
-              Copy-Item -Recurse -Force (Join-Path $fx "$set\LocalAppData\*") $la
-              if (Test-Path (Join-Path $fx "$set\data")) { Copy-Item -Recurse -Force (Join-Path $fx "$set\data") $app }
+              # merge the fixture sets file by file (Copy-Item -Recurse into an existing folder does not merge reliably)
+              python -c "import shutil, sys; shutil.copytree(sys.argv[1], sys.argv[2], dirs_exist_ok=True)" (Join-Path $fx "$set\LocalAppData") $la
+              if (Test-Path (Join-Path $fx "$set\data")) {
+                python -c "import shutil, sys; shutil.copytree(sys.argv[1], sys.argv[2], dirs_exist_ok=True)" (Join-Path $fx "$set\data") (Join-Path $app "data")
+              }
+              if ($LASTEXITCODE -ne 0) { throw "Fixture $set nicht kopiert" }
             }
+            Get-ChildItem -Recurse -File $la | ForEach-Object { Write-Host "  seed: $($_.FullName.Substring($la.Length))" }
             $report = Join-Path $PWD "build\selftest-start-$($sc.n).json"
             $env:LOCALAPPDATA = $la; $env:APPDATA = $ra
             $p = Start-Process -FilePath (Join-Path $app "sbench-gui.exe") -ArgumentList @("--self-test", "--platforms", "windows", "--no-clicks", "--report", "`"$report`"") -Wait -PassThru -NoNewWindow
