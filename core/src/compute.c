@@ -266,6 +266,17 @@ int sb_compute_run(int ti, const sb_test *t, const sb_storage_opts *o, const sb_
     int rc = 0;
     double total_prep = 0;
     uint64_t qpf = sb_qpf();
+    /* Prioritäten: Die Worker rechnen ohne Pause auf allen gewählten Prozessoren. Bei gleicher
+     * Priorität hängt alles andere (dieser Steuer-Thread mit Ticks und Stop-Event, die GUI,
+     * `sbench stop`, Defender, Runner-Agent) davon ab, dass der Scheduler Zeitscheiben
+     * fair verteilt. Auf manchen VMs passiert das nicht: auf GitHub-Runnern mit 4 vCPUs liefen
+     * Ticks nur noch im 4-8-s-Takt des Balance-Set-Managers, eine Messung von 2 s dauerte 9 s
+     * und `sbench stop` brauchte 20-30 s. Deshalb: Worker BELOW_NORMAL (geben jeder normal
+     * priorisierten Arbeit sofort Vorrang, auf einem ruhigen System ohne Einfluss auf die
+     * Messwerte), Steuer-Thread HIGHEST (wartet fast nur, verdrängt die Worker nur kurz). */
+    HANDLE self = GetCurrentThread();
+    int prio_old = GetThreadPriority(self);
+    SetThreadPriority(self, THREAD_PRIORITY_HIGHEST);
     /* 1. Threads anlegen, binden, starten (preparing) */
     /* Vertrag 1.3.1: dieselbe CPU-Liste steht auch im Ergebnis (tests[].cpus) */
     r->cpus_json = sb_phase_cpus_json(&topo, pick, nthreads);
@@ -293,6 +304,7 @@ int sb_compute_run(int ti, const sb_test *t, const sb_storage_opts *o, const sb_
             rc = 1;
             break;
         }
+        SetThreadPriority(w->th, THREAD_PRIORITY_BELOW_NORMAL);
         if (sb_topo_pin_thread(w->th, w->cpu))
             logf_(cb, "WARN", "Thread %d: Bindung an CPU %u fehlgeschlagen: %s", i, w->cpu->index, sb_errtext(GetLastError()));
         ResumeThread(w->th);
@@ -427,6 +439,7 @@ int sb_compute_run(int ti, const sb_test *t, const sb_storage_opts *o, const sb_
     _aligned_free(E.w);
     free(pick);
     sb_topo_free(&topo);
+    if (prio_old != THREAD_PRIORITY_ERROR_RETURN) SetThreadPriority(self, prio_old);
     if (rc == 0 && r->aborted) rc = 3;
     r->stop_phase = rc == 1 || rc == 3 ? ph : SB_STOP_NONE;
     return rc;
